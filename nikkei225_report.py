@@ -1,7 +1,7 @@
 import pandas as pd
 import yfinance as yf
 
-stocks = pd.read_csv("nikkei225.csv")
+stocks = pd.read_csv("data/nikkei225.csv")
 
 results = []
 
@@ -31,14 +31,17 @@ for _, row in stocks.iterrows():
             "前日比%": round(change, 2)
         })
 
-    except:
+    except Exception:
         pass
 
-df = pd.DataFrame(results)
+if len(results) == 0:
+    print("データ取得失敗")
+else:
+    df = pd.DataFrame(results)
 
-df = df.sort_values(
-    by="前日比%",
-    ascending=False
-)
+    df = df.sort_values(
+        by="前日比%",
+        ascending=False
+    )
 
-print(df.head(10).to_string(index=False))
+    print(df.head(20).to_string(index=False))
