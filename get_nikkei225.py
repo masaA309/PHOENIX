@@ -1,6 +1,7 @@
 import pandas as pd
 import requests
 from io import StringIO
+from pathlib import Path
 
 URL = "https://ja.wikipedia.org/wiki/日経平均株価"
 
@@ -31,7 +32,9 @@ try:
             "証券コード" in cols
             and "銘柄" in cols
         ):
-            df = table[["証券コード", "銘柄"]].copy()
+            df = table[
+                ["証券コード", "銘柄"]
+            ].copy()
             dfs.append(df)
 
     if len(dfs) == 0:
@@ -44,7 +47,6 @@ try:
         ignore_index=True
     )
 
-    # 英字入りコード（285A、543Aなど）も残す
     nikkei["証券コード"] = (
         nikkei["証券コード"]
         .astype(str)
@@ -66,20 +68,37 @@ try:
         nikkei["証券コード"] + ".T"
     )
 
-    result = result.drop_duplicates()
-    result = result.sort_values(
-        by="ticker"
-    ).reset_index(drop=True)
+    result = (
+        result
+        .drop_duplicates()
+        .sort_values(
+            by="ticker"
+        )
+        .reset_index(drop=True)
+    )
 
+    # dataフォルダ作成
+    Path("data").mkdir(
+        exist_ok=True
+    )
+
+    # PHOENIX本番CSVへ保存
     result.to_csv(
-        "nikkei225.csv",
+        "data/nikkei225.csv",
         index=False,
         encoding="utf-8-sig"
     )
 
+    print()
+    print("=" * 60)
     print(
         f"保存完了！ {len(result)}銘柄"
     )
+    print(
+        "保存先: data/nikkei225.csv"
+    )
+    print("=" * 60)
+    print()
 
     print(result.head())
 

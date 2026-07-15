@@ -1,163 +1,281 @@
+# daily_report.py
+
+from pathlib import Path
+
 import pandas as pd
-import yfinance as yf
-from datetime import datetime
 
-# 日経225銘柄読み込み
-stocks = pd.read_csv("nikkei225.csv")
+from scanner import scan_all
+from report import (
+    print_header,
+    print_rankings,
+    print_hot_stocks,
+    print_ai_comment,
+    save_reports,
+    print_footer,
+)
 
-results = []
 
-print("=" * 60)
-print("PHOENIX DAILY REPORT")
-print(datetime.now().strftime("%Y-%m-%d %H:%M"))
-print("=" * 60)
-print()
+OPTIMIZED_OUTPUT_FILE = Path(
+    "reports/optimized_signals.csv"
+)
 
-print("データ取得中...\n")
+MIN_SCORE = 55
+RSI_MIN = 30
+RSI_MAX = 75
+MIN_VOLUME_RATIO = 2.0
+MACD_CONDITION = "SELL"
 
-for _, row in stocks.iterrows():
 
-    name = row["name"]
-    ticker = row["ticker"]
+def extract_optimized_signals(df):
+    required_columns = {
+        "銘柄",
+        "ticker",
+        "価格",
+        "前日比%",
+        "出来高倍率",
+        "RSI",
+        "MACD判定",
+        "PHOENIX_SCORE",
+        "理由",
+    }
+
+    missing_columns = (
+        required_columns
+        - set(df.columns)
+    )
+
+    if missing_columns:
+        missing_text = ", ".join(
+            sorted(missing_columns)
+        )
+
+        raise ValueError(
+            f"最適シグナル抽出に必要な列がありません: "
+            f"{missing_text}"
+        )
+
+    target = df[
+        (
+            df["PHOENIX_SCORE"]
+            >= MIN_SCORE
+        )
+        & (
+            df["RSI"]
+            >= RSI_MIN
+        )
+        & (
+            df["RSI"]
+            <= RSI_MAX
+        )
+        & (
+            df["出来高倍率"]
+            >= MIN_VOLUME_RATIO
+        )
+        & (
+            df["MACD判定"]
+            == MACD_CONDITION
+        )
+    ].copy()
+
+    if target.empty:
+        return target
+
+    target["最適条件一致"] = True
+
+    target = target.sort_values(
+        by=[
+            "出来高倍率",
+            "PHOENIX_SCORE",
+            "前日比%",
+        ],
+        ascending=[
+            False,
+            False,
+            False,
+        ],
+    ).reset_index(
+        drop=True
+    )
+
+    return target
+
+
+def print_optimized_signals(target):
+    print()
+    print("=" * 70)
+    print("PHOENIX OPTIMIZED SIGNAL")
+    print("=" * 70)
+
+    print(
+        f"最低スコア     : {MIN_SCORE}"
+    )
+    print(
+        f"RSI範囲       : "
+        f"{RSI_MIN}〜{RSI_MAX}"
+    )
+    print(
+        f"最低出来高倍率 : "
+        f"{MIN_VOLUME_RATIO}"
+    )
+    print(
+        f"MACD条件      : "
+        f"{MACD_CONDITION}"
+    )
+    print()
+
+    if target.empty:
+        print(
+            "本日は最適条件に一致する"
+            "銘柄はありません。"
+        )
+        return
+
+    print(
+        f"該当銘柄数 : {len(target)}"
+    )
+    print()
+
+    display_columns = [
+        "銘柄",
+        "ticker",
+        "価格",
+        "前日比%",
+        "出来高倍率",
+        "RSI",
+        "MACD判定",
+        "PHOENIX_SCORE",
+        "理由",
+    ]
+
+    print(
+        target[
+            display_columns
+        ].to_string(
+            index=False
+        )
+    )
+
+
+def print_optimized_comment(target):
+    print()
+    print("=" * 70)
+    print("PHOENIX OPTIMIZED COMMENT")
+    print("=" * 70)
+
+    if target.empty:
+        print(
+            "本日はバックテスト上の"
+            "最適条件に一致する銘柄はありません。"
+        )
+        return
+
+    top = target.iloc[0]
+
+    print(
+        f"最優先監視銘柄は"
+        f" {top['銘柄']} です。"
+    )
+
+    print(
+        f"PHOENIX SCORE "
+        f"{top['PHOENIX_SCORE']}点、"
+        f"前日比 {top['前日比%']}%、"
+        f"出来高 {top['出来高倍率']}倍、"
+        f"RSI {top['RSI']}、"
+        f"MACD {top['MACD判定']}。"
+    )
+
+    print(
+        "過去検証では、"
+        "スコア55以上・RSI30〜75・"
+        "出来高2倍以上・MACD SELLの"
+        "組み合わせが比較的良好でした。"
+    )
+
+    print(
+        f"判定理由：{top['理由']}"
+    )
+
+    print(
+        "これは売買推奨ではなく、"
+        "翌営業日の監視候補です。"
+    )
+
+
+def save_optimized_signals(target):
+    OPTIMIZED_OUTPUT_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    target.to_csv(
+        OPTIMIZED_OUTPUT_FILE,
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    print()
+    print(
+        f"最適シグナル保存完了 : "
+        f"{OPTIMIZED_OUTPUT_FILE}"
+    )
+
+
+def main():
+    print_header()
 
     try:
-        hist = yf.Ticker(ticker).history(period="1mo")
+        df = scan_all()
 
-        if hist.empty or len(hist) < 6:
-            continue
+        if df.empty:
+            print(
+                "データ取得失敗"
+            )
+            print_footer()
+            return
 
-        close = hist["Close"].dropna()
-        volume = hist["Volume"].dropna()
+        print_rankings(
+            df
+        )
 
-        if len(close) < 2 or len(volume) < 6:
-            continue
+        print_hot_stocks(
+            df
+        )
 
-        latest = float(close.iloc[-1])
-        previous = float(close.iloc[-2])
+        print_ai_comment(
+            df
+        )
 
-        change = (latest - previous) / previous * 100
+        optimized = (
+            extract_optimized_signals(
+                df
+            )
+        )
 
-        latest_volume = float(volume.iloc[-1])
-        avg_volume = float(volume.iloc[-6:-1].mean())
+        print_optimized_signals(
+            optimized
+        )
 
-        if avg_volume == 0:
-            volume_ratio = 0
-        else:
-            volume_ratio = latest_volume / avg_volume
+        print_optimized_comment(
+            optimized
+        )
 
-        results.append({
-            "銘柄": name,
-            "ticker": ticker,
-            "価格": round(latest, 2),
-            "前日比%": round(change, 2),
-            "出来高倍率": round(volume_ratio, 2)
-        })
+        save_reports(
+            df
+        )
 
-    except:
-        pass
+        save_optimized_signals(
+            optimized
+        )
 
-if len(results) == 0:
-    print("データ取得失敗")
-    exit()
+    except Exception as error:
+        print()
+        print(
+            f"PHOENIXエラー: {error}"
+        )
 
-df = pd.DataFrame(results)
+    print_footer()
 
-# ----------------------------
-# 上昇率ランキング
-# ----------------------------
 
-print()
-print("=" * 60)
-print("上昇率ランキング TOP10")
-print("=" * 60)
-
-rank_df = df.sort_values(
-    by="前日比%",
-    ascending=False
-)
-
-print(
-    rank_df[
-        ["銘柄", "価格", "前日比%"]
-    ].head(10).to_string(index=False)
-)
-
-# ----------------------------
-# 出来高ランキング
-# ----------------------------
-
-print()
-print("=" * 60)
-print("出来高急増ランキング TOP10")
-print("=" * 60)
-
-volume_df = df.sort_values(
-    by="出来高倍率",
-    ascending=False
-)
-
-print(
-    volume_df[
-        ["銘柄", "価格", "出来高倍率"]
-    ].head(10).to_string(index=False)
-)
-
-# ----------------------------
-# 注目銘柄
-# ----------------------------
-
-print()
-print("=" * 60)
-print("本日の注目銘柄")
-print("=" * 60)
-
-hot = df[
-    (df["前日比%"] >= 2)
-    &
-    (df["出来高倍率"] >= 1.5)
-]
-
-if hot.empty:
-    print("該当なし")
-else:
-    print(
-        hot[
-            ["銘柄", "価格", "前日比%", "出来高倍率"]
-        ].sort_values(
-            by="前日比%",
-            ascending=False
-        ).to_string(index=False)
-    )
-
-# ----------------------------
-# AIコメント
-# ----------------------------
-
-print()
-print("=" * 60)
-print("AIコメント")
-print("=" * 60)
-
-if hot.empty:
-    print(
-        "本日は強いシグナルを示す銘柄はありません。"
-    )
-else:
-    top = hot.sort_values(
-        by="前日比%",
-        ascending=False
-    ).iloc[0]
-
-    print(
-        f"{top['銘柄']}は前日比"
-        f"{top['前日比%']}%上昇、"
-        f"出来高{top['出来高倍率']}倍です。"
-    )
-    print(
-        "短期資金が流入している可能性があります。"
-    )
-
-print()
-print("=" * 60)
-print("PHOENIX REPORT END")
-print("=" * 60)
+if __name__ == "__main__":
+    main()

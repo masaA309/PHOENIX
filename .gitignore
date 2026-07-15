@@ -1,0 +1,18 @@
+# Environment
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# Virtual Environment
+.venv/
+
+# Cache
+data/market_data_cache.pkl
+
+# Logs
+logs/
+
+# Reports
+reports/
