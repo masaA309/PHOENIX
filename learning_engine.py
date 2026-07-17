@@ -9,72 +9,55 @@ import math
 import sys
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 
-REPORT_DIR = Path("reports")
+# =========================================================
+# 基本設定
+# =========================================================
 
-BACKTEST_FILE = REPORT_DIR / "backtest_all.csv"
-PAPER_FILE = REPORT_DIR / "paper_learning_data.csv"
+ROOT_DIR = Path(__file__).resolve().parent
+REPORT_DIR = ROOT_DIR / "reports"
 
-PROFILE_JSON_FILE = REPORT_DIR / "learning_profile.json"
-PROFILE_CSV_FILE = REPORT_DIR / "learning_profile.csv"
-EVIDENCE_CSV_FILE = REPORT_DIR / "learning_evidence.csv"
+LEARNING_SOURCE_FILE = REPORT_DIR / "paper_learning_data.csv"
+LEARNING_REPORT_FILE = REPORT_DIR / "learning_report.csv"
+PARAMETER_FILE = REPORT_DIR / "ai_parameter.json"
+TEXT_REPORT_FILE = REPORT_DIR / "learning_engine_report.txt"
 
-MIN_SAMPLE_COUNT = 30
+ACCOUNT_CAPITAL = 300_000
 
-BACKTEST_WEIGHT = 1.0
-PAPER_WEIGHT = 5.0
+MIN_SAMPLE_FOR_ADJUSTMENT = 10
+STRONG_SAMPLE_COUNT = 30
+MAX_SCORE_ADJUSTMENT = 20
+BASELINE_SCORE = 0
 
-RETURN_COLUMN_CANDIDATES = [
-    "翌日騰落率%",
-    "return",
-    "騰落率%",
-    "翌日リターン%",
+RSI_BINS = [
+    (-math.inf, 29.9999, "RSI 30未満"),
+    (30.0, 39.9999, "RSI 30-39"),
+    (40.0, 49.9999, "RSI 40-49"),
+    (50.0, 59.9999, "RSI 50-59"),
+    (60.0, 69.9999, "RSI 60-69"),
+    (70.0, math.inf, "RSI 70以上"),
 ]
 
-SCORE_COLUMN_CANDIDATES = [
-    "score",
-    "PHOENIX_SCORE",
+AI_SCORE_BINS = [
+    (-math.inf, 59.9999, "AI判断点 60未満"),
+    (60.0, 69.9999, "AI判断点 60-69"),
+    (70.0, 79.9999, "AI判断点 70-79"),
+    (80.0, math.inf, "AI判断点 80以上"),
 ]
 
-RSI_COLUMN_CANDIDATES = [
-    "RSI",
-    "rsi",
+PHOENIX_SCORE_BINS = [
+    (-math.inf, 59.9999, "PHOENIX_SCORE 60未満"),
+    (60.0, 69.9999, "PHOENIX_SCORE 60-69"),
+    (70.0, 79.9999, "PHOENIX_SCORE 70-79"),
+    (80.0, math.inf, "PHOENIX_SCORE 80以上"),
 ]
 
-MACD_COLUMN_CANDIDATES = [
-    "MACD判定",
-    "macd_judge",
-    "MACD",
-]
 
-VOLUME_COLUMN_CANDIDATES = [
-    "出来高倍率",
-    "volume_ratio",
-]
-
-PAPER_RETURN_COLUMN_CANDIDATES = [
-    "損益率%",
-    "return",
-    "return_pct",
-]
-
-PAPER_SCORE_COLUMN_CANDIDATES = [
-    "PHOENIX_SCORE",
-    "AI判断点",
-    "score",
-]
-
-RETURN_COL = "学習リターン%"
-SCORE_COL = "学習スコア"
-RSI_COL = "学習RSI"
-MACD_COL = "学習MACD"
-VOLUME_COL = "学習出来高倍率"
-SOURCE_COL = "学習ソース"
-WEIGHT_COL = "学習重み"
-
+# =========================================================
+# 共通処理
+# =========================================================
 
 def configure_console() -> None:
     try:
@@ -82,12 +65,10 @@ def configure_console() -> None:
             encoding="utf-8",
             errors="replace",
         )
-
         sys.stderr.reconfigure(
             encoding="utf-8",
             errors="replace",
         )
-
     except (
         AttributeError,
         OSError,
@@ -95,15 +76,10 @@ def configure_console() -> None:
         pass
 
 
-def find_column(
-    df: pd.DataFrame,
-    candidates: list[str],
-) -> str | None:
-    for column in candidates:
-        if column in df.columns:
-            return column
-
-    return None
+def now_text() -> str:
+    return datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
 
 
 def safe_float(
@@ -128,14 +104,24 @@ def safe_float(
         return default
 
 
-def safe_round(
+def safe_int(
     value: Any,
-    digits: int = 4,
-) -> float:
-    return round(
-        safe_float(value),
-        digits,
-    )
+    default: int = 0,
+) -> int:
+    try:
+        return int(
+            round(
+                safe_float(
+                    value,
+                    default,
+                )
+            )
+        )
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return default
 
 
 def read_csv_safe(
@@ -156,7 +142,6 @@ def read_csv_safe(
                 file_path,
                 encoding=encoding,
             )
-
         except Exception as error:
             last_error = error
 
@@ -166,1208 +151,940 @@ def read_csv_safe(
     return pd.DataFrame()
 
 
-def normalize_macd(
-    value: Any,
-) -> str:
-    text = str(value).upper().strip()
-
-    if (
-        "BUY" in text
-        or "買" in text
-    ):
-        return "BUY"
-
-    if (
-        "SELL" in text
-        or "売" in text
-    ):
-        return "SELL"
-
-    if text:
-        return text
-
-    return "NEUTRAL"
-
-
-def normalize_return_percent(
-    values: pd.Series,
-    column_name: str,
-) -> pd.Series:
-    result = pd.to_numeric(
-        values,
-        errors="coerce",
-    )
-
-    valid = result.dropna()
-
-    if valid.empty:
-        return result
-
-    is_percent_column = (
-        "%" in column_name
-        or "率" in column_name
-    )
-
-    if not is_percent_column:
-        percentile_95 = safe_float(
-            valid.abs().quantile(0.95)
+def write_json(
+    file_path: Path,
+    data: dict[str, Any],
+) -> None:
+    with open(
+        file_path,
+        "w",
+        encoding="utf-8",
+        newline="\n",
+    ) as file:
+        json.dump(
+            data,
+            file,
+            ensure_ascii=False,
+            indent=2,
         )
 
-        if percentile_95 <= 1.5:
-            result = result * 100.0
 
-    return result.clip(
-        lower=-50.0,
-        upper=50.0,
-    )
+# =========================================================
+# 学習データ読込
+# =========================================================
 
-
-def load_backtest() -> tuple[
-    pd.DataFrame,
-    dict[str, str | None],
-]:
-    if not BACKTEST_FILE.exists():
-        raise FileNotFoundError(
-            f"バックテスト結果がありません: "
-            f"{BACKTEST_FILE}"
-        )
-
-    df = read_csv_safe(
-        BACKTEST_FILE
-    )
-
-    return_column = find_column(
-        df,
-        RETURN_COLUMN_CANDIDATES,
-    )
-
-    score_column = find_column(
-        df,
-        SCORE_COLUMN_CANDIDATES,
-    )
-
-    rsi_column = find_column(
-        df,
-        RSI_COLUMN_CANDIDATES,
-    )
-
-    macd_column = find_column(
-        df,
-        MACD_COLUMN_CANDIDATES,
-    )
-
-    volume_column = find_column(
-        df,
-        VOLUME_COLUMN_CANDIDATES,
-    )
-
-    if return_column is None:
-        raise ValueError(
-            "バックテストに騰落率列がありません。"
-        )
-
-    if score_column is None:
-        raise ValueError(
-            "バックテストにスコア列がありません。"
-        )
-
-    result = pd.DataFrame(
-        index=df.index
-    )
-
-    result[RETURN_COL] = (
-        normalize_return_percent(
-            df[return_column],
-            return_column,
-        )
-    )
-
-    result[SCORE_COL] = pd.to_numeric(
-        df[score_column],
-        errors="coerce",
-    )
-
-    if rsi_column is not None:
-        result[RSI_COL] = pd.to_numeric(
-            df[rsi_column],
-            errors="coerce",
-        )
-
-    else:
-        result[RSI_COL] = np.nan
-
-    if macd_column is not None:
-        result[MACD_COL] = df[
-            macd_column
-        ].map(
-            normalize_macd
-        )
-
-    else:
-        result[MACD_COL] = pd.NA
-
-    if volume_column is not None:
-        result[VOLUME_COL] = pd.to_numeric(
-            df[volume_column],
-            errors="coerce",
-        )
-
-    else:
-        result[VOLUME_COL] = np.nan
-
-    result[SOURCE_COL] = "backtest"
-    result[WEIGHT_COL] = BACKTEST_WEIGHT
-
-    ticker_column = find_column(
-        df,
-        [
+def create_empty_learning_source() -> pd.DataFrame:
+    return pd.DataFrame(
+        columns=[
             "ticker",
-            "Ticker",
-            "コード",
-        ],
-    )
-
-    name_column = find_column(
-        df,
-        [
             "銘柄",
-            "name",
-            "銘柄名",
-        ],
+            "AI判断",
+            "AI判断点",
+            "PHOENIX_SCORE",
+            "RSI",
+            "MACD判定",
+            "エントリー価格",
+            "決済価格",
+            "損益率%",
+            "結果",
+            "決済理由",
+            "エントリー日時",
+            "決済日時",
+        ]
     )
 
-    if ticker_column is not None:
-        result["ticker"] = df[
-            ticker_column
-        ].astype(str)
 
-    else:
-        result["ticker"] = ""
+def load_learning_source() -> pd.DataFrame:
+    if not LEARNING_SOURCE_FILE.exists():
+        REPORT_DIR.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
-    if name_column is not None:
-        result["銘柄"] = df[
-            name_column
-        ].astype(str)
+        empty = create_empty_learning_source()
 
-    else:
-        result["銘柄"] = ""
+        empty.to_csv(
+            LEARNING_SOURCE_FILE,
+            index=False,
+            encoding="utf-8-sig",
+        )
 
-    result = result.dropna(
+        return empty
+
+    data = read_csv_safe(
+        LEARNING_SOURCE_FILE
+    )
+
+    if data.empty:
+        return create_empty_learning_source()
+
+    required_columns = {
+        "ticker",
+        "銘柄",
+        "AI判断",
+        "AI判断点",
+        "PHOENIX_SCORE",
+        "RSI",
+        "MACD判定",
+        "損益率%",
+        "結果",
+        "決済理由",
+    }
+
+    missing_columns = (
+        required_columns
+        - set(data.columns)
+    )
+
+    if missing_columns:
+        raise ValueError(
+            "paper_learning_data.csv に必要な列がありません: "
+            + ", ".join(
+                sorted(missing_columns)
+            )
+        )
+
+    numeric_columns = [
+        "AI判断点",
+        "PHOENIX_SCORE",
+        "RSI",
+        "損益率%",
+    ]
+
+    for column in numeric_columns:
+        data[column] = pd.to_numeric(
+            data[column],
+            errors="coerce",
+        )
+
+    data["ticker"] = (
+        data["ticker"]
+        .astype(str)
+        .str.strip()
+    )
+
+    data["AI判断"] = (
+        data["AI判断"]
+        .astype(str)
+        .str.strip()
+    )
+
+    data["MACD判定"] = (
+        data["MACD判定"]
+        .astype(str)
+        .str.strip()
+        .str.upper()
+    )
+
+    data["結果"] = (
+        data["結果"]
+        .astype(str)
+        .str.strip()
+        .str.upper()
+    )
+
+    data["決済理由"] = (
+        data["決済理由"]
+        .astype(str)
+        .str.strip()
+    )
+
+    data = data.dropna(
         subset=[
-            RETURN_COL,
-            SCORE_COL,
+            "ticker",
+            "損益率%",
         ]
+    )
+
+    data = data[
+        data["結果"].isin(
+            [
+                "WIN",
+                "LOSS",
+                "DRAW",
+            ]
+        )
+    ].copy()
+
+    data = data.drop_duplicates(
+        subset=[
+            "ticker",
+            "エントリー日時",
+            "決済日時",
+        ],
+        keep="last",
+    )
+
+    return data.reset_index(
+        drop=True
+    )
+
+
+# =========================================================
+# 統計
+# =========================================================
+
+def wilson_shrunk_win_rate(
+    wins: int,
+    total: int,
+    prior_rate: float,
+    prior_weight: int = 10,
+) -> float:
+    if total <= 0:
+        return prior_rate
+
+    return (
+        wins
+        + prior_rate * prior_weight
+    ) / (
+        total
+        + prior_weight
+    )
+
+
+def sample_confidence(
+    sample_count: int,
+) -> float:
+    if sample_count <= 0:
+        return 0.0
+
+    return min(
+        sample_count
+        / STRONG_SAMPLE_COUNT,
+        1.0,
+    )
+
+
+def calculate_adjustment(
+    win_rate: float,
+    average_return: float,
+    profit_factor: float,
+    sample_count: int,
+    baseline_win_rate: float,
+) -> int:
+    if sample_count < MIN_SAMPLE_FOR_ADJUSTMENT:
+        return BASELINE_SCORE
+
+    confidence = sample_confidence(
+        sample_count
+    )
+
+    win_component = (
+        win_rate
+        - baseline_win_rate
+    ) * 40.0
+
+    return_component = max(
+        min(
+            average_return * 1.5,
+            8.0,
+        ),
+        -8.0,
+    )
+
+    if profit_factor >= 2.0:
+        pf_component = 4.0
+    elif profit_factor >= 1.3:
+        pf_component = 2.0
+    elif profit_factor >= 1.0:
+        pf_component = 0.0
+    elif profit_factor > 0:
+        pf_component = -3.0
+    else:
+        pf_component = -5.0
+
+    raw_adjustment = (
+        win_component
+        + return_component
+        + pf_component
+    ) * confidence
+
+    return int(
+        max(
+            min(
+                round(raw_adjustment),
+                MAX_SCORE_ADJUSTMENT,
+            ),
+            -MAX_SCORE_ADJUSTMENT,
+        )
+    )
+
+
+def create_group_row(
+    data: pd.DataFrame,
+    category: str,
+    condition: str,
+    baseline_win_rate: float,
+) -> dict[str, Any]:
+    total = len(data)
+
+    if total <= 0:
+        return {
+            "カテゴリ": category,
+            "条件": condition,
+            "取引数": 0,
+            "勝ち": 0,
+            "負け": 0,
+            "引分": 0,
+            "勝率%": 0.0,
+            "補正勝率%": round(
+                baseline_win_rate * 100,
+                2,
+            ),
+            "平均損益率%": 0.0,
+            "中央値損益率%": 0.0,
+            "総損益率%": 0.0,
+            "PF": 0.0,
+            "信頼度%": 0.0,
+            "AI点補正": 0,
+            "判定": "データ不足",
+        }
+
+    returns = pd.to_numeric(
+        data["損益率%"],
+        errors="coerce",
+    ).fillna(0.0)
+
+    wins = int(
+        (
+            returns > 0
+        ).sum()
+    )
+
+    losses = int(
+        (
+            returns < 0
+        ).sum()
+    )
+
+    draws = total - wins - losses
+
+    gross_profit = safe_float(
+        returns[
+            returns > 0
+        ].sum()
+    )
+
+    gross_loss = abs(
+        safe_float(
+            returns[
+                returns < 0
+            ].sum()
+        )
+    )
+
+    if gross_loss > 0:
+        profit_factor = (
+            gross_profit
+            / gross_loss
+        )
+    elif gross_profit > 0:
+        profit_factor = 99.0
+    else:
+        profit_factor = 0.0
+
+    raw_win_rate = (
+        wins
+        / total
+    )
+
+    adjusted_win_rate = (
+        wilson_shrunk_win_rate(
+            wins=wins,
+            total=total,
+            prior_rate=baseline_win_rate,
+        )
+    )
+
+    average_return = safe_float(
+        returns.mean()
+    )
+
+    adjustment = calculate_adjustment(
+        win_rate=adjusted_win_rate,
+        average_return=average_return,
+        profit_factor=profit_factor,
+        sample_count=total,
+        baseline_win_rate=baseline_win_rate,
+    )
+
+    if total < MIN_SAMPLE_FOR_ADJUSTMENT:
+        judgement = "データ不足"
+    elif adjustment >= 8:
+        judgement = "強化"
+    elif adjustment >= 3:
+        judgement = "やや強化"
+    elif adjustment <= -8:
+        judgement = "大幅抑制"
+    elif adjustment <= -3:
+        judgement = "やや抑制"
+    else:
+        judgement = "維持"
+
+    return {
+        "カテゴリ": category,
+        "条件": condition,
+        "取引数": total,
+        "勝ち": wins,
+        "負け": losses,
+        "引分": draws,
+        "勝率%": round(
+            raw_win_rate * 100,
+            2,
+        ),
+        "補正勝率%": round(
+            adjusted_win_rate * 100,
+            2,
+        ),
+        "平均損益率%": round(
+            average_return,
+            4,
+        ),
+        "中央値損益率%": round(
+            safe_float(
+                returns.median()
+            ),
+            4,
+        ),
+        "総損益率%": round(
+            safe_float(
+                returns.sum()
+            ),
+            4,
+        ),
+        "PF": round(
+            profit_factor,
+            3,
+        ),
+        "信頼度%": round(
+            sample_confidence(total)
+            * 100,
+            2,
+        ),
+        "AI点補正": adjustment,
+        "判定": judgement,
+    }
+
+
+def bin_label(
+    value: float,
+    bins: list[
+        tuple[
+            float,
+            float,
+            str,
+        ]
+    ],
+) -> str:
+    for minimum, maximum, label in bins:
+        if minimum <= value <= maximum:
+            return label
+
+    return "不明"
+
+
+def build_learning_report(
+    data: pd.DataFrame,
+) -> pd.DataFrame:
+    if data.empty:
+        return pd.DataFrame(
+            columns=[
+                "カテゴリ",
+                "条件",
+                "取引数",
+                "勝ち",
+                "負け",
+                "引分",
+                "勝率%",
+                "補正勝率%",
+                "平均損益率%",
+                "中央値損益率%",
+                "総損益率%",
+                "PF",
+                "信頼度%",
+                "AI点補正",
+                "判定",
+            ]
+        )
+
+    baseline_wins = int(
+        (
+            data["損益率%"] > 0
+        ).sum()
+    )
+
+    baseline_win_rate = (
+        baseline_wins
+        / len(data)
+        if len(data) > 0
+        else 0.5
+    )
+
+    rows: list[
+        dict[str, Any]
+    ] = []
+
+    rows.append(
+        create_group_row(
+            data=data,
+            category="全体",
+            condition="全取引",
+            baseline_win_rate=baseline_win_rate,
+        )
+    )
+
+    data = data.copy()
+
+    data["RSI条件"] = data["RSI"].apply(
+        lambda value:
+            bin_label(
+                safe_float(value),
+                RSI_BINS,
+            )
+    )
+
+    data["AI点条件"] = data[
+        "AI判断点"
+    ].apply(
+        lambda value:
+            bin_label(
+                safe_float(value),
+                AI_SCORE_BINS,
+            )
+    )
+
+    data["PHOENIX条件"] = data[
+        "PHOENIX_SCORE"
+    ].apply(
+        lambda value:
+            bin_label(
+                safe_float(value),
+                PHOENIX_SCORE_BINS,
+            )
+    )
+
+    grouping_definitions = [
+        (
+            "RSI",
+            "RSI条件",
+        ),
+        (
+            "MACD",
+            "MACD判定",
+        ),
+        (
+            "AI判断",
+            "AI判断",
+        ),
+        (
+            "AI判断点",
+            "AI点条件",
+        ),
+        (
+            "PHOENIX_SCORE",
+            "PHOENIX条件",
+        ),
+        (
+            "決済理由",
+            "決済理由",
+        ),
+    ]
+
+    for category, column in grouping_definitions:
+        for condition, group in data.groupby(
+            column,
+            dropna=False,
+        ):
+            condition_text = str(
+                condition
+            ).strip()
+
+            if (
+                not condition_text
+                or condition_text.lower()
+                == "nan"
+            ):
+                condition_text = "不明"
+
+            rows.append(
+                create_group_row(
+                    data=group,
+                    category=category,
+                    condition=condition_text,
+                    baseline_win_rate=baseline_win_rate,
+                )
+            )
+
+    report = pd.DataFrame(
+        rows
+    )
+
+    report = report.sort_values(
+        by=[
+            "カテゴリ",
+            "取引数",
+            "AI点補正",
+        ],
+        ascending=[
+            True,
+            False,
+            False,
+        ],
     ).reset_index(
         drop=True
     )
 
-    columns = {
-        "return": return_column,
-        "score": score_column,
-        "rsi": rsi_column,
-        "macd": macd_column,
-        "volume": volume_column,
-    }
-
-    return (
-        result,
-        columns,
-    )
+    return report
 
 
-def load_paper_learning() -> pd.DataFrame:
-    if not PAPER_FILE.exists():
-        return pd.DataFrame()
+# =========================================================
+# AIパラメータ作成
+# =========================================================
 
-    df = read_csv_safe(
-        PAPER_FILE
-    )
+def report_adjustments(
+    report: pd.DataFrame,
+    category: str,
+) -> dict[str, int]:
+    if report.empty:
+        return {}
 
-    if df.empty:
-        return pd.DataFrame()
-
-    return_column = find_column(
-        df,
-        PAPER_RETURN_COLUMN_CANDIDATES,
-    )
-
-    score_column = find_column(
-        df,
-        PAPER_SCORE_COLUMN_CANDIDATES,
-    )
-
-    rsi_column = find_column(
-        df,
-        RSI_COLUMN_CANDIDATES,
-    )
-
-    macd_column = find_column(
-        df,
-        MACD_COLUMN_CANDIDATES,
-    )
-
-    if (
-        return_column is None
-        or score_column is None
-    ):
-        print(
-            "ペーパー学習データに必要な列がないため、"
-            "今回はバックテストのみ使用します。"
+    matched = report[
+        (
+            report["カテゴリ"]
+            == category
         )
-
-        return pd.DataFrame()
-
-    if "結果" in df.columns:
-        df = df[
-            df["結果"]
-            .astype(str)
-            .isin(
-                [
-                    "WIN",
-                    "LOSS",
-                    "DRAW",
-                ]
-            )
-        ].copy()
-
-    result = pd.DataFrame(
-        index=df.index
-    )
-
-    result[RETURN_COL] = (
-        normalize_return_percent(
-            df[return_column],
-            return_column,
-        )
-    )
-
-    result[SCORE_COL] = pd.to_numeric(
-        df[score_column],
-        errors="coerce",
-    )
-
-    if rsi_column is not None:
-        result[RSI_COL] = pd.to_numeric(
-            df[rsi_column],
-            errors="coerce",
-        )
-
-    else:
-        result[RSI_COL] = np.nan
-
-    if macd_column is not None:
-        result[MACD_COL] = df[
-            macd_column
-        ].map(
-            normalize_macd
-        )
-
-    else:
-        result[MACD_COL] = pd.NA
-
-    result[VOLUME_COL] = np.nan
-    result[SOURCE_COL] = "paper"
-    result[WEIGHT_COL] = PAPER_WEIGHT
-
-    if "ticker" in df.columns:
-        result["ticker"] = df[
-            "ticker"
-        ].astype(str)
-
-    else:
-        result["ticker"] = ""
-
-    if "銘柄" in df.columns:
-        result["銘柄"] = df[
-            "銘柄"
-        ].astype(str)
-
-    else:
-        result["銘柄"] = ""
-
-    return (
-        result.dropna(
-            subset=[
-                RETURN_COL,
-                SCORE_COL,
-            ]
-        )
-        .reset_index(
-            drop=True
-        )
-    )
-
-
-def score_bucket(
-    value: Any,
-) -> str:
-    score = safe_float(value)
-
-    lower = int(
-        math.floor(
-            score / 5
-        )
-        * 5
-    )
-
-    return (
-        f"{lower}-"
-        f"{lower + 4}"
-    )
-
-
-def rsi_bucket(
-    value: Any,
-) -> str:
-    rsi = safe_float(value)
-
-    if rsi < 30:
-        return "0-29"
-
-    if rsi < 40:
-        return "30-39"
-
-    if rsi < 50:
-        return "40-49"
-
-    if rsi < 60:
-        return "50-59"
-
-    if rsi < 70:
-        return "60-69"
-
-    if rsi < 80:
-        return "70-79"
-
-    return "80-100"
-
-
-def volume_bucket(
-    value: Any,
-) -> str:
-    volume = safe_float(value)
-
-    if volume < 0.8:
-        return "0.0-0.79"
-
-    if volume < 1.0:
-        return "0.8-0.99"
-
-    if volume < 1.2:
-        return "1.0-1.19"
-
-    if volume < 1.5:
-        return "1.2-1.49"
-
-    if volume < 2.0:
-        return "1.5-1.99"
-
-    if volume < 3.0:
-        return "2.0-2.99"
-
-    return "3.0以上"
-
-
-def weighted_average(
-    values: pd.Series,
-    weights: pd.Series,
-) -> float:
-    numeric_values = pd.to_numeric(
-        values,
-        errors="coerce",
-    )
-
-    numeric_weights = pd.to_numeric(
-        weights,
-        errors="coerce",
-    )
-
-    valid = (
-        numeric_values.notna()
-        & numeric_weights.notna()
         & (
-            numeric_weights > 0
+            report["取引数"]
+            >= MIN_SAMPLE_FOR_ADJUSTMENT
         )
-    )
+    ]
 
-    if not valid.any():
-        return 0.0
-
-    return float(
-        np.average(
-            numeric_values[valid],
-            weights=numeric_weights[
-                valid
-            ],
-        )
-    )
-
-
-def calculate_evaluation_score(
-    effective_sample_count: float,
-    win_rate: float,
-    average_return: float,
-    profit_factor: float,
-) -> float:
-    sample_reliability = min(
-        effective_sample_count / 300.0,
-        1.0,
-    )
-
-    win_component = (
-        win_rate - 50.0
-    ) * 0.8
-
-    return_component = (
-        average_return * 15.0
-    )
-
-    capped_pf = min(
-        max(
-            profit_factor,
-            0.0,
-        ),
-        5.0,
-    )
-
-    pf_component = (
-        capped_pf - 1.0
-    ) * 12.0
-
-    return (
-        win_component
-        + return_component
-        + pf_component
-    ) * sample_reliability
-
-
-def empty_statistics() -> dict[str, Any]:
     return {
-        "対象数": 0,
-        "有効サンプル数": 0.0,
-        "バックテスト件数": 0,
-        "ペーパー件数": 0,
-        "勝率%": 0.0,
-        "平均騰落率%": 0.0,
-        "中央値%": 0.0,
-        "平均利益%": 0.0,
-        "平均損失%": 0.0,
-        "PF": 0.0,
-        "期待値評価": 0.0,
-        "ペーパー勝率%": 0.0,
-        "ペーパー平均損益率%": 0.0,
+        str(row["条件"]): safe_int(
+            row["AI点補正"]
+        )
+        for _, row in matched.iterrows()
     }
 
 
-def calculate_statistics(
-    group_df: pd.DataFrame,
+def overall_statistics(
+    data: pd.DataFrame,
 ) -> dict[str, Any]:
-    if group_df.empty:
-        return empty_statistics()
+    if data.empty:
+        return {
+            "trades": 0,
+            "wins": 0,
+            "losses": 0,
+            "draws": 0,
+            "win_rate_percent": 0.0,
+            "average_return_percent": 0.0,
+            "total_return_percent": 0.0,
+            "profit_factor": 0.0,
+        }
 
-    work = group_df.copy()
-
-    work[RETURN_COL] = pd.to_numeric(
-        work[RETURN_COL],
+    returns = pd.to_numeric(
+        data["損益率%"],
         errors="coerce",
+    ).fillna(0.0)
+
+    wins = int(
+        (
+            returns > 0
+        ).sum()
     )
 
-    work[WEIGHT_COL] = pd.to_numeric(
-        work[WEIGHT_COL],
-        errors="coerce",
+    losses = int(
+        (
+            returns < 0
+        ).sum()
     )
 
-    work = work.dropna(
-        subset=[
-            RETURN_COL,
-            WEIGHT_COL,
-        ]
+    draws = len(data) - wins - losses
+
+    gross_profit = safe_float(
+        returns[
+            returns > 0
+        ].sum()
     )
 
-    work = work[
-        work[WEIGHT_COL] > 0
-    ].copy()
-
-    if work.empty:
-        return empty_statistics()
-
-    values = work[
-        RETURN_COL
-    ]
-
-    weights = work[
-        WEIGHT_COL
-    ]
-
-    sample_count = len(work)
-
-    effective_sample_count = safe_float(
-        weights.sum()
-    )
-
-    win_rate = (
-        weighted_average(
-            (
-                values > 0
-            ).astype(float),
-            weights,
+    gross_loss = abs(
+        safe_float(
+            returns[
+                returns < 0
+            ].sum()
         )
-        * 100.0
     )
 
-    average_return = weighted_average(
-        values,
-        weights,
-    )
-
-    median_return = safe_float(
-        values.median()
-    )
-
-    wins = work[
-        work[RETURN_COL] > 0
-    ]
-
-    losses = work[
-        work[RETURN_COL] < 0
-    ]
-
-    if not wins.empty:
-        average_profit = (
-            weighted_average(
-                wins[RETURN_COL],
-                wins[WEIGHT_COL],
-            )
-        )
-
-    else:
-        average_profit = 0.0
-
-    if not losses.empty:
-        average_loss = (
-            weighted_average(
-                losses[RETURN_COL],
-                losses[WEIGHT_COL],
-            )
-        )
-
-    else:
-        average_loss = 0.0
-
-    if not wins.empty:
-        total_profit = safe_float(
-            (
-                wins[RETURN_COL]
-                * wins[WEIGHT_COL]
-            ).sum()
-        )
-
-    else:
-        total_profit = 0.0
-
-    if not losses.empty:
-        total_loss = abs(
-            safe_float(
-                (
-                    losses[RETURN_COL]
-                    * losses[WEIGHT_COL]
-                ).sum()
-            )
-        )
-
-    else:
-        total_loss = 0.0
-
-    if total_loss > 0:
+    if gross_loss > 0:
         profit_factor = (
-            total_profit
-            / total_loss
+            gross_profit
+            / gross_loss
         )
-
-    elif total_profit > 0:
+    elif gross_profit > 0:
         profit_factor = 99.0
-
     else:
         profit_factor = 0.0
 
-    evaluation = (
-        calculate_evaluation_score(
-            effective_sample_count=(
-                effective_sample_count
-            ),
-            win_rate=win_rate,
-            average_return=average_return,
-            profit_factor=profit_factor,
-        )
-    )
-
-    backtest_df = work[
-        work[SOURCE_COL]
-        == "backtest"
-    ]
-
-    paper_df = work[
-        work[SOURCE_COL]
-        == "paper"
-    ]
-
-    paper_win_rate = 0.0
-    paper_average_return = 0.0
-
-    if not paper_df.empty:
-        paper_values = paper_df[
-            RETURN_COL
-        ]
-
-        paper_win_rate = safe_float(
-            (
-                paper_values > 0
-            ).mean()
-            * 100.0
-        )
-
-        paper_average_return = safe_float(
-            paper_values.mean()
-        )
-
     return {
-        "対象数": int(
-            sample_count
-        ),
-        "有効サンプル数": safe_round(
-            effective_sample_count,
+        "trades": len(data),
+        "wins": wins,
+        "losses": losses,
+        "draws": draws,
+        "win_rate_percent": round(
+            wins
+            / len(data)
+            * 100,
             2,
         ),
-        "バックテスト件数": int(
-            len(backtest_df)
-        ),
-        "ペーパー件数": int(
-            len(paper_df)
-        ),
-        "勝率%": safe_round(
-            win_rate,
-            2,
-        ),
-        "平均騰落率%": safe_round(
-            average_return,
+        "average_return_percent": round(
+            safe_float(
+                returns.mean()
+            ),
             4,
         ),
-        "中央値%": safe_round(
-            median_return,
+        "total_return_percent": round(
+            safe_float(
+                returns.sum()
+            ),
             4,
         ),
-        "平均利益%": safe_round(
-            average_profit,
-            4,
-        ),
-        "平均損失%": safe_round(
-            average_loss,
-            4,
-        ),
-        "PF": safe_round(
+        "profit_factor": round(
             profit_factor,
             3,
         ),
-        "期待値評価": safe_round(
-            evaluation,
-            2,
-        ),
-        "ペーパー勝率%": safe_round(
-            paper_win_rate,
-            2,
-        ),
-        "ペーパー平均損益率%": safe_round(
-            paper_average_return,
-            4,
-        ),
     }
 
 
-def build_group_statistics(
-    df: pd.DataFrame,
-    group_column: str,
-    group_type: str,
-) -> list[dict[str, Any]]:
-    results: list[
-        dict[str, Any]
-    ] = []
+def build_parameter_data(
+    data: pd.DataFrame,
+    report: pd.DataFrame,
+) -> dict[str, Any]:
+    total_trades = len(data)
 
-    grouped = df.groupby(
-        group_column,
-        dropna=False,
+    learning_active = (
+        total_trades
+        >= MIN_SAMPLE_FOR_ADJUSTMENT
     )
 
-    for group_name, group_df in grouped:
-        results.append({
-            "分類": group_type,
-            "条件": str(
-                group_name
+    return {
+        "version": "PHOENIX v3.4",
+        "generated_at": now_text(),
+        "account_capital_yen": ACCOUNT_CAPITAL,
+        "learning": {
+            "active": learning_active,
+            "minimum_sample_for_adjustment": (
+                MIN_SAMPLE_FOR_ADJUSTMENT
             ),
-            **calculate_statistics(
-                group_df
+            "strong_sample_count": STRONG_SAMPLE_COUNT,
+            "maximum_score_adjustment": (
+                MAX_SCORE_ADJUSTMENT
             ),
-        })
-
-    return results
-
-
-def build_learning_profile(
-    evidence_df: pd.DataFrame,
-    backtest_columns: dict[
-        str,
-        str | None,
-    ],
-) -> tuple[
-    dict[str, Any],
-    pd.DataFrame,
-]:
-    work = evidence_df.copy()
-
-    work["スコア帯"] = work[
-        SCORE_COL
-    ].apply(
-        score_bucket
-    )
-
-    profile_rows: list[
-        dict[str, Any]
-    ] = []
-
-    profile_rows.extend(
-        build_group_statistics(
-            df=work,
-            group_column="スコア帯",
-            group_type="score",
-        )
-    )
-
-    rsi_work = work.dropna(
-        subset=[
-            RSI_COL,
-        ]
-    ).copy()
-
-    if not rsi_work.empty:
-        rsi_work["RSI帯"] = rsi_work[
-            RSI_COL
-        ].apply(
-            rsi_bucket
-        )
-
-        profile_rows.extend(
-            build_group_statistics(
-                df=rsi_work,
-                group_column="RSI帯",
-                group_type="rsi",
-            )
-        )
-
-    macd_work = work.dropna(
-        subset=[
-            MACD_COL,
-        ]
-    ).copy()
-
-    if not macd_work.empty:
-        profile_rows.extend(
-            build_group_statistics(
-                df=macd_work,
-                group_column=MACD_COL,
-                group_type="macd",
-            )
-        )
-
-    volume_work = work.dropna(
-        subset=[
-            VOLUME_COL,
-        ]
-    ).copy()
-
-    if not volume_work.empty:
-        volume_work["出来高帯"] = (
-            volume_work[
-                VOLUME_COL
-            ].apply(
-                volume_bucket
-            )
-        )
-
-        profile_rows.extend(
-            build_group_statistics(
-                df=volume_work,
-                group_column="出来高帯",
-                group_type="volume",
-            )
-        )
-
-    combination_work = work.dropna(
-        subset=[
-            RSI_COL,
-            MACD_COL,
-            VOLUME_COL,
-        ]
-    ).copy()
-
-    if not combination_work.empty:
-        combination_work[
-            "スコア帯"
-        ] = combination_work[
-            SCORE_COL
-        ].apply(
-            score_bucket
-        )
-
-        combination_work[
-            "RSI帯"
-        ] = combination_work[
-            RSI_COL
-        ].apply(
-            rsi_bucket
-        )
-
-        combination_work[
-            "出来高帯"
-        ] = combination_work[
-            VOLUME_COL
-        ].apply(
-            volume_bucket
-        )
-
-        combination_work[
-            "複合条件"
-        ] = (
-            combination_work[
-                [
-                    "スコア帯",
-                    "RSI帯",
-                    MACD_COL,
-                    "出来高帯",
-                ]
-            ]
-            .astype(str)
-            .agg(
-                " | ".join,
-                axis=1,
-            )
-        )
-
-        combination_rows = (
-            build_group_statistics(
-                df=combination_work,
-                group_column="複合条件",
-                group_type="combination",
-            )
-        )
-
-        profile_rows.extend(
-            row
-            for row
-            in combination_rows
-            if int(
-                row["対象数"]
-            )
-            >= MIN_SAMPLE_COUNT
-        )
-
-    profile_df = pd.DataFrame(
-        profile_rows
-    )
-
-    profile_df = (
-        profile_df.sort_values(
-            by=[
-                "分類",
-                "期待値評価",
-                "対象数",
-            ],
-            ascending=[
-                True,
-                False,
-                False,
-            ],
-        )
-        .reset_index(
-            drop=True
-        )
-    )
-
-    overall_stats = (
-        calculate_statistics(
-            work
-        )
-    )
-
-    profile: dict[str, Any] = {
-        "generated_at": (
-            datetime.now().isoformat(
-                timespec="seconds"
-            )
-        ),
-        "source_file": str(
-            BACKTEST_FILE
-        ),
-        "source_files": {
-            "backtest": str(
-                BACKTEST_FILE
-            ),
-            "paper": str(
-                PAPER_FILE
+            "message": (
+                "学習補正を有効化"
+                if learning_active
+                else (
+                    f"決済済み取引が"
+                    f"{MIN_SAMPLE_FOR_ADJUSTMENT}件未満のため"
+                    "AI点補正は0"
+                )
             ),
         },
-        "source_counts": {
-            "backtest": int(
-                (
-                    work[SOURCE_COL]
-                    == "backtest"
-                ).sum()
+        "overall": overall_statistics(
+            data
+        ),
+        "score_adjustments": {
+            "rsi": report_adjustments(
+                report,
+                "RSI",
             ),
-            "paper": int(
-                (
-                    work[SOURCE_COL]
-                    == "paper"
-                ).sum()
+            "macd": report_adjustments(
+                report,
+                "MACD",
+            ),
+            "ai_judgement": report_adjustments(
+                report,
+                "AI判断",
+            ),
+            "ai_score": report_adjustments(
+                report,
+                "AI判断点",
+            ),
+            "phoenix_score": report_adjustments(
+                report,
+                "PHOENIX_SCORE",
             ),
         },
-        "weights": {
-            "backtest": (
-                BACKTEST_WEIGHT
+        "risk_management": {
+            "account_capital_yen": ACCOUNT_CAPITAL,
+            "default_risk_per_trade_percent": 1.0,
+            "default_max_loss_yen": int(
+                ACCOUNT_CAPITAL
+                * 0.01
             ),
-            "paper": (
-                PAPER_WEIGHT
-            ),
-        },
-        "minimum_sample_count": (
-            MIN_SAMPLE_COUNT
-        ),
-        "overall": overall_stats,
-        "columns": (
-            backtest_columns
-        ),
-        "groups": {
-            "score": {},
-            "rsi": {},
-            "macd": {},
-            "volume": {},
-            "combination": {},
+            "maximum_total_exposure_percent": 80.0,
+            "maximum_single_position_percent": 30.0,
+            "maximum_open_positions": 3,
         },
     }
 
-    for row in profile_rows:
-        group_type = str(
-            row["分類"]
-        )
 
-        condition = str(
-            row["条件"]
-        )
+# =========================================================
+# 保存・表示
+# =========================================================
 
-        if group_type not in profile[
-            "groups"
-        ]:
-            continue
-
-        profile["groups"][
-            group_type
-        ][condition] = {
-            "sample_count": int(
-                row["対象数"]
-            ),
-            "effective_sample_count": (
-                safe_float(
-                    row[
-                        "有効サンプル数"
-                    ]
-                )
-            ),
-            "backtest_count": int(
-                row[
-                    "バックテスト件数"
-                ]
-            ),
-            "paper_count": int(
-                row[
-                    "ペーパー件数"
-                ]
-            ),
-            "win_rate": safe_float(
-                row["勝率%"]
-            ),
-            "average_return": (
-                safe_float(
-                    row[
-                        "平均騰落率%"
-                    ]
-                )
-            ),
-            "median_return": safe_float(
-                row["中央値%"]
-            ),
-            "profit_factor": safe_float(
-                row["PF"]
-            ),
-            "evaluation": safe_float(
-                row["期待値評価"]
-            ),
-            "paper_win_rate": (
-                safe_float(
-                    row[
-                        "ペーパー勝率%"
-                    ]
-                )
-            ),
-            "paper_average_return": (
-                safe_float(
-                    row[
-                        "ペーパー平均損益率%"
-                    ]
-                )
-            ),
-        }
-
-    return (
-        profile,
-        profile_df,
-    )
-
-
-def save_profile(
-    profile: dict[str, Any],
-    profile_df: pd.DataFrame,
-    evidence_df: pd.DataFrame,
+def save_outputs(
+    report: pd.DataFrame,
+    parameters: dict[str, Any],
 ) -> None:
     REPORT_DIR.mkdir(
         parents=True,
         exist_ok=True,
     )
 
+    report.to_csv(
+        LEARNING_REPORT_FILE,
+        index=False,
+        encoding="utf-8-sig",
+    )
+
+    write_json(
+        PARAMETER_FILE,
+        parameters,
+    )
+
+    overall = parameters["overall"]
+    learning = parameters["learning"]
+
     with open(
-        PROFILE_JSON_FILE,
+        TEXT_REPORT_FILE,
         "w",
         encoding="utf-8",
         newline="\n",
     ) as file:
-        json.dump(
-            profile,
-            file,
-            ensure_ascii=False,
-            indent=2,
+        file.write(
+            "PHOENIX LEARNING ENGINE REPORT\n"
+        )
+        file.write(
+            now_text()
+            + "\n"
+        )
+        file.write(
+            "=" * 100
+            + "\n"
+        )
+        file.write(
+            f"口座資金: "
+            f"{ACCOUNT_CAPITAL:,}円\n"
+        )
+        file.write(
+            f"学習対象: "
+            f"{overall['trades']}件\n"
+        )
+        file.write(
+            f"勝率: "
+            f"{overall['win_rate_percent']:.2f}%\n"
+        )
+        file.write(
+            f"平均損益率: "
+            f"{overall['average_return_percent']:+.4f}%\n"
+        )
+        file.write(
+            f"PF: "
+            f"{overall['profit_factor']:.3f}\n"
+        )
+        file.write(
+            f"学習状態: "
+            f"{learning['message']}\n"
+        )
+        file.write(
+            "\n"
         )
 
-    profile_df.to_csv(
-        PROFILE_CSV_FILE,
-        index=False,
-        encoding="utf-8-sig",
-    )
-
-    evidence_columns = [
-        SOURCE_COL,
-        WEIGHT_COL,
-        "ticker",
-        "銘柄",
-        SCORE_COL,
-        RSI_COL,
-        MACD_COL,
-        VOLUME_COL,
-        RETURN_COL,
-    ]
-
-    evidence_df[
-        evidence_columns
-    ].to_csv(
-        EVIDENCE_CSV_FILE,
-        index=False,
-        encoding="utf-8-sig",
-    )
+        if report.empty:
+            file.write(
+                "決済済みの学習データはありません。\n"
+            )
+        else:
+            file.write(
+                report.to_string(
+                    index=False
+                )
+            )
+            file.write(
+                "\n"
+            )
 
 
-def print_summary(
-    profile: dict[str, Any],
-    profile_df: pd.DataFrame,
+def print_result(
+    data: pd.DataFrame,
+    report: pd.DataFrame,
+    parameters: dict[str, Any],
 ) -> None:
-    overall = profile[
-        "overall"
-    ]
+    overall = parameters["overall"]
+    learning = parameters["learning"]
 
-    counts = profile[
-        "source_counts"
-    ]
-
-    print()
-    print("=" * 90)
-    print("PHOENIX LEARNING RESULT")
-    print("=" * 90)
-
+    print("=" * 100)
+    print("PHOENIX LEARNING ENGINE")
+    print("=" * 100)
     print(
-        f"バックテスト件数 : "
-        f"{counts['backtest']:,}"
+        f"口座資金       : "
+        f"{ACCOUNT_CAPITAL:,}円"
     )
-
     print(
-        f"ペーパー取引件数 : "
-        f"{counts['paper']:,}"
+        f"学習対象取引   : "
+        f"{len(data)}件"
     )
-
     print(
-        f"統合学習対象数   : "
-        f"{overall['対象数']:,}"
+        f"勝ち           : "
+        f"{overall['wins']}件"
     )
-
     print(
-        f"統合勝率         : "
-        f"{overall['勝率%']:.2f}%"
+        f"負け           : "
+        f"{overall['losses']}件"
     )
-
     print(
-        f"統合平均騰落率   : "
-        f"{overall['平均騰落率%']:+.4f}%"
+        f"勝率           : "
+        f"{overall['win_rate_percent']:.2f}%"
     )
-
     print(
-        f"統合PF           : "
-        f"{overall['PF']:.3f}"
+        f"平均損益率     : "
+        f"{overall['average_return_percent']:+.4f}%"
+    )
+    print(
+        f"PF             : "
+        f"{overall['profit_factor']:.3f}"
+    )
+    print(
+        f"学習状態       : "
+        f"{learning['message']}"
     )
 
     print()
-    print("=" * 90)
-    print("期待値が高い条件 TOP20")
-    print("=" * 90)
+    print("=" * 100)
+    print("学習結果")
+    print("=" * 100)
 
-    display_df = (
-        profile_df[
-            profile_df["対象数"]
-            >= MIN_SAMPLE_COUNT
-        ]
-        .sort_values(
-            by=[
-                "期待値評価",
-                "対象数",
-            ],
-            ascending=[
-                False,
-                False,
-            ],
-        )
-        .head(20)
-    )
-
-    if display_df.empty:
+    if report.empty:
         print(
-            "十分なサンプル数を持つ条件がありません。"
+            "決済済み取引がないため、"
+            "初期パラメータを保存しました。"
         )
-
     else:
+        display_columns = [
+            "カテゴリ",
+            "条件",
+            "取引数",
+            "勝率%",
+            "平均損益率%",
+            "PF",
+            "信頼度%",
+            "AI点補正",
+            "判定",
+        ]
+
         print(
-            display_df[
-                [
-                    "分類",
-                    "条件",
-                    "対象数",
-                    "ペーパー件数",
-                    "勝率%",
-                    "平均騰落率%",
-                    "PF",
-                    "期待値評価",
-                ]
+            report[
+                display_columns
             ].to_string(
                 index=False
             )
@@ -1375,82 +1092,49 @@ def print_summary(
 
     print()
     print(
-        f"保存完了 : "
-        f"{PROFILE_JSON_FILE}"
+        f"保存完了: {LEARNING_REPORT_FILE}"
     )
-
     print(
-        f"保存完了 : "
-        f"{PROFILE_CSV_FILE}"
+        f"保存完了: {PARAMETER_FILE}"
     )
-
     print(
-        f"保存完了 : "
-        f"{EVIDENCE_CSV_FILE}"
+        f"保存完了: {TEXT_REPORT_FILE}"
     )
 
+
+# =========================================================
+# メイン
+# =========================================================
 
 def main() -> None:
     configure_console()
 
-    print("=" * 90)
-    print("PHOENIX SELF LEARNING ENGINE v2.1")
-    print("=" * 90)
-
     try:
-        backtest_df, columns = (
-            load_backtest()
+        REPORT_DIR.mkdir(
+            parents=True,
+            exist_ok=True,
         )
 
-        paper_df = (
-            load_paper_learning()
+        data = load_learning_source()
+
+        report = build_learning_report(
+            data
         )
 
-        evidence_frames = [
-            backtest_df
-        ]
-
-        if not paper_df.empty:
-            evidence_frames.append(
-                paper_df
-            )
-
-        evidence_df = pd.concat(
-            evidence_frames,
-            ignore_index=True,
+        parameters = build_parameter_data(
+            data=data,
+            report=report,
         )
 
-        print(
-            f"使用ファイル : "
-            f"{BACKTEST_FILE}"
+        save_outputs(
+            report=report,
+            parameters=parameters,
         )
 
-        print(
-            f"バックテスト件数 : "
-            f"{len(backtest_df):,}"
-        )
-
-        print(
-            f"ペーパー取引件数 : "
-            f"{len(paper_df):,}"
-        )
-
-        profile, profile_df = (
-            build_learning_profile(
-                evidence_df=evidence_df,
-                backtest_columns=columns,
-            )
-        )
-
-        save_profile(
-            profile=profile,
-            profile_df=profile_df,
-            evidence_df=evidence_df,
-        )
-
-        print_summary(
-            profile=profile,
-            profile_df=profile_df,
+        print_result(
+            data=data,
+            report=report,
+            parameters=parameters,
         )
 
     except Exception as error:
@@ -1458,7 +1142,9 @@ def main() -> None:
             f"エラー: {error}"
         )
 
-        raise SystemExit(1)
+        raise SystemExit(
+            1
+        )
 
 
 if __name__ == "__main__":
