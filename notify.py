@@ -33,9 +33,6 @@ ENV_FILE = Path(".env")
 
 REQUEST_TIMEOUT = 30
 
-MAX_BUY_STOCKS = 5
-MAX_WAIT_STOCKS = 8
-
 DISCORD_MAX_LENGTH = 1900
 LINE_MAX_LENGTH = 4500
 
@@ -316,7 +313,6 @@ def format_stock(
 def build_group_section(
     title: str,
     target_df: pd.DataFrame,
-    maximum: int,
 ) -> str:
     lines = [
         f"【{title}】",
@@ -331,12 +327,8 @@ def build_group_section(
             lines
         )
 
-    limited_df = target_df.head(
-        maximum,
-    )
-
     for number, (_, row) in enumerate(
-        limited_df.iterrows(),
+        target_df.iterrows(),
         start=1,
     ):
         lines.append(
@@ -350,23 +342,14 @@ def build_group_section(
             )
         )
 
-    if len(target_df) > maximum:
-        lines.append(
-            ""
-        )
-
-        lines.append(
-            f"ほか {len(target_df) - maximum}銘柄"
-        )
-
     return "\n".join(
         lines
     )
 
 
-def build_notification_message(
+def build_notification_messages(
     df: pd.DataFrame,
-) -> str:
+) -> list[str]:
     priority_df = df[
         df["AI判断"]
         == "優先監視"
@@ -377,49 +360,34 @@ def build_notification_message(
         == "買い候補"
     ]
 
-    wait_df = df[
+    pullback_df = df[
         df["AI判断"]
         == "押し目待ち"
     ]
 
-    sections = [
-        "🔥 PHOENIX ALERT",
-        datetime.now().strftime(
-            "%Y-%m-%d %H:%M"
-        ),
+    timestamp = datetime.now().strftime(
+        "%Y-%m-%d %H:%M"
+    )
+
+    buy_message = "\n".join([
+        "🔥 PHOENIX BUY ALERT",
+        timestamp,
         "",
         (
             "優先監視 "
             f"{len(priority_df)}銘柄"
             " / 買い候補 "
             f"{len(buy_df)}銘柄"
-            " / 押し目待ち "
-            f"{len(wait_df)}銘柄"
         ),
-    ]
-
-    if not priority_df.empty:
-        sections.extend([
-            "",
-            build_group_section(
-                title="優先監視",
-                target_df=priority_df,
-                maximum=MAX_BUY_STOCKS,
-            ),
-        ])
-
-    sections.extend([
+        "",
+        build_group_section(
+            title="優先監視",
+            target_df=priority_df,
+        ),
         "",
         build_group_section(
             title="買い候補",
             target_df=buy_df,
-            maximum=MAX_BUY_STOCKS,
-        ),
-        "",
-        build_group_section(
-            title="押し目待ち",
-            target_df=wait_df,
-            maximum=MAX_WAIT_STOCKS,
         ),
         "",
         "※売買推奨ではなく監視候補です。",
@@ -427,9 +395,75 @@ def build_notification_message(
         "チャート: reports/charts/",
     ])
 
-    return "\n".join(
-        sections
-    )
+    pullback_message = "\n".join([
+        "📉 PHOENIX PULLBACK ALERT",
+        timestamp,
+        "",
+        (
+            "押し目買い候補 "
+            f"{len(pullback_df)}銘柄"
+        ),
+        "",
+        build_group_section(
+            title="押し目買い候補",
+            target_df=pullback_df,
+        ),
+        "",
+        "※現在価格での即時買いではなく、押し目を監視する候補です。",
+        "詳細: reports/ai_judgement.csv",
+        "チャート: reports/charts/",
+    ])
+
+    return [
+        buy_message,
+        pullback_message,
+    ]
+
+
+def split_message(
+    message: str,
+    maximum_length: int,
+) -> list[str]:
+    if len(message) <= maximum_length:
+        return [message]
+
+    chunks: list[str] = []
+    current = ""
+
+    for block in message.split("\n\n"):
+        candidate = block if not current else f"{current}\n\n{block}"
+
+        if len(candidate) <= maximum_length:
+            current = candidate
+            continue
+
+        if current:
+            chunks.append(current)
+            current = ""
+
+        while len(block) > maximum_length:
+            chunks.append(block[:maximum_length])
+            block = block[maximum_length:]
+
+        current = block
+
+    if current:
+        chunks.append(current)
+
+    total = len(chunks)
+
+    if total <= 1:
+        return chunks
+
+    numbered_chunks: list[str] = []
+
+    for index, chunk in enumerate(chunks, start=1):
+        prefix = f"({index}/{total})\n"
+        numbered_chunks.append(
+            prefix + chunk[:maximum_length - len(prefix)]
+        )
+
+    return numbered_chunks
 
 
 # =========================================================
@@ -674,12 +708,62 @@ def send_line(
     )
 
 
+def send_all_discord(
+    messages: list[str],
+) -> tuple[bool, str]:
+    sent_count = 0
+
+    for message in messages:
+        for chunk in split_message(
+            message=message,
+            maximum_length=DISCORD_MAX_LENGTH,
+        ):
+            success, result = send_discord(
+                chunk
+            )
+
+            if not success:
+                return False, result
+
+            sent_count += 1
+
+    return (
+        True,
+        f"Discord通知成功: {sent_count}件",
+    )
+
+
+def send_all_line(
+    messages: list[str],
+) -> tuple[bool, str]:
+    sent_count = 0
+
+    for message in messages:
+        for chunk in split_message(
+            message=message,
+            maximum_length=LINE_MAX_LENGTH,
+        ):
+            success, result = send_line(
+                chunk
+            )
+
+            if not success:
+                return False, result
+
+            sent_count += 1
+
+    return (
+        True,
+        f"LINE通知成功: {sent_count}件",
+    )
+
+
 # =========================================================
 # ログ保存
 # =========================================================
 
 def save_notification_log(
-    message: str,
+    messages: list[str],
     results: list[str],
 ) -> None:
     REPORT_DIR.mkdir(
@@ -712,17 +796,25 @@ def save_notification_log(
                 result + "\n"
             )
 
-        log_file.write(
-            "\n"
-        )
-
-        log_file.write(
-            message
-        )
-
-        log_file.write(
-            "\n"
-        )
+        for number, message in enumerate(
+            messages,
+            start=1,
+        ):
+            log_file.write(
+                "\n" + "=" * 80 + "\n"
+            )
+            log_file.write(
+                f"NOTIFICATION {number}\n"
+            )
+            log_file.write(
+                "=" * 80 + "\n"
+            )
+            log_file.write(
+                message
+            )
+            log_file.write(
+                "\n"
+            )
 
 
 # =========================================================
@@ -736,12 +828,13 @@ def main() -> None:
     print("=" * 80)
     print("PHOENIX MULTI NOTIFIER")
     print("LINE + Discord")
+    print("買い候補通知 / 押し目買い候補通知")
     print("=" * 80)
 
     try:
         df = load_ai_judgement()
 
-        message = build_notification_message(
+        messages = build_notification_messages(
             df
         )
 
@@ -754,18 +847,26 @@ def main() -> None:
             1
         )
 
-    print()
-    print(message)
+    for number, message in enumerate(
+        messages,
+        start=1,
+    ):
+        print()
+        print("=" * 80)
+        print(f"NOTIFICATION {number}")
+        print("=" * 80)
+        print(message)
+
     print()
 
     discord_success, discord_result = (
-        send_discord(
-            message
+        send_all_discord(
+            messages
         )
     )
 
-    line_success, line_result = send_line(
-        message
+    line_success, line_result = send_all_line(
+        messages
     )
 
     print("=" * 80)
@@ -786,7 +887,7 @@ def main() -> None:
     ]
 
     save_notification_log(
-        message=message,
+        messages=messages,
         results=results,
     )
 
