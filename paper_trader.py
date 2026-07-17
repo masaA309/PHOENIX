@@ -10,11 +10,120 @@ from typing import Any
 import pandas as pd
 
 
-REPORT_DIR = Path("reports")
+ROOT_DIR = Path(__file__).resolve().parent
+REPORT_DIR = ROOT_DIR / "reports"
 
 WATCHLIST_FILE = REPORT_DIR / "price_watchlist.csv"
-STATE_FILE = REPORT_DIR / "price_monitor_state.csv"
-EVENT_FILE = REPORT_DIR / "price_alert_history.csv"
+
+LIVE_STATE_FILE = REPORT_DIR / "price_monitor_state.csv"
+LIVE_EVENT_FILE = REPORT_DIR / "price_alert_history.csv"
+
+DRY_RUN_STATE_FILE = REPORT_DIR / "price_monitor_state_dry_run.csv"
+DRY_RUN_EVENT_FILE = REPORT_DIR / "price_alert_dry_run.csv"
+
+# AUTO:
+#   DRY RUN用とLIVE用のうち、更新日時が新しい組を自動選択します。
+# DRY_RUN:
+#   price_monitor_state_dry_run.csv / price_alert_dry_run.csv を使用します。
+# LIVE:
+#   price_monitor_state.csv / price_alert_history.csv を使用します。
+MONITOR_FILE_MODE = "AUTO"
+
+
+def file_modified_time(
+    file_path: Path,
+) -> float:
+    try:
+        return file_path.stat().st_mtime
+
+    except OSError:
+        return 0.0
+
+
+def select_monitor_files() -> tuple[
+    Path,
+    Path,
+    str,
+]:
+    mode = (
+        MONITOR_FILE_MODE
+        .strip()
+        .upper()
+    )
+
+    if mode == "DRY_RUN":
+        return (
+            DRY_RUN_STATE_FILE,
+            DRY_RUN_EVENT_FILE,
+            "DRY RUN",
+        )
+
+    if mode == "LIVE":
+        return (
+            LIVE_STATE_FILE,
+            LIVE_EVENT_FILE,
+            "LIVE",
+        )
+
+    dry_run_modified = max(
+        file_modified_time(
+            DRY_RUN_STATE_FILE
+        ),
+        file_modified_time(
+            DRY_RUN_EVENT_FILE
+        ),
+    )
+
+    live_modified = max(
+        file_modified_time(
+            LIVE_STATE_FILE
+        ),
+        file_modified_time(
+            LIVE_EVENT_FILE
+        ),
+    )
+
+    dry_run_exists = (
+        DRY_RUN_STATE_FILE.exists()
+        or DRY_RUN_EVENT_FILE.exists()
+    )
+
+    live_exists = (
+        LIVE_STATE_FILE.exists()
+        or LIVE_EVENT_FILE.exists()
+    )
+
+    if (
+        dry_run_exists
+        and (
+            not live_exists
+            or dry_run_modified
+            >= live_modified
+        )
+    ):
+        return (
+            DRY_RUN_STATE_FILE,
+            DRY_RUN_EVENT_FILE,
+            "DRY RUN",
+        )
+
+    if live_exists:
+        return (
+            LIVE_STATE_FILE,
+            LIVE_EVENT_FILE,
+            "LIVE",
+        )
+
+    return (
+        DRY_RUN_STATE_FILE,
+        DRY_RUN_EVENT_FILE,
+        "DRY RUN",
+    )
+
+
+STATE_FILE, EVENT_FILE, ACTIVE_MONITOR_MODE = (
+    select_monitor_files()
+)
 
 TRADES_FILE = REPORT_DIR / "paper_trades.csv"
 SUMMARY_FILE = REPORT_DIR / "paper_trade_summary.csv"
@@ -1468,6 +1577,18 @@ def main() -> None:
         events = load_events()
         state = load_state()
         trades = load_trades()
+
+        print(
+            f"監視連携モード : {ACTIVE_MONITOR_MODE}"
+        )
+
+        print(
+            f"状態ファイル : {STATE_FILE}"
+        )
+
+        print(
+            f"イベント履歴 : {EVENT_FILE}"
+        )
 
         print(
             f"監視銘柄数 : {len(watchlist)}"

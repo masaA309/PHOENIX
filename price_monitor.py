@@ -27,9 +27,6 @@ JST = ZoneInfo("Asia/Tokyo")
 ROOT_DIR = Path(__file__).resolve().parent
 REPORT_DIR = ROOT_DIR / "reports"
 
-RANKING_FILE = REPORT_DIR / "ranking_ai.csv"
-AI_FILE = REPORT_DIR / "ai_judgement.csv"
-
 WATCHLIST_FILE = REPORT_DIR / "price_watchlist.csv"
 
 LIVE_STATE_FILE = REPORT_DIR / "price_monitor_state.csv"
@@ -379,226 +376,253 @@ def seconds_until(
 
 
 # =========================================================
-# ランキング読込
+# Trade Engine監視リスト読込
 # =========================================================
 
-def load_ranking() -> pd.DataFrame:
-    if not RANKING_FILE.exists():
+def load_trade_watchlist(
+    max_targets: int,
+) -> pd.DataFrame:
+    if not WATCHLIST_FILE.exists():
         raise FileNotFoundError(
-            f"ランキングファイルがありません: "
-            f"{RANKING_FILE}"
+            "Trade Engine監視リストがありません: "
+            f"{WATCHLIST_FILE}"
         )
 
-    ranking = read_csv_safe(
-        RANKING_FILE
+    watchlist = read_csv_safe(
+        WATCHLIST_FILE
     )
 
-    if ranking.empty:
+    if watchlist.empty:
         raise ValueError(
-            "ランキングファイルが空です。"
+            "Trade Engine監視リストが空です。"
         )
 
     required_columns = {
-        "順位",
         "銘柄",
         "ticker",
-        "価格",
-        "ランキング点",
-        "監視区分",
         "AI判断",
         "AI判断点",
         "PHOENIX_SCORE",
-        "RSI",
-        "MACD判定",
+        "基準価格",
+        "押し目価格",
+        "利確価格",
+        "損切価格",
+        "Trade判定",
+        "ロット比率",
+        "MarketRiskScore",
+        "MarketRiskLevel",
     }
 
     missing_columns = (
         required_columns
-        - set(ranking.columns)
+        - set(watchlist.columns)
     )
 
     if missing_columns:
         raise ValueError(
-            "ランキングファイルに必要な列がありません: "
+            "price_watchlist.csv に必要な列がありません: "
             + ", ".join(
                 sorted(missing_columns)
             )
         )
 
     numeric_columns = [
-        "順位",
-        "価格",
-        "ランキング点",
         "AI判断点",
         "PHOENIX_SCORE",
-        "RSI",
+        "基準価格",
+        "押し目価格",
+        "利確価格",
+        "損切価格",
+        "ロット比率",
+        "MarketRiskScore",
     ]
 
     optional_numeric_columns = [
+        "RSI",
+        "ランキング点",
+        "順位",
         "期待勝率%",
         "期待騰落率%",
-        "出来高倍率",
-        "リスクリワード",
-        "参考目標価格",
-        "参考損切価格",
-        "目標価格",
-        "損切価格",
-        "押し目価格",
-        "買い価格",
     ]
 
     for column in numeric_columns:
-        ranking[column] = pd.to_numeric(
-            ranking[column],
+        watchlist[column] = pd.to_numeric(
+            watchlist[column],
             errors="coerce",
         )
 
     for column in optional_numeric_columns:
-        if column in ranking.columns:
-            ranking[column] = pd.to_numeric(
-                ranking[column],
+        if column in watchlist.columns:
+            watchlist[column] = pd.to_numeric(
+                watchlist[column],
                 errors="coerce",
             )
 
-    ranking["ticker"] = (
-        ranking["ticker"]
+    watchlist["ticker"] = (
+        watchlist["ticker"]
         .astype(str)
         .str.strip()
     )
 
-    ranking = ranking.dropna(
-        subset=[
-            "順位",
-            "銘柄",
-            "ticker",
-            "価格",
-            "ランキング点",
-        ]
-    )
-
-    ranking = ranking.sort_values(
-        by=[
-            "順位",
-            "ランキング点",
-        ],
-        ascending=[
-            True,
-            False,
-        ],
-    )
-
-    return ranking.reset_index(
-        drop=True
-    )
-
-
-def load_ai_details() -> pd.DataFrame:
-    if not AI_FILE.exists():
-        return pd.DataFrame()
-
-    ai = read_csv_safe(
-        AI_FILE
-    )
-
-    if ai.empty:
-        return pd.DataFrame()
-
-    if "ticker" not in ai.columns:
-        return pd.DataFrame()
-
-    ai["ticker"] = (
-        ai["ticker"]
+    watchlist["Trade判定"] = (
+        watchlist["Trade判定"]
         .astype(str)
         .str.strip()
+        .str.upper()
     )
 
-    ai = ai.drop_duplicates(
-        subset=["ticker"],
-        keep="last",
-    )
-
-    return ai.reset_index(
-        drop=True
-    )
-
-
-def merge_ranking_and_ai(
-    ranking: pd.DataFrame,
-    ai: pd.DataFrame,
-) -> pd.DataFrame:
-    if ai.empty:
-        return ranking.copy()
-
-    ai_columns = [
-        column
-        for column in [
-            "ticker",
-            "参考目標価格",
-            "参考損切価格",
-            "目標価格",
-            "損切価格",
-            "押し目価格",
-            "買い価格",
-            "基準価格",
-        ]
-        if column in ai.columns
-    ]
-
-    if ai_columns == ["ticker"]:
-        return ranking.copy()
-
-    ai_subset = ai[
-        ai_columns
-    ].copy()
-
-    rename_columns = {
-        column: f"{column}_ai"
-        for column in ai_columns
-        if column != "ticker"
-    }
-
-    ai_subset = ai_subset.rename(
-        columns=rename_columns
-    )
-
-    return ranking.merge(
-        ai_subset,
-        on="ticker",
-        how="left",
-    )
-
-
-def select_targets(
-    merged: pd.DataFrame,
-    max_targets: int,
-) -> pd.DataFrame:
-    active = merged[
-        merged["監視区分"].astype(str).isin(
-            ACTIVE_MONITOR_TYPES
+    watchlist = watchlist[
+        watchlist["Trade判定"].isin(
+            [
+                "BUY",
+                "WATCH",
+            ]
         )
     ].copy()
 
-    if active.empty:
-        active = merged.copy()
+    watchlist = watchlist.dropna(
+        subset=[
+            "銘柄",
+            "ticker",
+            "基準価格",
+            "押し目価格",
+            "利確価格",
+            "損切価格",
+        ]
+    )
 
-    active = (
-        active.sort_values(
+    watchlist = watchlist[
+        (
+            watchlist["基準価格"] > 0
+        )
+        & (
+            watchlist["押し目価格"] > 0
+        )
+        & (
+            watchlist["利確価格"] > 0
+        )
+        & (
+            watchlist["損切価格"] > 0
+        )
+    ].copy()
+
+    watchlist = watchlist[
+        (
+            watchlist["利確価格"]
+            > watchlist["押し目価格"]
+        )
+        & (
+            watchlist["損切価格"]
+            < watchlist["押し目価格"]
+        )
+    ].copy()
+
+    if watchlist.empty:
+        raise ValueError(
+            "有効な監視対象がありません。"
+        )
+
+    if "順位" not in watchlist.columns:
+        watchlist["順位"] = range(
+            1,
+            len(watchlist) + 1,
+        )
+
+    if "ランキング点" not in watchlist.columns:
+        watchlist["ランキング点"] = (
+            watchlist["AI判断点"]
+            .fillna(0)
+            * 0.60
+            + watchlist["PHOENIX_SCORE"]
+            .fillna(0)
+            * 0.40
+        )
+
+    watchlist["監視区分"] = (
+        watchlist["Trade判定"]
+        .map({
+            "BUY": "買い監視",
+            "WATCH": "押し目監視",
+        })
+        .fillna("継続観察")
+    )
+
+    if "RSI" not in watchlist.columns:
+        watchlist["RSI"] = 0.0
+
+    if "MACD判定" not in watchlist.columns:
+        watchlist["MACD判定"] = ""
+
+    if "期待勝率%" not in watchlist.columns:
+        watchlist["期待勝率%"] = 0.0
+
+    if "期待騰落率%" not in watchlist.columns:
+        watchlist["期待騰落率%"] = 0.0
+
+    if "リスク" not in watchlist.columns:
+        watchlist["リスク"] = ""
+
+    if "ランク" not in watchlist.columns:
+        watchlist["ランク"] = ""
+
+    if "評価" not in watchlist.columns:
+        watchlist["評価"] = ""
+
+    if "判定理由" not in watchlist.columns:
+        watchlist["判定理由"] = ""
+
+    if "生成日時" not in watchlist.columns:
+        watchlist["生成日時"] = ""
+
+    priority_map = {
+        "BUY": 0,
+        "WATCH": 1,
+    }
+
+    watchlist["監視優先順位"] = (
+        watchlist["Trade判定"]
+        .map(priority_map)
+        .fillna(9)
+    )
+
+    watchlist = (
+        watchlist.sort_values(
             by=[
-                "順位",
-                "ランキング点",
+                "監視優先順位",
                 "AI判断点",
+                "PHOENIX_SCORE",
+                "ランキング点",
             ],
             ascending=[
                 True,
                 False,
                 False,
+                False,
             ],
         )
-        .head(max_targets)
-        .reset_index(drop=True)
+        .head(
+            max(
+                max_targets,
+                1,
+            )
+        )
+        .reset_index(
+            drop=True,
+        )
     )
 
-    return active
+    watchlist["順位"] = range(
+        1,
+        len(watchlist) + 1,
+    )
+
+    watchlist = watchlist.drop(
+        columns=[
+            "監視優先順位",
+        ]
+    )
+
+    return watchlist
 
 
 # =========================================================
@@ -712,24 +736,6 @@ def create_watchlist(
     monitor_date = today_text()
 
     for _, row in targets.iterrows():
-        base_price = safe_float(
-            row["価格"]
-        )
-
-        entry_price = calculate_entry_price(
-            row
-        )
-
-        target_price = calculate_target_price(
-            row,
-            entry_price,
-        )
-
-        stop_price = calculate_stop_price(
-            row,
-            entry_price,
-        )
-
         rows.append({
             "監視日": monitor_date,
             "作成日時": created_at,
@@ -744,7 +750,10 @@ def create_watchlist(
             ).strip(),
             "ランキング点": round(
                 safe_float(
-                    row["ランキング点"]
+                    row.get(
+                        "ランキング点",
+                        0.0,
+                    )
                 ),
                 4,
             ),
@@ -798,38 +807,78 @@ def create_watchlist(
             ),
             "RSI": round(
                 safe_float(
-                    row["RSI"]
+                    row.get(
+                        "RSI",
+                        0.0,
+                    )
                 ),
                 2,
             ),
             "MACD判定": str(
-                row["MACD判定"]
+                row.get(
+                    "MACD判定",
+                    "",
+                )
             ),
             "基準価格": round(
-                base_price,
+                safe_float(
+                    row["基準価格"]
+                ),
                 2,
             ),
-            "押し目価格": entry_price,
-            "利確価格": target_price,
-            "損切価格": stop_price,
+            "押し目価格": round(
+                safe_float(
+                    row["押し目価格"]
+                ),
+                2,
+            ),
+            "利確価格": round(
+                safe_float(
+                    row["利確価格"]
+                ),
+                2,
+            ),
+            "損切価格": round(
+                safe_float(
+                    row["損切価格"]
+                ),
+                2,
+            ),
+            "Trade判定": str(
+                row["Trade判定"]
+            ),
+            "ロット比率": round(
+                safe_float(
+                    row["ロット比率"]
+                ),
+                2,
+            ),
+            "MarketRiskScore": round(
+                safe_float(
+                    row["MarketRiskScore"]
+                ),
+                2,
+            ),
+            "MarketRiskLevel": str(
+                row["MarketRiskLevel"]
+            ),
+            "判定理由": str(
+                row.get(
+                    "判定理由",
+                    "",
+                )
+            ),
+            "生成日時": str(
+                row.get(
+                    "生成日時",
+                    "",
+                )
+            ),
         })
 
-    watchlist = pd.DataFrame(
+    return pd.DataFrame(
         rows
     )
-
-    REPORT_DIR.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    watchlist.to_csv(
-        WATCHLIST_FILE,
-        index=False,
-        encoding="utf-8-sig",
-    )
-
-    return watchlist
 
 
 # =========================================================
@@ -1025,23 +1074,9 @@ def prepare_state(
     reset: bool,
     max_targets: int,
 ) -> pd.DataFrame:
-    ranking = load_ranking()
-    ai = load_ai_details()
-
-    merged = merge_ranking_and_ai(
-        ranking,
-        ai,
+    targets = load_trade_watchlist(
+        max_targets=max_targets,
     )
-
-    targets = select_targets(
-        merged,
-        max_targets,
-    )
-
-    if targets.empty:
-        raise ValueError(
-            "価格監視対象がありません。"
-        )
 
     watchlist = create_watchlist(
         targets
@@ -2301,7 +2336,7 @@ def monitor_loop(
     maximum_quote_age_minutes: int,
 ) -> None:
     write_log(
-        "PHOENIX RANKING PRICE MONITOR START"
+        "PHOENIX TRADE PRICE MONITOR START"
     )
 
     write_log(
@@ -2410,7 +2445,7 @@ def monitor_loop(
     )
 
     write_log(
-        "PHOENIX RANKING PRICE MONITOR END"
+        "PHOENIX TRADE PRICE MONITOR END"
     )
 
 
@@ -2421,7 +2456,7 @@ def monitor_loop(
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "PHOENIXランキング連動価格監視"
+            "PHOENIX Trade Engine連動価格監視"
         )
     )
 
@@ -2463,7 +2498,7 @@ def parse_arguments() -> argparse.Namespace:
         "--max-targets",
         type=int,
         default=DEFAULT_MAX_TARGETS,
-        help="ランキングから監視する最大銘柄数",
+        help="Trade Engine監視リストから使う最大銘柄数",
     )
 
     parser.add_argument(
@@ -2494,7 +2529,7 @@ def main() -> None:
     live = arguments.live
 
     print("=" * 115)
-    print("PHOENIX RANKING PRICE MONITOR")
+    print("PHOENIX TRADE ENGINE PRICE MONITOR")
     print("=" * 115)
 
     try:
@@ -2537,6 +2572,10 @@ def main() -> None:
                 if live
                 else "DRY RUN"
             )
+        )
+
+        print(
+            "監視元: Trade Engine"
         )
 
         print(
