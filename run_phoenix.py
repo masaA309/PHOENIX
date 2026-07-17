@@ -11,106 +11,56 @@ import time
 from typing import Any
 
 
-LOG_DIR = Path("logs")
+ROOT_DIR = Path(__file__).resolve().parent
+LOG_DIR = ROOT_DIR / "logs"
+REPORT_DIR = ROOT_DIR / "reports"
 
 LOG_FILE = LOG_DIR / (
     "phoenix_"
-    + datetime.now().strftime(
-        "%Y%m%d_%H%M%S"
-    )
+    + datetime.now().strftime("%Y%m%d")
     + ".log"
 )
 
+PROCESS_TIMEOUT_SECONDS = 1800
 
-TASKS: list[dict[str, Any]] = [
+
+TASKS = [
     {
         "name": "日経225構成銘柄更新",
-        "file": "get_nikkei225.py",
+        "script": "get_nikkei225.py",
         "required": True,
     },
     {
-        "name": "PHOENIX日次レポート",
-        "file": "daily_report.py",
+        "name": "日次スキャン・レポート",
+        "script": "daily_report.py",
         "required": True,
     },
     {
-        "name": "自己学習プロフィール更新",
-        "file": "learning_engine.py",
+        "name": "自己学習エンジン",
+        "script": "learning_engine.py",
         "required": False,
     },
     {
-        "name": "自己学習AI売買判断",
-        "file": "ai_judgement.py",
+        "name": "AI売買判断",
+        "script": "ai_judgement.py",
         "required": True,
     },
     {
-        "name": "チャート生成",
-        "file": "chart_generator.py",
+        "name": "監視優先ランキングAI",
+        "script": "ranking_ai.py",
+        "required": True,
+    },
+    {
+        "name": "チャート自動生成",
+        "script": "chart_generator.py",
         "required": True,
     },
     {
         "name": "LINE・Discord通知",
-        "file": "notify.py",
+        "script": "notify.py",
         "required": True,
     },
 ]
-
-
-def safe_text(
-    value: Any,
-) -> str:
-    return (
-        str(value)
-        .replace(
-            "\u2013",
-            "-",
-        )
-        .replace(
-            "\u2014",
-            "-",
-        )
-        .replace(
-            "\u2212",
-            "-",
-        )
-    )
-
-
-def write_log(
-    message: Any,
-) -> None:
-    text = safe_text(
-        message
-    )
-
-    print(
-        text,
-        flush=True,
-    )
-
-    with open(
-        LOG_FILE,
-        "a",
-        encoding="utf-8",
-        newline="\n",
-    ) as log_file:
-        log_file.write(
-            text + "\n"
-        )
-
-
-def build_environment() -> dict[str, str]:
-    environment = os.environ.copy()
-
-    environment[
-        "PYTHONIOENCODING"
-    ] = "utf-8"
-
-    environment[
-        "PYTHONUTF8"
-    ] = "1"
-
-    return environment
 
 
 def configure_console() -> None:
@@ -132,101 +82,163 @@ def configure_console() -> None:
         pass
 
 
+def now_text() -> str:
+    return datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+
+def write_log(
+    message: Any,
+) -> None:
+    LOG_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    text = (
+        f"[{now_text()}] "
+        f"{message}"
+    )
+
+    print(
+        text,
+        flush=True,
+    )
+
+    with open(
+        LOG_FILE,
+        "a",
+        encoding="utf-8",
+        newline="\n",
+    ) as file:
+        file.write(
+            text + "\n"
+        )
+
+
+def build_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+
+    environment["PYTHONIOENCODING"] = "utf-8"
+    environment["PYTHONUTF8"] = "1"
+
+    return environment
+
+
 def run_script(
-    task: dict[str, Any],
-) -> bool:
-    task_name = str(
-        task["name"]
-    )
+    task_name: str,
+    script_name: str,
+) -> tuple[
+    bool,
+    float,
+    int,
+]:
+    script_path = ROOT_DIR / script_name
 
-    script_file = Path(
-        str(
-            task["file"]
+    write_log("=" * 90)
+    write_log(f"START: {task_name}")
+    write_log(f"SCRIPT: {script_name}")
+
+    if not script_path.exists():
+        write_log(
+            f"FAILED: ファイルがありません: "
+            f"{script_path}"
         )
-    )
 
-    required = bool(
-        task.get(
-            "required",
+        return (
             False,
-        )
-    )
-
-    if not script_file.exists():
-        if required:
-            write_log(
-                f"FAILED: {task_name}"
-            )
-
-            write_log(
-                f"{script_file} がありません。"
-            )
-
-            return False
-
-        write_log(
-            f"SKIP: {task_name}"
+            0.0,
+            -1,
         )
 
-        write_log(
-            f"{script_file} がありません。"
-        )
-
-        return True
-
-    write_log("")
-    write_log("=" * 80)
-
-    write_log(
-        f"START: {task_name}"
-    )
-
-    write_log(
-        f"FILE : {script_file}"
-    )
-
-    write_log("=" * 80)
+    command = [
+        sys.executable,
+        "-X",
+        "utf8",
+        str(script_path),
+    ]
 
     started_at = time.time()
 
     try:
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-X",
-                "utf8",
-                str(script_file),
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+        process = subprocess.run(
+            command,
+            cwd=ROOT_DIR,
+            capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
-            bufsize=1,
+            timeout=PROCESS_TIMEOUT_SECONDS,
             env=build_environment(),
+            check=False,
+        )
+
+    except subprocess.TimeoutExpired:
+        elapsed = (
+            time.time()
+            - started_at
+        )
+
+        write_log(
+            f"FAILED: {task_name}"
+        )
+
+        write_log(
+            f"タイムアウト: "
+            f"{PROCESS_TIMEOUT_SECONDS}秒"
+        )
+
+        return (
+            False,
+            elapsed,
+            -2,
         )
 
     except Exception as error:
+        elapsed = (
+            time.time()
+            - started_at
+        )
+
+        write_log(
+            f"FAILED: {task_name}"
+        )
+
         write_log(
             f"起動エラー: {error}"
         )
 
-        return False
-
-    if process.stdout is not None:
-        for line in process.stdout:
-            write_log(
-                line.rstrip()
-            )
-
-    return_code = process.wait()
+        return (
+            False,
+            elapsed,
+            -3,
+        )
 
     elapsed = (
         time.time()
         - started_at
     )
 
-    if return_code == 0:
+    if process.stdout:
+        for line in (
+            process.stdout
+            .rstrip()
+            .splitlines()
+        ):
+            write_log(line)
+
+    if process.stderr:
+        for line in (
+            process.stderr
+            .rstrip()
+            .splitlines()
+        ):
+            write_log(
+                f"STDERR: {line}"
+            )
+
+    if process.returncode == 0:
         write_log(
             f"SUCCESS: {task_name}"
         )
@@ -235,21 +247,192 @@ def run_script(
             f"処理時間: {elapsed:.1f}秒"
         )
 
-        return True
+        return (
+            True,
+            elapsed,
+            process.returncode,
+        )
 
     write_log(
         f"FAILED: {task_name}"
     )
 
     write_log(
-        f"終了コード: {return_code}"
+        f"終了コード: "
+        f"{process.returncode}"
     )
 
     write_log(
         f"処理時間: {elapsed:.1f}秒"
     )
 
-    return False
+    return (
+        False,
+        elapsed,
+        process.returncode,
+    )
+
+
+def verify_output_files() -> dict[str, bool]:
+    today = datetime.now().strftime(
+        "%Y%m%d"
+    )
+
+    expected_files = {
+        "日次CSV": (
+            REPORT_DIR
+            / f"report_{today}.csv"
+        ),
+        "AI判断CSV": (
+            REPORT_DIR
+            / "ai_judgement.csv"
+        ),
+        "ランキングCSV": (
+            REPORT_DIR
+            / "ranking_ai.csv"
+        ),
+        "ランキングTXT": (
+            REPORT_DIR
+            / "ranking_ai.txt"
+        ),
+    }
+
+    results: dict[str, bool] = {}
+
+    write_log("=" * 90)
+    write_log("出力ファイル確認")
+
+    for name, file_path in expected_files.items():
+        exists = file_path.exists()
+
+        results[name] = exists
+
+        status = (
+            "OK"
+            if exists
+            else "MISSING"
+        )
+
+        write_log(
+            f"{status}: "
+            f"{name} "
+            f"{file_path}"
+        )
+
+    return results
+
+
+def print_final_summary(
+    task_results: list[
+        dict[str, Any]
+    ],
+    output_results: dict[
+        str,
+        bool
+    ],
+    started_at: float,
+) -> None:
+    elapsed_total = (
+        time.time()
+        - started_at
+    )
+
+    success_count = sum(
+        1
+        for result in task_results
+        if result["success"]
+    )
+
+    failure_count = (
+        len(task_results)
+        - success_count
+    )
+
+    required_failures = [
+        result
+        for result in task_results
+        if (
+            result["required"]
+            and not result["success"]
+        )
+    ]
+
+    missing_outputs = [
+        name
+        for name, exists
+        in output_results.items()
+        if not exists
+    ]
+
+    write_log("=" * 90)
+    write_log("PHOENIX DAILY RESULT")
+    write_log("=" * 90)
+
+    for result in task_results:
+        status = (
+            "SUCCESS"
+            if result["success"]
+            else "FAILED"
+        )
+
+        required_text = (
+            "必須"
+            if result["required"]
+            else "任意"
+        )
+
+        write_log(
+            f"{status:<7} "
+            f"{result['name']} "
+            f"({required_text}) "
+            f"{result['elapsed']:.1f}秒"
+        )
+
+    write_log("-" * 90)
+
+    write_log(
+        f"成功: {success_count}件"
+    )
+
+    write_log(
+        f"失敗: {failure_count}件"
+    )
+
+    write_log(
+        f"総処理時間: "
+        f"{elapsed_total:.1f}秒"
+    )
+
+    if required_failures:
+        write_log(
+            "必須処理失敗: "
+            + ", ".join(
+                result["name"]
+                for result
+                in required_failures
+            )
+        )
+
+    if missing_outputs:
+        write_log(
+            "未生成ファイル: "
+            + ", ".join(
+                missing_outputs
+            )
+        )
+
+    if (
+        not required_failures
+        and not missing_outputs
+    ):
+        write_log(
+            "PHOENIX DAILY RUN SUCCESS"
+        )
+
+    else:
+        write_log(
+            "PHOENIX DAILY RUN FAILED"
+        )
 
 
 def main() -> None:
@@ -260,82 +443,108 @@ def main() -> None:
         exist_ok=True,
     )
 
-    write_log("=" * 80)
-    write_log("PHOENIX MASTER RUN")
-
-    write_log(
-        datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+    REPORT_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
     )
 
-    write_log("=" * 80)
+    started_at = time.time()
 
-    success_count = 0
-    failed_tasks: list[str] = []
+    write_log("=" * 90)
+    write_log("PHOENIX DAILY AUTOMATION START")
+    write_log("=" * 90)
+
+    write_log(
+        f"Python: {sys.executable}"
+    )
+
+    write_log(
+        f"作業フォルダ: {ROOT_DIR}"
+    )
+
+    task_results: list[
+        dict[str, Any]
+    ] = []
+
+    required_task_failed = False
 
     for task in TASKS:
-        success = run_script(
-            task
-        )
+        if required_task_failed:
+            write_log("=" * 90)
+            write_log(
+                f"SKIPPED: {task['name']}"
+            )
 
-        if success:
-            success_count += 1
+            write_log(
+                "前の必須処理が失敗したため、"
+                "後続処理を停止しました。"
+            )
+
+            task_results.append({
+                "name": task["name"],
+                "script": task["script"],
+                "required": task["required"],
+                "success": False,
+                "elapsed": 0.0,
+                "returncode": -10,
+                "skipped": True,
+            })
+
             continue
 
-        task_name = str(
-            task["name"]
-        )
-
-        failed_tasks.append(
-            task_name
-        )
-
-        if bool(
-            task.get(
-                "required",
-                False,
+        success, elapsed, returncode = (
+            run_script(
+                task_name=task["name"],
+                script_name=task["script"],
             )
+        )
+
+        task_results.append({
+            "name": task["name"],
+            "script": task["script"],
+            "required": task["required"],
+            "success": success,
+            "elapsed": elapsed,
+            "returncode": returncode,
+            "skipped": False,
+        })
+
+        if (
+            task["required"]
+            and not success
         ):
-            write_log("")
-            write_log(
-                "必須処理が失敗したため、"
-                "後続処理を中止します。"
-            )
+            required_task_failed = True
 
-            break
-
-    write_log("")
-    write_log("=" * 80)
-    write_log("PHOENIX MASTER RESULT")
-    write_log("=" * 80)
-
-    write_log(
-        f"成功: {success_count}"
+    output_results = (
+        verify_output_files()
     )
 
-    write_log(
-        f"失敗: {len(failed_tasks)}"
+    print_final_summary(
+        task_results=task_results,
+        output_results=output_results,
+        started_at=started_at,
     )
 
-    if failed_tasks:
-        for task_name in failed_tasks:
-            write_log(
-                f"- {task_name}"
-            )
-
-    else:
-        write_log(
-            "すべての処理が完了しました。"
+    required_failures = [
+        result
+        for result in task_results
+        if (
+            result["required"]
+            and not result["success"]
         )
+    ]
 
-    write_log(
-        f"ログ保存先: {LOG_FILE}"
-    )
+    missing_outputs = [
+        name
+        for name, exists
+        in output_results.items()
+        if not exists
+    ]
 
-    write_log("=" * 80)
-
-    if failed_tasks:
+    if (
+        required_failures
+        or missing_outputs
+    ):
         raise SystemExit(1)
 
 
