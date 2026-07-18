@@ -25,6 +25,7 @@ PAPER_TRADES_FILE = REPORT_DIR / "paper_trades.csv"
 LEARNING_REPORT_FILE = REPORT_DIR / "learning_report.csv"
 AI_PARAMETER_FILE = REPORT_DIR / "ai_parameter.json"
 BACKTEST_SUMMARY_FILE = REPORT_DIR / "backtest_summary.json"
+OPTIMIZATION_BEST_FILE = REPORT_DIR / "optimization_best.json"
 
 MARKET_RISK_FILES = (
     DATA_DIR / "market_risk_latest.json",
@@ -385,6 +386,67 @@ def load_backtest() -> dict[str, Any]:
     }
 
 
+
+def load_optimization() -> dict[str, Any]:
+    data = load_json(OPTIMIZATION_BEST_FILE)
+    parameters = data.get("parameters", {})
+    performance = data.get("performance", {})
+
+    if not isinstance(parameters, dict):
+        parameters = {}
+
+    if not isinstance(performance, dict):
+        performance = {}
+
+    return {
+        "available": bool(data),
+        "generated_at": str(data.get("generated_at", "")),
+        "period": str(data.get("period", "")),
+        "tested_combinations": safe_int(
+            data.get("tested_combinations", 0)
+        ),
+        "rsi_min": safe_float(parameters.get("rsi_min", 0)),
+        "rsi_max": safe_float(parameters.get("rsi_max", 0)),
+        "stop_atr_multiplier": safe_float(
+            parameters.get("stop_atr_multiplier", 0)
+        ),
+        "target_r_multiplier": safe_float(
+            parameters.get("target_r_multiplier", 0)
+        ),
+        "ma_short": safe_int(parameters.get("ma_short", 0)),
+        "ma_mid": safe_int(parameters.get("ma_mid", 0)),
+        "ma_long": safe_int(parameters.get("ma_long", 0)),
+        "signal_score_threshold": safe_float(
+            parameters.get("signal_score_threshold", 0)
+        ),
+        "max_hold_days": safe_int(
+            parameters.get("max_hold_days", 0)
+        ),
+        "optimization_score": safe_float(
+            performance.get("optimization_score", 0)
+        ),
+        "status": str(performance.get("status", "")),
+        "trade_count": safe_int(
+            performance.get("trade_count", 0)
+        ),
+        "win_rate_pct": safe_float(
+            performance.get("win_rate_pct", 0)
+        ),
+        "profit_factor": safe_float(
+            performance.get("profit_factor", 0)
+        ),
+        "annual_return_pct": safe_float(
+            performance.get("annual_return_pct", 0)
+        ),
+        "max_drawdown_pct": safe_float(
+            performance.get("max_drawdown_pct", 0)
+        ),
+        "sharpe_ratio": safe_float(
+            performance.get("sharpe_ratio", 0)
+        ),
+    }
+
+
 def build_dashboard() -> dict[str, Any]:
     market = load_market_risk()
     portfolio = load_portfolio()
@@ -392,6 +454,7 @@ def build_dashboard() -> dict[str, Any]:
     paper = load_paper_trader()
     learning = load_learning()
     backtest = load_backtest()
+    optimization = load_optimization()
     system = load_system()
 
     if system["failed_count"] > 0:
@@ -404,7 +467,7 @@ def build_dashboard() -> dict[str, Any]:
         overall = "READY"
 
     return {
-        "version": "PHOENIX v5.1.1",
+        "version": "PHOENIX v6.0",
         "generated_at": now_text(),
         "overall_status": overall,
         "market_risk": market,
@@ -413,6 +476,7 @@ def build_dashboard() -> dict[str, Any]:
         "paper_trader": paper,
         "learning": learning,
         "backtest": backtest,
+        "optimization": optimization,
         "system": system,
     }
 
@@ -424,10 +488,11 @@ def print_dashboard(data: dict[str, Any]) -> None:
     paper = data["paper_trader"]
     learning = data["learning"]
     backtest = data["backtest"]
+    optimization = data["optimization"]
     system = data["system"]
 
     print("=" * 120)
-    print("PHOENIX v5.1.1 DASHBOARD")
+    print("PHOENIX v6.0 DASHBOARD")
     print("=" * 120)
     print(f"生成時刻       : {data['generated_at']}")
     print(f"システム状態   : {data['overall_status']}")
@@ -498,6 +563,43 @@ def print_dashboard(data: dict[str, Any]) -> None:
     else:
         print("バックテスト結果はまだありません。")
 
+    print()
+    print("=" * 120)
+    print("Optimization")
+    print("=" * 120)
+
+    if optimization["available"]:
+        print(
+            f"RSI            : "
+            f"{optimization['rsi_min']:.1f} ～ "
+            f"{optimization['rsi_max']:.1f}"
+        )
+        print(
+            f"ATR / Target R : "
+            f"{optimization['stop_atr_multiplier']:.2f} / "
+            f"{optimization['target_r_multiplier']:.2f}"
+        )
+        print(
+            f"MA             : "
+            f"{optimization['ma_short']} / "
+            f"{optimization['ma_mid']} / "
+            f"{optimization['ma_long']}"
+        )
+        print(
+            f"Signal         : "
+            f"{optimization['signal_score_threshold']:.1f}"
+        )
+        print(
+            f"Expected PF    : "
+            f"{optimization['profit_factor']:.3f}"
+        )
+        print(
+            f"Expected Sharpe: "
+            f"{optimization['sharpe_ratio']:.3f}"
+        )
+    else:
+        print("最適化結果はまだありません。")
+
     print("\n" + "=" * 120)
     print("ステージ実行時間")
     print("=" * 120)
@@ -520,10 +622,11 @@ def save_text(data: dict[str, Any]) -> None:
     paper = data["paper_trader"]
     learning = data["learning"]
     backtest = data["backtest"]
+    optimization = data["optimization"]
     system = data["system"]
 
     lines = [
-        "PHOENIX v5.1.1 DASHBOARD",
+        "PHOENIX v6.0 DASHBOARD",
         "=" * 120,
         f"生成時刻       : {data['generated_at']}",
         f"システム状態   : {data['overall_status']}",
@@ -581,6 +684,28 @@ def save_text(data: dict[str, Any]) -> None:
         f"最大DD         : {backtest['max_drawdown_pct']:.2f}%",
         f"シャープレシオ : {backtest['sharpe_ratio']:.3f}",
         "",
+        "Optimization",
+        "=" * 120,
+        (
+            f"RSI            : "
+            f"{optimization['rsi_min']:.1f} ～ "
+            f"{optimization['rsi_max']:.1f}"
+        ),
+        (
+            f"ATR / Target R : "
+            f"{optimization['stop_atr_multiplier']:.2f} / "
+            f"{optimization['target_r_multiplier']:.2f}"
+        ),
+        (
+            f"MA             : "
+            f"{optimization['ma_short']} / "
+            f"{optimization['ma_mid']} / "
+            f"{optimization['ma_long']}"
+        ),
+        f"Signal         : {optimization['signal_score_threshold']:.1f}",
+        f"Expected PF    : {optimization['profit_factor']:.3f}",
+        f"Expected Sharpe: {optimization['sharpe_ratio']:.3f}",
+        "",
         "ステージ実行時間",
         "=" * 120,
     ])
@@ -607,6 +732,7 @@ def save_html(data: dict[str, Any]) -> None:
     paper = data["paper_trader"]
     learning = data["learning"]
     backtest = data["backtest"]
+    optimization = data["optimization"]
     system = data["system"]
 
     portfolio_rows = "".join(
@@ -641,7 +767,7 @@ section{{margin-top:20px}}h2{{font-size:18px}}.table{{overflow-x:auto;background
 .mini-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}}.mini{{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:14px;display:flex;justify-content:space-between}}.mini span{{color:var(--muted)}}.mini strong{{font-size:22px}}
 footer{{text-align:right;color:var(--muted);font-size:12px;margin-top:22px}}@media(max-width:1000px){{.grid{{grid-template-columns:repeat(2,1fr)}}}}@media(max-width:640px){{.grid{{grid-template-columns:1fr}}header{{flex-direction:column;align-items:start}}.wrap{{padding:16px}}}}
 </style></head><body><div class="wrap">
-<header><div><h1>PHOENIX v5.1.1</h1><div class="muted">AI Trading Operations Dashboard</div></div><div><span class="badge {status_class(data['overall_status'])}">{escape(data['overall_status'])}</span><div class="muted">{escape(data['generated_at'])}</div></div></header>
+<header><div><h1>PHOENIX v6.0</h1><div class="muted">AI Trading Operations Dashboard</div></div><div><span class="badge {status_class(data['overall_status'])}">{escape(data['overall_status'])}</span><div class="muted">{escape(data['generated_at'])}</div></div></header>
 <div class="grid">
 <div class="card"><div class="title">MARKET RISK</div><div class="value">{escape(risk['level'])}</div><div class="note">Risk Score {risk['score']:.0f}</div></div>
 <div class="card"><div class="title">口座資金</div><div class="value">{positions['account_capital_yen']:,.0f}円</div><div class="note">投資予定 {positions['invested_yen']:,.0f}円</div></div>
@@ -652,6 +778,8 @@ footer{{text-align:right;color:var(--muted);font-size:12px;margin-top:22px}}@med
 <div class="card"><div class="title">LEARNING</div><div class="value">{learning['closed_trades']}件</div><div class="note">勝率 {learning['win_rate']:.2f}% / PF {learning['profit_factor']:.3f}</div></div>
 <div class="card"><div class="title">BACKTEST RETURN</div><div class="value">{backtest['total_return_pct']:+.2f}%</div><div class="note">年率 {backtest['annual_return_pct']:+.2f}% / DD {backtest['max_drawdown_pct']:.2f}%</div></div>
 <div class="card"><div class="title">BACKTEST QUALITY</div><div class="value">{backtest['win_rate_pct']:.2f}%</div><div class="note">PF {backtest['profit_factor']:.3f} / Sharpe {backtest['sharpe_ratio']:.3f}</div></div>
+<div class="card"><div class="title">BEST PARAMETER</div><div class="value">{optimization['optimization_score']:.2f}</div><div class="note">RSI {optimization['rsi_min']:.0f}-{optimization['rsi_max']:.0f} / MA {optimization['ma_short']}-{optimization['ma_mid']}-{optimization['ma_long']}</div></div>
+<div class="card"><div class="title">EXPECTED QUALITY</div><div class="value">{optimization['profit_factor']:.3f}</div><div class="note">Sharpe {optimization['sharpe_ratio']:.3f} / DD {optimization['max_drawdown_pct']:.2f}%</div></div>
 <div class="card"><div class="title">SYSTEM</div><div class="value">{escape(system['status'])}</div><div class="note">成功 {system['success_count']} / 失敗 {system['failed_count']} / {system['total_seconds']:.2f} sec</div></div>
 </div>
 <section><h2>今日の採用銘柄</h2><div class="table"><table><thead><tr><th>順位</th><th>銘柄</th><th>Ticker</th><th>セクター</th><th>判定</th><th>AI</th><th>PHOENIX</th><th>Portfolio</th><th>配分額</th></tr></thead><tbody>{portfolio_rows}</tbody></table></div></section>
@@ -665,6 +793,16 @@ footer{{text-align:right;color:var(--muted);font-size:12px;margin-top:22px}}@med
 <div class="mini"><span>最大DD</span><strong>{backtest['max_drawdown_pct']:.2f}%</strong></div>
 <div class="mini"><span>Sharpe</span><strong>{backtest['sharpe_ratio']:.3f}</strong></div>
 <div class="mini"><span>平均保有</span><strong>{backtest['average_holding_days']:.1f}日</strong></div>
+</div></section>
+<section><h2>Optimization</h2><div class="mini-grid">
+<div class="mini"><span>RSI</span><strong>{optimization['rsi_min']:.0f} - {optimization['rsi_max']:.0f}</strong></div>
+<div class="mini"><span>ATR損切</span><strong>{optimization['stop_atr_multiplier']:.2f}</strong></div>
+<div class="mini"><span>利確R</span><strong>{optimization['target_r_multiplier']:.2f}</strong></div>
+<div class="mini"><span>MA</span><strong>{optimization['ma_short']}/{optimization['ma_mid']}/{optimization['ma_long']}</strong></div>
+<div class="mini"><span>Signal</span><strong>{optimization['signal_score_threshold']:.0f}</strong></div>
+<div class="mini"><span>Expected PF</span><strong>{optimization['profit_factor']:.3f}</strong></div>
+<div class="mini"><span>Expected Sharpe</span><strong>{optimization['sharpe_ratio']:.3f}</strong></div>
+<div class="mini"><span>探索数</span><strong>{optimization['tested_combinations']}</strong></div>
 </div></section>
 <section><h2>ステージ実行結果</h2><div class="table"><table><thead><tr><th>ステージ</th><th>状態</th><th>実行時間</th><th>メッセージ</th></tr></thead><tbody>{stage_rows}</tbody></table></div></section>
 <footer>Generated at {escape(data['generated_at'])}</footer></div></body></html>'''

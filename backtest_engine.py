@@ -45,6 +45,33 @@ SLIPPAGE_RATE = 0.0005
 MIN_HISTORY = 100
 
 
+@dataclass(frozen=True)
+class StrategyParameters:
+    rsi_min: float = 40.0
+    rsi_max: float = 72.0
+    stop_atr_multiplier: float = 1.5
+    target_r_multiplier: float = 2.0
+    ma_short: int = 5
+    ma_mid: int = 25
+    ma_long: int = 75
+    signal_score_threshold: float = 70.0
+    max_hold_days: int = 20
+
+    def validate(self) -> None:
+        if self.rsi_min >= self.rsi_max:
+            raise ValueError("RSI最小値は最大値より小さくしてください。")
+        if self.stop_atr_multiplier <= 0:
+            raise ValueError("ATR損切倍率は0より大きくしてください。")
+        if self.target_r_multiplier <= 0:
+            raise ValueError("利確R倍率は0より大きくしてください。")
+        if not (1 <= self.ma_short < self.ma_mid < self.ma_long):
+            raise ValueError("MA期間は 短期 < 中期 < 長期 にしてください。")
+        if self.signal_score_threshold < 0:
+            raise ValueError("シグナル点数は0以上にしてください。")
+        if self.max_hold_days <= 0:
+            raise ValueError("最大保有日数は1日以上にしてください。")
+
+
 @dataclass
 class Position:
     ticker: str
@@ -290,19 +317,38 @@ def download_history(ticker: str, period: str) -> pd.DataFrame:
     return data
 
 
-def add_indicators(data: pd.DataFrame) -> pd.DataFrame:
+def add_indicators(
+    data: pd.DataFrame,
+    parameters: StrategyParameters | None = None,
+) -> pd.DataFrame:
+    params = parameters or StrategyParameters()
+    params.validate()
+
     result = data.copy()
 
-    result["MA5"] = result["Close"].rolling(5).mean()
-    result["MA25"] = result["Close"].rolling(25).mean()
-    result["MA75"] = result["Close"].rolling(75).mean()
+    result["MA_SHORT"] = result["Close"].rolling(params.ma_short).mean()
+    result["MA_MID"] = result["Close"].rolling(params.ma_mid).mean()
+    result["MA_LONG"] = result["Close"].rolling(params.ma_long).mean()
+
+    # 互換用
+    result["MA5"] = result["MA_SHORT"]
+    result["MA25"] = result["MA_MID"]
+    result["MA75"] = result["MA_LONG"]
 
     delta = result["Close"].diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
 
-    average_gain = gain.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
-    average_loss = loss.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+    average_gain = gain.ewm(
+        alpha=1 / 14,
+        adjust=False,
+        min_periods=14,
+    ).mean()
+    average_loss = loss.ewm(
+        alpha=1 / 14,
+        adjust=False,
+        min_periods=14,
+    ).mean()
 
     rs = average_gain / average_loss.replace(0, np.nan)
     result["RSI"] = 100 - (100 / (1 + rs))
@@ -311,7 +357,10 @@ def add_indicators(data: pd.DataFrame) -> pd.DataFrame:
     ema12 = result["Close"].ewm(span=12, adjust=False).mean()
     ema26 = result["Close"].ewm(span=26, adjust=False).mean()
     result["MACD"] = ema12 - ema26
-    result["MACD_SIGNAL"] = result["MACD"].ewm(span=9, adjust=False).mean()
+    result["MACD_SIGNAL"] = result["MACD"].ewm(
+        span=9,
+        adjust=False,
+    ).mean()
 
     previous_close = result["Close"].shift(1)
     true_range = pd.concat(
@@ -326,7 +375,8 @@ def add_indicators(data: pd.DataFrame) -> pd.DataFrame:
     result["ATR"] = true_range.rolling(14).mean()
     result["VOLUME_MA20"] = result["Volume"].rolling(20).mean()
     result["VOLUME_RATIO"] = (
-        result["Volume"] / result["VOLUME_MA20"].replace(0, np.nan)
+        result["Volume"]
+        / result["VOLUME_MA20"].replace(0, np.nan)
     ).fillna(0)
 
     result["RETURN_5D"] = result["Close"].pct_change(5) * 100
@@ -335,35 +385,44 @@ def add_indicators(data: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def signal_score(row: pd.Series) -> float:
+def signal_score(
+    row: pd.Series,
+    parameters: StrategyParameters | None = None,
+) -> float:
+    params = parameters or StrategyParameters()
+
     score = 0.0
 
     close = safe_float(row.get("Close"))
-    ma5 = safe_float(row.get("MA5"))
-    ma25 = safe_float(row.get("MA25"))
-    ma75 = safe_float(row.get("MA75"))
+    ma_short = safe_float(row.get("MA_SHORT", row.get("MA5")))
+    ma_mid = safe_float(row.get("MA_MID", row.get("MA25")))
+    ma_long = safe_float(row.get("MA_LONG", row.get("MA75")))
     rsi = safe_float(row.get("RSI"), 50)
     macd = safe_float(row.get("MACD"))
     macd_signal = safe_float(row.get("MACD_SIGNAL"))
     volume_ratio = safe_float(row.get("VOLUME_RATIO"))
     return_20d = safe_float(row.get("RETURN_20D"))
 
-    if close > ma25 > 0:
+    if close > ma_mid > 0:
         score += 20
 
-    if ma5 > ma25 > 0:
+    if ma_short > ma_mid > 0:
         score += 20
 
-    if ma25 > ma75 > 0:
+    if ma_mid > ma_long > 0:
         score += 20
 
     if macd > macd_signal:
         score += 15
 
-    if 45 <= rsi <= 68:
-        score += 15
-    elif 40 <= rsi < 45:
-        score += 8
+    rsi_center = (params.rsi_min + params.rsi_max) / 2
+    rsi_half_range = max((params.rsi_max - params.rsi_min) / 2, 1)
+
+    if params.rsi_min <= rsi <= params.rsi_max:
+        distance_ratio = abs(rsi - rsi_center) / rsi_half_range
+        score += max(5.0, 15.0 * (1.0 - 0.35 * distance_ratio))
+    elif params.rsi_min - 5 <= rsi < params.rsi_min:
+        score += 6
 
     if volume_ratio >= 1.2:
         score += 5
@@ -374,14 +433,18 @@ def signal_score(row: pd.Series) -> float:
     return round(score, 2)
 
 
-def is_entry_signal(row: pd.Series) -> bool:
-    score = signal_score(row)
+def is_entry_signal(
+    row: pd.Series,
+    parameters: StrategyParameters | None = None,
+) -> bool:
+    params = parameters or StrategyParameters()
+    score = signal_score(row, params)
     rsi = safe_float(row.get("RSI"), 50)
     atr = safe_float(row.get("ATR"))
 
     return (
-        score >= 70
-        and 40 <= rsi <= 72
+        score >= params.signal_score_threshold
+        and params.rsi_min <= rsi <= params.rsi_max
         and atr > 0
     )
 
@@ -415,13 +478,22 @@ def calculate_shares(
 def prepare_histories(
     universe: pd.DataFrame,
     period: str,
+    parameters: StrategyParameters | None = None,
 ) -> tuple[dict[str, pd.DataFrame], dict[str, str]]:
+    params = parameters or StrategyParameters()
+    params.validate()
+
     histories: dict[str, pd.DataFrame] = {}
     names: dict[str, str] = {}
 
     print("=" * 100)
     print("PHOENIX BACKTEST DATA DOWNLOAD")
     print("=" * 100)
+
+    minimum_history = max(
+        MIN_HISTORY,
+        params.ma_long + 25,
+    )
 
     for _, item in universe.iterrows():
         ticker = str(item["ticker"])
@@ -435,11 +507,11 @@ def prepare_histories(
             print(f"  SKIP: {error}")
             continue
 
-        if len(history) < MIN_HISTORY:
+        if len(history) < minimum_history:
             print(f"  SKIP: データ不足 {len(history)}日")
             continue
 
-        histories[ticker] = add_indicators(history)
+        histories[ticker] = add_indicators(history, params)
         names[ticker] = name
         print(f"  OK: {len(history)}日")
 
@@ -452,7 +524,10 @@ def prepare_histories(
 def run_backtest(
     histories: dict[str, pd.DataFrame],
     names: dict[str, str],
+    parameters: StrategyParameters | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    params = parameters or StrategyParameters()
+    params.validate()
     all_dates = sorted(
         set().union(*(set(data.index) for data in histories.values()))
     )
@@ -494,7 +569,7 @@ def run_backtest(
             elif high_price >= position.target_price:
                 exit_price = position.target_price
                 exit_reason = "TARGET"
-            elif position.holding_days >= MAX_HOLD_DAYS:
+            elif position.holding_days >= params.max_hold_days:
                 exit_price = close_price
                 exit_reason = "TIME_EXIT"
 
@@ -552,10 +627,10 @@ def run_backtest(
 
             row = data.iloc[location]
 
-            if is_entry_signal(row):
+            if is_entry_signal(row, params):
                 candidates.append(
                     (
-                        signal_score(row),
+                        signal_score(row, params),
                         ticker,
                         data.index[location + 1],
                     )
@@ -585,10 +660,10 @@ def run_backtest(
                 continue
 
             entry_price = raw_entry_price * (1 + SLIPPAGE_RATE)
-            stop_price = entry_price - atr * STOP_ATR_MULTIPLIER
+            stop_price = entry_price - atr * params.stop_atr_multiplier
             target_price = entry_price + (
                 entry_price - stop_price
-            ) * TARGET_R_MULTIPLIER
+            ) * params.target_r_multiplier
 
             exposure = sum(
                 position.entry_cost for position in positions.values()
@@ -709,6 +784,7 @@ def run_backtest(
     trades_df = pd.DataFrame([asdict(trade) for trade in trades])
     equity_df = pd.DataFrame(equity_rows)
     summary = calculate_summary(trades_df, equity_df)
+    summary['strategy_parameters'] = asdict(params)
 
     return trades_df, equity_df, summary
 
@@ -801,7 +877,7 @@ def calculate_summary(
         average_holding = 0.0
 
     return {
-        "version": "PHOENIX v5.1.1",
+        "version": "PHOENIX v6.0",
         "generated_at": now_text(),
         "strategy": {
             "entry": "MA5>MA25、MA25>MA75、MACD、RSI、出来高を合成した70点以上",
@@ -865,7 +941,7 @@ def save_outputs(
     period = summary["period"]
 
     lines = [
-        "PHOENIX v5.1.1 BACKTEST REPORT",
+        "PHOENIX v6.0 BACKTEST REPORT",
         "=" * 100,
         f"生成時刻       : {summary['generated_at']}",
         f"検証期間       : {period['start_date']} ～ {period['end_date']}",
@@ -901,7 +977,7 @@ def print_summary(summary: dict[str, Any]) -> None:
 
     print()
     print("=" * 100)
-    print("PHOENIX v5.1.1 BACKTEST RESULT")
+    print("PHOENIX v6.0 BACKTEST RESULT")
     print("=" * 100)
     print(f"検証期間       : {period['start_date']} ～ {period['end_date']}")
     print(f"取引日数       : {period['trading_days']}日")
@@ -940,6 +1016,15 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_MAX_TICKERS,
         help="最大検証銘柄数。既定値は20。",
     )
+    parser.add_argument("--rsi-min", type=float, default=40.0)
+    parser.add_argument("--rsi-max", type=float, default=72.0)
+    parser.add_argument("--stop-atr", type=float, default=1.5)
+    parser.add_argument("--target-r", type=float, default=2.0)
+    parser.add_argument("--ma-short", type=int, default=5)
+    parser.add_argument("--ma-mid", type=int, default=25)
+    parser.add_argument("--ma-long", type=int, default=75)
+    parser.add_argument("--signal-threshold", type=float, default=70.0)
+    parser.add_argument("--max-hold-days", type=int, default=20)
     return parser.parse_args()
 
 
@@ -948,9 +1033,30 @@ def main() -> None:
     args = parse_args()
 
     try:
+        parameters = StrategyParameters(
+            rsi_min=args.rsi_min,
+            rsi_max=args.rsi_max,
+            stop_atr_multiplier=args.stop_atr,
+            target_r_multiplier=args.target_r,
+            ma_short=args.ma_short,
+            ma_mid=args.ma_mid,
+            ma_long=args.ma_long,
+            signal_score_threshold=args.signal_threshold,
+            max_hold_days=args.max_hold_days,
+        )
+        parameters.validate()
+
         universe = load_universe(max(args.max_tickers, 1))
-        histories, names = prepare_histories(universe, args.period)
-        trades, equity, summary = run_backtest(histories, names)
+        histories, names = prepare_histories(
+            universe,
+            args.period,
+            parameters,
+        )
+        trades, equity, summary = run_backtest(
+            histories,
+            names,
+            parameters,
+        )
         summary["request"] = {
             "period": args.period,
             "maximum_tickers": max(args.max_tickers, 1),
