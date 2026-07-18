@@ -61,7 +61,6 @@ STAGES = (
     Stage("learning_engine", "Learning Engine", "learning_engine.py"),
     Stage("backtest", "Backtest Engine", "backtest_engine.py"),
     Stage("optimization", "Optimization Engine", "optimization_engine.py"),
-    Stage("walk_forward", "Walk Forward Engine", "walk_forward_engine.py"),
     Stage("dashboard", "Dashboard", "dashboard.py"),
     Stage("notify", "Notify", "notify.py", (), False),
 )
@@ -117,7 +116,7 @@ def append_log(path: Path, text: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="PHOENIX v6.1 統合オートパイロット"
+        description="PHOENIX v6.0.1 安定版 統合オートパイロット"
     )
     parser.add_argument("--from", dest="from_stage")
     parser.add_argument("--only", dest="only_stage")
@@ -154,11 +153,14 @@ def diagnostics() -> dict[str, Any]:
         packages.append({"name": package, "ok": ok})
 
     files = []
-    for stage in STAGES:
-        if not stage.required:
-            continue
-        exists = (ROOT_DIR / stage.script).exists()
-        files.append({"name": stage.script, "ok": exists})
+    required_files = ["market_data_manager.py"]
+    required_files.extend(
+        stage.script for stage in STAGES if stage.required
+    )
+
+    for file_name in dict.fromkeys(required_files):
+        exists = (ROOT_DIR / file_name).exists()
+        files.append({"name": file_name, "ok": exists})
 
     ready = (
         python_ok
@@ -230,7 +232,6 @@ def create_backup(run_id: str) -> Path:
 
     source_dir = target / "source"
     for file_name in [
-        "market_data_manager.py",
         "market_risk_ai.py",
         "daily_report.py",
         "ai_judgement.py",
@@ -240,9 +241,9 @@ def create_backup(run_id: str) -> Path:
         "price_monitor.py",
         "paper_trader.py",
         "learning_engine.py",
+        "market_data_manager.py",
         "backtest_engine.py",
         "optimization_engine.py",
-        "walk_forward_engine.py",
         "dashboard.py",
         "notify.py",
         "phoenix.py",
@@ -467,7 +468,7 @@ def build_summary(
     )
 
     return {
-        "version": "PHOENIX v6.1",
+        "version": "PHOENIX v6.0",
         "run_id": run_id,
         "started_at": started_at,
         "finished_at": now_text(),
@@ -489,7 +490,7 @@ def save_report(summary: dict[str, Any]) -> None:
     save_json(LATEST_SUMMARY_FILE, summary)
 
     lines = [
-        "PHOENIX v6.1 EXECUTION REPORT",
+        "PHOENIX v6.0 EXECUTION REPORT",
         separator(),
         f"RUN ID        : {summary['run_id']}",
         f"START         : {summary['started_at']}",
@@ -565,7 +566,7 @@ def main() -> None:
     log_path = LOG_DIR / f"{datetime.now():%Y-%m-%d}.log"
 
     print(separator())
-    print("PHOENIX v6.1 AUTOPILOT START")
+    print("PHOENIX v6.0 AUTOPILOT START")
     print(separator())
     print(f"ROOT DIR : {ROOT_DIR}")
     print(f"RUN ID   : {run_id}")
@@ -573,7 +574,7 @@ def main() -> None:
 
     append_log(
         log_path,
-        f"\n{separator()}\nPHOENIX v6.1 AUTOPILOT START\n"
+        f"\n{separator()}\nPHOENIX v6.0 AUTOPILOT START\n"
         f"RUN ID: {run_id}\nSTART : {started_at}\n{separator()}\n",
     )
 
@@ -591,7 +592,7 @@ def main() -> None:
     stages = resolve_stages(args)
 
     state = {
-        "version": "PHOENIX v6.1",
+        "version": "PHOENIX v6.0",
         "run_id": run_id,
         "started_at": started_at,
         "finished_at": "",

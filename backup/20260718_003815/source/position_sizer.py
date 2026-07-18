@@ -19,13 +19,7 @@ import pandas as pd
 ROOT_DIR = Path(__file__).resolve().parent
 REPORT_DIR = ROOT_DIR / "reports"
 
-PORTFOLIO_WATCHLIST_FILE = REPORT_DIR / "portfolio_watchlist.csv"
-TRADE_WATCHLIST_FILE = REPORT_DIR / "price_watchlist.csv"
-WATCHLIST_FILE = (
-    PORTFOLIO_WATCHLIST_FILE
-    if PORTFOLIO_WATCHLIST_FILE.exists()
-    else TRADE_WATCHLIST_FILE
-)
+WATCHLIST_FILE = REPORT_DIR / "price_watchlist.csv"
 AI_PARAMETER_FILE = REPORT_DIR / "ai_parameter.json"
 
 POSITION_PLAN_FILE = REPORT_DIR / "position_plan.csv"
@@ -369,21 +363,6 @@ def load_watchlist() -> pd.DataFrame:
             ]
         )
     ].copy()
-
-    if "Portfolio判定" in watchlist.columns:
-        watchlist["Portfolio判定"] = (
-            watchlist["Portfolio判定"]
-            .astype(str)
-            .str.strip()
-        )
-
-        adopted = watchlist[
-            watchlist["Portfolio判定"]
-            == "採用"
-        ].copy()
-
-        if not adopted.empty:
-            watchlist = adopted
 
     watchlist = watchlist.dropna(
         subset=[

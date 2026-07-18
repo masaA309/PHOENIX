@@ -230,7 +230,6 @@ def create_backup(run_id: str) -> Path:
 
     source_dir = target / "source"
     for file_name in [
-        "market_data_manager.py",
         "market_risk_ai.py",
         "daily_report.py",
         "ai_judgement.py",

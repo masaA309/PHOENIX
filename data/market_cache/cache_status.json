@@ -1,0 +1,122 @@
+{
+  "1605.T": {
+    "updated_at": "2026-07-18 21:14:21",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "5406.T": {
+    "updated_at": "2026-07-18 21:14:22",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "6988.T": {
+    "updated_at": "2026-07-18 21:14:22",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "9501.T": {
+    "updated_at": "2026-07-18 21:14:22",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "9101.T": {
+    "updated_at": "2026-07-18 21:14:23",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "3405.T": {
+    "updated_at": "2026-07-18 21:14:23",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "9107.T": {
+    "updated_at": "2026-07-18 21:14:24",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "3697.T": {
+    "updated_at": "2026-07-18 21:14:24",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "1332.T": {
+    "updated_at": "2026-07-18 21:14:24",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "1721.T": {
+    "updated_at": "2026-07-18 21:14:25",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "1801.T": {
+    "updated_at": "2026-07-18 21:14:25",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "1802.T": {
+    "updated_at": "2026-07-18 21:14:26",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "1803.T": {
+    "updated_at": "2026-07-18 21:14:26",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "1808.T": {
+    "updated_at": "2026-07-18 21:14:26",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "1812.T": {
+    "updated_at": "2026-07-18 21:14:27",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "1925.T": {
+    "updated_at": "2026-07-18 21:14:27",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "1928.T": {
+    "updated_at": "2026-07-18 21:14:28",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "1963.T": {
+    "updated_at": "2026-07-18 21:14:28",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "2002.T": {
+    "updated_at": "2026-07-18 21:14:28",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  },
+  "2269.T": {
+    "updated_at": "2026-07-18 21:14:29",
+    "source": "yf.download(period)",
+    "rows": 2464,
+    "error": ""
+  }
+}
