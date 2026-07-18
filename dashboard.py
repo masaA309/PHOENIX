@@ -391,6 +391,7 @@ def build_dashboard() -> dict[str, Any]:
     positions = load_positions()
     paper = load_paper_trader()
     learning = load_learning()
+    backtest = load_backtest()
     system = load_system()
 
     if system["failed_count"] > 0:
@@ -403,7 +404,7 @@ def build_dashboard() -> dict[str, Any]:
         overall = "READY"
 
     return {
-        "version": "PHOENIX v5.1",
+        "version": "PHOENIX v5.1.1",
         "generated_at": now_text(),
         "overall_status": overall,
         "market_risk": market,
@@ -426,7 +427,7 @@ def print_dashboard(data: dict[str, Any]) -> None:
     system = data["system"]
 
     print("=" * 120)
-    print("PHOENIX v5.1 DASHBOARD")
+    print("PHOENIX v5.1.1 DASHBOARD")
     print("=" * 120)
     print(f"生成時刻       : {data['generated_at']}")
     print(f"システム状態   : {data['overall_status']}")
@@ -522,7 +523,7 @@ def save_text(data: dict[str, Any]) -> None:
     system = data["system"]
 
     lines = [
-        "PHOENIX v5.1 DASHBOARD",
+        "PHOENIX v5.1.1 DASHBOARD",
         "=" * 120,
         f"生成時刻       : {data['generated_at']}",
         f"システム状態   : {data['overall_status']}",
@@ -640,7 +641,7 @@ section{{margin-top:20px}}h2{{font-size:18px}}.table{{overflow-x:auto;background
 .mini-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}}.mini{{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:14px;display:flex;justify-content:space-between}}.mini span{{color:var(--muted)}}.mini strong{{font-size:22px}}
 footer{{text-align:right;color:var(--muted);font-size:12px;margin-top:22px}}@media(max-width:1000px){{.grid{{grid-template-columns:repeat(2,1fr)}}}}@media(max-width:640px){{.grid{{grid-template-columns:1fr}}header{{flex-direction:column;align-items:start}}.wrap{{padding:16px}}}}
 </style></head><body><div class="wrap">
-<header><div><h1>PHOENIX v5.1</h1><div class="muted">AI Trading Operations Dashboard</div></div><div><span class="badge {status_class(data['overall_status'])}">{escape(data['overall_status'])}</span><div class="muted">{escape(data['generated_at'])}</div></div></header>
+<header><div><h1>PHOENIX v5.1.1</h1><div class="muted">AI Trading Operations Dashboard</div></div><div><span class="badge {status_class(data['overall_status'])}">{escape(data['overall_status'])}</span><div class="muted">{escape(data['generated_at'])}</div></div></header>
 <div class="grid">
 <div class="card"><div class="title">MARKET RISK</div><div class="value">{escape(risk['level'])}</div><div class="note">Risk Score {risk['score']:.0f}</div></div>
 <div class="card"><div class="title">口座資金</div><div class="value">{positions['account_capital_yen']:,.0f}円</div><div class="note">投資予定 {positions['invested_yen']:,.0f}円</div></div>

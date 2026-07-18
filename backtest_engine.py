@@ -144,20 +144,31 @@ def normalize_ticker(value: Any) -> str:
 
 
 def load_universe(max_tickers: int) -> pd.DataFrame:
-    candidates = (
+    """
+    Portfolio採用銘柄、監視銘柄、日経225を優先順に統合する。
+    """
+    max_tickers = max(int(max_tickers), 1)
+
+    source_specs = (
         (PORTFOLIO_FILE, "portfolio"),
         (WATCHLIST_FILE, "watchlist"),
         (NIKKEI225_FILE, "nikkei225"),
     )
 
-    for path, source in candidates:
+    frames: list[pd.DataFrame] = []
+
+    for path, source in source_specs:
         data = read_csv_safe(path)
 
         if data.empty:
             continue
 
         ticker_column = next(
-            (column for column in ("ticker", "Ticker", "コード") if column in data.columns),
+            (
+                column
+                for column in ("ticker", "Ticker", "コード")
+                if column in data.columns
+            ),
             None,
         )
 
@@ -165,45 +176,85 @@ def load_universe(max_tickers: int) -> pd.DataFrame:
             continue
 
         name_column = next(
-            (column for column in ("銘柄", "name", "Name", "会社名") if column in data.columns),
+            (
+                column
+                for column in ("銘柄", "name", "Name", "会社名")
+                if column in data.columns
+            ),
             None,
         )
 
-        if source == "portfolio" and "Portfolio判定" in data.columns:
-            selected = data[
-                data["Portfolio判定"].astype(str).str.strip() == "採用"
+        work = data.copy()
+
+        if source == "portfolio" and "Portfolio判定" in work.columns:
+            adopted = work[
+                work["Portfolio判定"].astype(str).str.strip() == "採用"
             ].copy()
 
-            if not selected.empty:
-                data = selected
+            if not adopted.empty:
+                work = adopted
 
-        if "PortfolioScore" in data.columns:
-            data = data.sort_values("PortfolioScore", ascending=False)
-        elif "AI判断点" in data.columns:
-            data = data.sort_values("AI判断点", ascending=False)
-        elif "PHOENIX_SCORE" in data.columns:
-            data = data.sort_values("PHOENIX_SCORE", ascending=False)
+        sort_column = next(
+            (
+                column
+                for column in (
+                    "PortfolioScore",
+                    "AI判断点",
+                    "PHOENIX_SCORE",
+                    "score",
+                )
+                if column in work.columns
+            ),
+            None,
+        )
+
+        if sort_column is not None:
+            work[sort_column] = pd.to_numeric(
+                work[sort_column],
+                errors="coerce",
+            )
+            work = work.sort_values(
+                sort_column,
+                ascending=False,
+                na_position="last",
+            )
 
         result = pd.DataFrame()
-        result["ticker"] = data[ticker_column].map(normalize_ticker)
-        result["name"] = (
-            data[name_column].astype(str)
-            if name_column
-            else result["ticker"]
-        )
+        result["ticker"] = work[ticker_column].map(normalize_ticker)
+
+        if name_column is not None:
+            result["name"] = work[name_column].astype(str).str.strip()
+        else:
+            result["name"] = result["ticker"]
+
+        result["source"] = source
 
         result = result[
             result["ticker"].astype(str).str.len() > 0
         ].drop_duplicates("ticker")
 
         if not result.empty:
-            return result.head(max_tickers).reset_index(drop=True)
+            frames.append(result)
 
-    raise FileNotFoundError(
-        "バックテスト対象がありません。"
-        " reports/portfolio_watchlist.csv、reports/price_watchlist.csv、"
-        "data/nikkei225.csv のいずれかを用意してください。"
+    if not frames:
+        raise FileNotFoundError(
+            "バックテスト対象がありません。"
+            " reports/portfolio_watchlist.csv、"
+            "reports/price_watchlist.csv、"
+            "data/nikkei225.csv のいずれかを用意してください。"
+        )
+
+    universe = pd.concat(
+        frames,
+        ignore_index=True,
     )
+
+    universe = universe.drop_duplicates(
+        subset=["ticker"],
+        keep="first",
+    )
+
+    return universe.head(max_tickers).reset_index(drop=True)
 
 
 def download_history(ticker: str, period: str) -> pd.DataFrame:
@@ -750,7 +801,7 @@ def calculate_summary(
         average_holding = 0.0
 
     return {
-        "version": "PHOENIX v5.1",
+        "version": "PHOENIX v5.1.1",
         "generated_at": now_text(),
         "strategy": {
             "entry": "MA5>MA25、MA25>MA75、MACD、RSI、出来高を合成した70点以上",
@@ -814,7 +865,7 @@ def save_outputs(
     period = summary["period"]
 
     lines = [
-        "PHOENIX v5.1 BACKTEST REPORT",
+        "PHOENIX v5.1.1 BACKTEST REPORT",
         "=" * 100,
         f"生成時刻       : {summary['generated_at']}",
         f"検証期間       : {period['start_date']} ～ {period['end_date']}",
@@ -850,7 +901,7 @@ def print_summary(summary: dict[str, Any]) -> None:
 
     print()
     print("=" * 100)
-    print("PHOENIX v5.1 BACKTEST RESULT")
+    print("PHOENIX v5.1.1 BACKTEST RESULT")
     print("=" * 100)
     print(f"検証期間       : {period['start_date']} ～ {period['end_date']}")
     print(f"取引日数       : {period['trading_days']}日")
