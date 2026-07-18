@@ -32,7 +32,7 @@ REPORT_DIR = ROOT_DIR / "reports"
 RESULTS_FILE = REPORT_DIR / "optimization_results.csv"
 BEST_FILE = REPORT_DIR / "optimization_best.json"
 REPORT_FILE = REPORT_DIR / "optimization_report.txt"
-AI_PARAMETER_FILE = REPORT_DIR / "ai_parameter.json"
+OPTIMIZATION_CANDIDATE_FILE = REPORT_DIR / "optimization_candidate.json"
 
 DEFAULT_PERIOD = "5y"
 DEFAULT_MAX_TICKERS = 20
@@ -261,7 +261,7 @@ def run_optimization(
 
     print()
     print("=" * 110)
-    print("PHOENIX v6.0.1 OPTIMIZATION")
+    print("PHOENIX v6.2 OPTIMIZATION")
     print("=" * 110)
     print(f"探索組み合わせ: {total}")
 
@@ -420,7 +420,7 @@ def build_best_payload(
     }
 
     return {
-        "version": "PHOENIX v6.0",
+        "version": "PHOENIX v6.2",
         "generated_at": now_text(),
         "period": period,
         "maximum_tickers": max_tickers,
@@ -431,36 +431,18 @@ def build_best_payload(
     }
 
 
-def update_ai_parameter(best_payload: dict[str, Any]) -> None:
-    current: dict[str, Any] = {}
-
-    if AI_PARAMETER_FILE.exists():
-        try:
-            loaded = json.loads(
-                AI_PARAMETER_FILE.read_text(encoding="utf-8")
-            )
-            if isinstance(loaded, dict):
-                current = loaded
-        except (OSError, json.JSONDecodeError):
-            current = {}
-
-    current["version"] = "PHOENIX v6.0"
-    current["updated_at"] = now_text()
-    current["source"] = "optimization_engine"
-    current["optimization"] = {
+def save_optimization_candidate(best_payload: dict[str, Any]) -> None:
+    candidate = {
+        "version": "PHOENIX v6.2",
+        "generated_at": now_text(),
+        "source": "optimization_engine",
+        "status": "CANDIDATE",
         "parameters": best_payload["parameters"],
         "performance": best_payload["performance"],
         "period": best_payload["period"],
-        "tested_combinations": best_payload[
-            "tested_combinations"
-        ],
+        "tested_combinations": best_payload["tested_combinations"],
     }
-
-    # 他エンジンが読みやすいよう、主要値はトップレベルにも保存。
-    current.update(best_payload["parameters"])
-
-    save_json(AI_PARAMETER_FILE, current)
-
+    save_json(OPTIMIZATION_CANDIDATE_FILE, candidate)
 
 def save_outputs(
     results: pd.DataFrame,
@@ -474,13 +456,13 @@ def save_outputs(
         encoding="utf-8-sig",
     )
     save_json(BEST_FILE, best_payload)
-    update_ai_parameter(best_payload)
+    save_optimization_candidate(best_payload)
 
     params = best_payload["parameters"]
     performance = best_payload["performance"]
 
     lines = [
-        "PHOENIX v6.0.1 OPTIMIZATION REPORT",
+        "PHOENIX v6.2 OPTIMIZATION REPORT",
         "=" * 110,
         f"生成時刻       : {best_payload['generated_at']}",
         f"検証期間       : {best_payload['period']}",
@@ -510,7 +492,7 @@ def save_outputs(
         "",
         "注意:",
         "最適化結果は過去データに対する成績であり、将来利益を保証しません。",
-        "過学習を避けるため、今後は期間分割検証を追加する必要があります。",
+        "候補パラメータはWalk-ForwardとAdaptive Parameter Engineを通過した場合のみ本採用されます。",
     ]
 
     REPORT_FILE.write_text(
@@ -526,7 +508,7 @@ def print_best(best_payload: dict[str, Any]) -> None:
 
     print()
     print("=" * 110)
-    print("PHOENIX v6.0.1 OPTIMIZATION BEST")
+    print("PHOENIX v6.2 OPTIMIZATION BEST")
     print("=" * 110)
     print(f"RSI            : {params['rsi_min']:.1f} ～ {params['rsi_max']:.1f}")
     print(f"ATR損切倍率    : {params['stop_atr_multiplier']:.2f}")
@@ -552,7 +534,7 @@ def print_best(best_payload: dict[str, Any]) -> None:
     print(f"保存完了: {RESULTS_FILE}")
     print(f"保存完了: {BEST_FILE}")
     print(f"保存完了: {REPORT_FILE}")
-    print(f"更新完了: {AI_PARAMETER_FILE}")
+    print(f"候補保存: {OPTIMIZATION_CANDIDATE_FILE}")
 
 
 def parse_args() -> argparse.Namespace:

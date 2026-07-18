@@ -323,7 +323,7 @@ def run_walk_forward(
 
     print()
     print("=" * 120)
-    print("PHOENIX v6.1 WALK-FORWARD TEST")
+    print("PHOENIX v6.2 WALK-FORWARD TEST")
     print("=" * 120)
     print(f"候補パラメータ : {len(parameter_grid)}")
     print(f"作成期間数     : {len(windows)}")
@@ -543,7 +543,7 @@ def build_summary(
     )
 
     return {
-        "version": "PHOENIX v6.1",
+        "version": "PHOENIX v6.2",
         "generated_at": now_text(),
         "status": status,
         "period": period,
@@ -595,7 +595,7 @@ def save_outputs(
     adopted = summary["adopted_parameters"]
 
     lines = [
-        "PHOENIX v6.1 WALK-FORWARD REPORT",
+        "PHOENIX v6.2 WALK-FORWARD REPORT",
         "=" * 120,
         f"生成時刻       : {summary['generated_at']}",
         f"判定           : {summary['status']}",
@@ -646,7 +646,7 @@ def print_summary(summary: dict[str, Any]) -> None:
 
     print()
     print("=" * 120)
-    print("PHOENIX v6.1 WALK-FORWARD SUMMARY")
+    print("PHOENIX v6.2 WALK-FORWARD SUMMARY")
     print("=" * 120)
     print(f"判定           : {summary['status']}")
     print(f"検証期間数     : {summary['fold_count']}")
