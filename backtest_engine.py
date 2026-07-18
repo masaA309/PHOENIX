@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
+from market_data_manager import fetch_history
 
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -285,34 +285,19 @@ def load_universe(max_tickers: int) -> pd.DataFrame:
 
 
 def download_history(ticker: str, period: str) -> pd.DataFrame:
-    data = yf.download(
-        ticker,
+    """
+    Yahoo Financeを複数方式で再試行し、失敗時はローカルキャッシュを使う。
+    """
+    data, source = fetch_history(
+        ticker=ticker,
         period=period,
-        interval="1d",
-        auto_adjust=True,
-        progress=False,
-        threads=False,
+        retries=3,
+        retry_wait=2.0,
+        allow_cache=True,
     )
 
-    if data.empty:
-        return pd.DataFrame()
-
-    if isinstance(data.columns, pd.MultiIndex):
-        if ticker in data.columns.get_level_values(-1):
-            data = data.xs(ticker, axis=1, level=-1)
-        else:
-            data.columns = data.columns.get_level_values(0)
-
-    required = ["Open", "High", "Low", "Close", "Volume"]
-
-    if not all(column in data.columns for column in required):
-        return pd.DataFrame()
-
-    data = data[required].copy()
-    data.index = pd.to_datetime(data.index).tz_localize(None)
-    data = data[~data.index.duplicated(keep="last")]
-    data = data.sort_index()
-    data = data.dropna(subset=["Open", "High", "Low", "Close"])
+    if not data.empty:
+        print(f"  DATA SOURCE: {source}")
 
     return data
 

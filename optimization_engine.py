@@ -261,7 +261,7 @@ def run_optimization(
 
     print()
     print("=" * 110)
-    print("PHOENIX v6.0 OPTIMIZATION")
+    print("PHOENIX v6.0.1 OPTIMIZATION")
     print("=" * 110)
     print(f"探索組み合わせ: {total}")
 
@@ -480,7 +480,7 @@ def save_outputs(
     performance = best_payload["performance"]
 
     lines = [
-        "PHOENIX v6.0 OPTIMIZATION REPORT",
+        "PHOENIX v6.0.1 OPTIMIZATION REPORT",
         "=" * 110,
         f"生成時刻       : {best_payload['generated_at']}",
         f"検証期間       : {best_payload['period']}",
@@ -526,7 +526,7 @@ def print_best(best_payload: dict[str, Any]) -> None:
 
     print()
     print("=" * 110)
-    print("PHOENIX v6.0 OPTIMIZATION BEST")
+    print("PHOENIX v6.0.1 OPTIMIZATION BEST")
     print("=" * 110)
     print(f"RSI            : {params['rsi_min']:.1f} ～ {params['rsi_max']:.1f}")
     print(f"ATR損切倍率    : {params['stop_atr_multiplier']:.2f}")
