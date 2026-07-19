@@ -2126,6 +2126,22 @@ def process_quotes(
             "最新確認日時",
         ] = check_time
 
+        entry_reached = bool_value(
+            row["エントリー到達"]
+        )
+
+        target_reached = bool_value(
+            row["利確到達"]
+        )
+
+        stop_reached = bool_value(
+            row["損切到達"]
+        )
+
+        entry_price = safe_float(
+            row["押し目価格"]
+        )
+
         if (
             not initialized
             or previous_price <= 0
@@ -2147,23 +2163,27 @@ def process_quotes(
                 f"{current_price:.2f}円"
             )
 
+            # 起動時点ですでに押し目価格以下なら、
+            # クロス待ちにせずENTRYイベントを記録する。
+            if (
+                not entry_reached
+                and entry_price > 0
+                and current_price <= entry_price
+            ):
+                process_event(
+                    state=state,
+                    index=index,
+                    row=row,
+                    event_type=EVENT_ENTRY,
+                    previous_price=current_price,
+                    current_price=current_price,
+                    quote_timestamp=quote.timestamp,
+                    live=live,
+                    event_file=event_file,
+                    event_keys=event_keys,
+                )
+
             continue
-
-        entry_reached = bool_value(
-            row["エントリー到達"]
-        )
-
-        target_reached = bool_value(
-            row["利確到達"]
-        )
-
-        stop_reached = bool_value(
-            row["損切到達"]
-        )
-
-        entry_price = safe_float(
-            row["押し目価格"]
-        )
 
         target_price = safe_float(
             row["利確価格"]
