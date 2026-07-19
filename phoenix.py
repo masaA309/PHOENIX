@@ -68,6 +68,7 @@ STAGES = (
         PRICE_MONITOR_TIMEOUT,
     ),
     Stage("paper_trader", "Paper Trader", "paper_trader.py"),
+    Stage("performance_analyzer", "Performance Analyzer", "performance_analyzer.py"),
     Stage("learning_engine", "Learning Engine", "learning_engine.py"),
     Stage("backtest", "Backtest Engine", "backtest_engine.py"),
     Stage("optimization", "Optimization Engine", "optimization_engine.py"),
@@ -128,7 +129,7 @@ def append_log(path: Path, text: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="PHOENIX v6.6 分析データ保護・RSSリアルタイム執行"
+        description="PHOENIX v6.7 Paper Trade利益・固定費評価"
     )
     parser.add_argument("--from", dest="from_stage")
     parser.add_argument("--only", dest="only_stage")

@@ -1,20 +1,30 @@
-PHOENIX v6.6 VERIFIED COMPLETE
-Verification date: 2026-07-19
+syntax: PASS
+run_without_trade_data: PASS
 
-PASS:
-- All Python files compiled with py_compile.
-- Missing folders/configs are created automatically.
-- Professional team includes Pro Trader, Pro Coder, Debugger, QA Tester, Data Engineer.
-- Data Health Monitor validates RSS heartbeat and realtime quote file.
-- Realtime Gateway rejects missing, stale, invalid bid/ask, excessive spread, and non-trading status.
-- Execution AI uses RSS best ask, not Yahoo/cache price, for order value and limit price.
-- Execution AI blocks price deviation over configured tolerance.
-- Broker Gateway revalidates RSS quote immediately before queue creation.
-- LIVE cannot be permitted without heartbeat, fresh quote, unlock phrase, and live_trading=true.
-- DRY_RUN remains default and generated queue trigger remains 0.
-- Market Data Gateway includes same-day cache and Yahoo circuit breaker.
-- phoenix.py stage list includes Data Health Monitor before Risk Controller.
+====================================================================================================
+PHOENIX v6.7 PERFORMANCE ANALYZER
+====================================================================================================
+作成日時             : 2026-07-19 06:11:33
+初期資金             : 300,000円
+決済済み取引         : 0件
+勝率                 : 0.00%
+PF                   : 0.0000
+売買損益             : +0円
+最大ドローダウン     : 0円 (0.00%)
+----------------------------------------------------------------------------------------------------
+今月売買損益         : +0円
+今月固定費           : -6,000円  (ChatGPT Plus + Excel)
+今月税額概算         : -0円
+今月コスト・税引後   : -6,000円
+固定費回収           : NO
+----------------------------------------------------------------------------------------------------
+増資合格判定         : NOT YET
+  NG closed_trades
+  NG profit_factor
+  NG win_rate
+  OK maximum_drawdown
+  NG positive_months_after_cost
+----------------------------------------------------------------------------------------------------
+Paper Tradeの結果であり、将来の利益を保証しません。税額は概算です。
+====================================================================================================
 
-IMPORTANT:
-- execution/rss_realtime_quotes.csv must be written by the user's MarketSpeed II RSS Excel/VBA bridge.
-- Yahoo/cache data is analysis-only and is never accepted as LIVE execution price.

@@ -20,12 +20,14 @@ ROOT_DIR = Path(__file__).resolve().parent
 REPORT_DIR = ROOT_DIR / "reports"
 DATA_DIR = ROOT_DIR / "data"
 
+OPTIMIZED_INPUT_FILE = REPORT_DIR / "portfolio_optimized_candidates.csv"
 INPUT_FILE = REPORT_DIR / "price_watchlist.csv"
 SECTOR_MASTER_FILE = DATA_DIR / "sector_master.csv"
 
 OUTPUT_FILE = REPORT_DIR / "portfolio_watchlist.csv"
 SUMMARY_FILE = REPORT_DIR / "portfolio_manager_summary.json"
 TEXT_REPORT_FILE = REPORT_DIR / "portfolio_manager_report.txt"
+MARKET_REGIME_FILE = REPORT_DIR / "market_regime.json"
 
 ACCOUNT_CAPITAL = 300_000
 MAX_SELECTED = 3
@@ -156,17 +158,40 @@ def save_json(file_path: Path, data: dict[str, Any]) -> None:
         json.dump(data, file, ensure_ascii=False, indent=2)
 
 
+
+def load_market_regime() -> dict[str, Any]:
+    if not MARKET_REGIME_FILE.exists():
+        return {"regime": "SIDEWAYS", "settings": {}}
+    try:
+        data = json.loads(MARKET_REGIME_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {"regime": "SIDEWAYS", "settings": {}}
+    except (OSError, json.JSONDecodeError):
+        return {"regime": "SIDEWAYS", "settings": {}}
+
+
+def apply_market_regime() -> dict[str, Any]:
+    global MAX_SELECTED, MIN_PORTFOLIO_SCORE
+    data = load_market_regime()
+    settings = data.get("settings", {})
+    if not isinstance(settings, dict):
+        settings = {}
+    MAX_SELECTED = max(1, safe_int(settings.get("max_positions", MAX_SELECTED), MAX_SELECTED))
+    adjustment = safe_float(settings.get("entry_score_adjustment", 0.0), 0.0)
+    MIN_PORTFOLIO_SCORE = max(45.0, min(85.0, 55.0 + adjustment * 0.5))
+    return data
+
 # =========================================================
 # データ読込
 # =========================================================
 
 def load_watchlist() -> pd.DataFrame:
-    if not INPUT_FILE.exists():
+    source_file = OPTIMIZED_INPUT_FILE if OPTIMIZED_INPUT_FILE.exists() else INPUT_FILE
+    if not source_file.exists():
         raise FileNotFoundError(
-            f"Trade Engine監視リストがありません: {INPUT_FILE}"
+            f"候補リストがありません: {source_file}"
         )
 
-    data = read_csv_safe(INPUT_FILE)
+    data = read_csv_safe(source_file)
 
     if data.empty:
         raise ValueError("price_watchlist.csv が空です。")
@@ -395,10 +420,9 @@ def select_portfolio(data: pd.DataFrame) -> pd.DataFrame:
         axis=1,
     )
 
-    work["PortfolioScore"] = work.apply(
-        calculate_portfolio_score,
-        axis=1,
-    )
+    work["PortfolioScore"] = work.apply(calculate_portfolio_score, axis=1)
+    if "OptimizerScore" in work.columns:
+        work["PortfolioScore"] = (work["PortfolioScore"] * 0.45 + pd.to_numeric(work["OptimizerScore"], errors="coerce").fillna(0) * 0.55).round(2)
 
     work["_trade_priority"] = work["Trade判定"].map(
         {"BUY": 0, "WATCH": 1}
@@ -539,7 +563,7 @@ def build_summary(result: pd.DataFrame) -> dict[str, Any]:
     )
 
     return {
-        "version": "PHOENIX v4.1",
+        "version": "PHOENIX v6.4",
         "generated_at": now_text(),
         "account_capital_yen": ACCOUNT_CAPITAL,
         "settings": {
@@ -615,7 +639,7 @@ def print_result(
     summary: dict[str, Any],
 ) -> None:
     print("=" * 120)
-    print("PHOENIX PORTFOLIO MANAGER AI")
+    print("PHOENIX v6.4 PORTFOLIO MANAGER AI")
     print("=" * 120)
     print(f"口座資金       : {ACCOUNT_CAPITAL:,}円")
     print(f"入力候補       : {summary['result']['input_count']}件")
@@ -656,6 +680,8 @@ def print_result(
 
 def main() -> None:
     configure_console()
+    regime_data = apply_market_regime()
+    print(f"Market Regime : {regime_data.get('regime', 'SIDEWAYS')}")
 
     try:
         data = load_watchlist()

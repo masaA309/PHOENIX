@@ -1,0 +1,37 @@
+{
+  "version": "6.7",
+  "initial_capital_yen": 300000,
+  "monthly_costs": {
+    "chatgpt_plus_yen": 3000,
+    "excel_yen": 3000,
+    "other_yen": 0,
+    "include_chatgpt_plus": true,
+    "include_excel": true,
+    "note": "Excel導入前でも将来の完全運用コストを含めて合格判定する"
+  },
+  "tax": {
+    "account_type": "specific_with_withholding",
+    "estimated_rate": 0.20315,
+    "apply_tax_estimate": true,
+    "note": "特定口座（源泉徴収あり）の概算。NISA運用時はaccount_type=nisa、apply_tax_estimate=false"
+  },
+  "qualification": {
+    "minimum_closed_trades": 50,
+    "target_closed_trades": 100,
+    "minimum_profit_factor": 1.5,
+    "minimum_win_rate_percent": 55.0,
+    "maximum_drawdown_percent": 10.0,
+    "minimum_net_monthly_profit_yen": 1,
+    "required_positive_months": 3
+  },
+  "input_files": {
+    "paper_trades": "reports/paper_trades.csv"
+  },
+  "output_files": {
+    "summary_json": "reports/performance_summary.json",
+    "summary_csv": "reports/performance_summary.csv",
+    "monthly_csv": "reports/performance_monthly.csv",
+    "equity_curve_csv": "reports/equity_curve.csv",
+    "text_report": "reports/performance_report.txt"
+  }
+}
