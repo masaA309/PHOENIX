@@ -19,14 +19,9 @@ import pandas as pd
 ROOT_DIR = Path(__file__).resolve().parent
 REPORT_DIR = ROOT_DIR / "reports"
 
-PORTFOLIO_WATCHLIST_FILE = REPORT_DIR / "portfolio_watchlist.csv"
-TRADE_WATCHLIST_FILE = REPORT_DIR / "price_watchlist.csv"
-WATCHLIST_FILE = (
-    PORTFOLIO_WATCHLIST_FILE
-    if PORTFOLIO_WATCHLIST_FILE.exists()
-    else TRADE_WATCHLIST_FILE
-)
+WATCHLIST_FILE = REPORT_DIR / "price_watchlist.csv"
 AI_PARAMETER_FILE = REPORT_DIR / "ai_parameter.json"
+MARKET_REGIME_FILE = REPORT_DIR / "market_regime.json"
 
 POSITION_PLAN_FILE = REPORT_DIR / "position_plan.csv"
 POSITION_REPORT_FILE = REPORT_DIR / "position_sizer_report.txt"
@@ -282,6 +277,22 @@ def load_risk_settings() -> dict[str, Any]:
     }
 
 
+
+def apply_market_regime_to_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    regime = read_json_safe(MARKET_REGIME_FILE)
+    values = regime.get("settings", {})
+    if not isinstance(values, dict):
+        values = {}
+    result = dict(settings)
+    capital_usage = safe_float(values.get("capital_usage_percent", 70.0), 70.0)
+    risk_multiplier = safe_float(values.get("risk_per_trade_multiplier", 1.0), 1.0)
+    result["maximum_total_exposure_percent"] = min(result["maximum_total_exposure_percent"], capital_usage)
+    result["risk_per_trade_percent"] = max(0.1, result["risk_per_trade_percent"] * risk_multiplier)
+    result["maximum_open_positions"] = max(1, safe_int(values.get("max_positions", result["maximum_open_positions"]), result["maximum_open_positions"]))
+    result["market_regime"] = str(regime.get("regime", "SIDEWAYS"))
+    result["regime_confidence"] = safe_float(regime.get("confidence", 0.0))
+    return result
+
 # =========================================================
 # 監視リスト読込
 # =========================================================
@@ -369,21 +380,6 @@ def load_watchlist() -> pd.DataFrame:
             ]
         )
     ].copy()
-
-    if "Portfolio判定" in watchlist.columns:
-        watchlist["Portfolio判定"] = (
-            watchlist["Portfolio判定"]
-            .astype(str)
-            .str.strip()
-        )
-
-        adopted = watchlist[
-            watchlist["Portfolio判定"]
-            == "採用"
-        ].copy()
-
-        if not adopted.empty:
-            watchlist = adopted
 
     watchlist = watchlist.dropna(
         subset=[
@@ -1461,7 +1457,7 @@ def main() -> None:
             exist_ok=True,
         )
 
-        settings = load_risk_settings()
+        settings = apply_market_regime_to_settings(load_risk_settings())
 
         watchlist = load_watchlist()
 

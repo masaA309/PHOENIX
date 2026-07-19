@@ -21,6 +21,7 @@ DATA_DIR = ROOT_DIR / "data"
 
 AI_JUDGEMENT_FILE = REPORT_DIR / "ai_judgement.csv"
 MARKET_RISK_FILE = DATA_DIR / "market_risk_latest.json"
+MARKET_REGIME_FILE = REPORT_DIR / "market_regime.json"
 
 WATCHLIST_FILE = REPORT_DIR / "price_watchlist.csv"
 TRADE_SIGNAL_FILE = REPORT_DIR / "trade_signals.csv"
@@ -242,6 +243,31 @@ def find_column(
 
     return None
 
+
+
+def load_market_regime() -> dict[str, Any]:
+    if not MARKET_REGIME_FILE.exists():
+        return {"regime": "SIDEWAYS", "settings": {}}
+    try:
+        data = json.loads(MARKET_REGIME_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {"regime": "SIDEWAYS", "settings": {}}
+    except (OSError, json.JSONDecodeError):
+        return {"regime": "SIDEWAYS", "settings": {}}
+
+
+def apply_market_regime(regime_data: dict[str, Any]) -> None:
+    global BUY_MIN_AI_SCORE, WATCH_MIN_AI_SCORE, MIN_PHOENIX_SCORE
+    global DEFAULT_TARGET_RATE, DEFAULT_STOP_RATE, DEFAULT_PULLBACK_RATE
+    settings = regime_data.get("settings", {})
+    if not isinstance(settings, dict):
+        settings = {}
+    adjustment = safe_float(settings.get("entry_score_adjustment", 0.0))
+    BUY_MIN_AI_SCORE = max(50, min(95, int(round(80 + adjustment))))
+    WATCH_MIN_AI_SCORE = max(45, min(90, int(round(65 + adjustment))))
+    MIN_PHOENIX_SCORE = max(40, min(90, int(round(60 + adjustment))))
+    DEFAULT_TARGET_RATE = 0.05 * safe_float(settings.get("target_multiplier", 1.0), 1.0)
+    DEFAULT_STOP_RATE = 0.03 * safe_float(settings.get("stop_multiplier", 1.0), 1.0)
+    DEFAULT_PULLBACK_RATE = 0.02
 
 # =========================================================
 # Market Risk
@@ -1291,6 +1317,10 @@ def main() -> None:
         )
 
         market_risk = load_market_risk()
+        market_regime = load_market_regime()
+        apply_market_regime(market_regime)
+
+        print(f"Market Regime: {market_regime.get('regime', 'SIDEWAYS')}")
 
         print(
             "Market Risk: "

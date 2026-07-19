@@ -46,6 +46,7 @@ STAGES = (
     Stage("market_risk", "Market Risk AI", "market_risk_ai.py"),
     Stage("daily_report", "Daily Report", "daily_report.py"),
     Stage("ai_judgement", "AI Judgement", "ai_judgement.py"),
+    Stage("market_regime", "Market Regime AI", "market_regime_ai.py"),
     Stage("trade_engine", "Trade Engine", "trade_engine.py"),
     Stage("portfolio_manager", "Portfolio Manager", "portfolio_manager.py"),
     Stage("position_sizer", "Position Sizer", "position_sizer.py"),
@@ -118,7 +119,7 @@ def append_log(path: Path, text: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="PHOENIX v6.2 統合オートパイロット"
+        description="PHOENIX v6.3 統合オートパイロット"
     )
     parser.add_argument("--from", dest="from_stage")
     parser.add_argument("--only", dest="only_stage")
@@ -469,7 +470,7 @@ def build_summary(
     )
 
     return {
-        "version": "PHOENIX v6.2",
+        "version": "PHOENIX v6.3",
         "run_id": run_id,
         "started_at": started_at,
         "finished_at": now_text(),
@@ -491,7 +492,7 @@ def save_report(summary: dict[str, Any]) -> None:
     save_json(LATEST_SUMMARY_FILE, summary)
 
     lines = [
-        "PHOENIX v6.2 EXECUTION REPORT",
+        "PHOENIX v6.3 EXECUTION REPORT",
         separator(),
         f"RUN ID        : {summary['run_id']}",
         f"START         : {summary['started_at']}",
@@ -567,7 +568,7 @@ def main() -> None:
     log_path = LOG_DIR / f"{datetime.now():%Y-%m-%d}.log"
 
     print(separator())
-    print("PHOENIX v6.2 AUTOPILOT START")
+    print("PHOENIX v6.3 AUTOPILOT START")
     print(separator())
     print(f"ROOT DIR : {ROOT_DIR}")
     print(f"RUN ID   : {run_id}")
@@ -575,7 +576,7 @@ def main() -> None:
 
     append_log(
         log_path,
-        f"\n{separator()}\nPHOENIX v6.2 AUTOPILOT START\n"
+        f"\n{separator()}\nPHOENIX v6.3 AUTOPILOT START\n"
         f"RUN ID: {run_id}\nSTART : {started_at}\n{separator()}\n",
     )
 
@@ -593,7 +594,7 @@ def main() -> None:
     stages = resolve_stages(args)
 
     state = {
-        "version": "PHOENIX v6.2",
+        "version": "PHOENIX v6.3",
         "run_id": run_id,
         "started_at": started_at,
         "finished_at": "",

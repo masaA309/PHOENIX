@@ -28,6 +28,7 @@ BACKTEST_SUMMARY_FILE = REPORT_DIR / "backtest_summary.json"
 OPTIMIZATION_BEST_FILE = REPORT_DIR / "optimization_best.json"
 WALK_FORWARD_SUMMARY_FILE = REPORT_DIR / "walk_forward_summary.json"
 ADAPTIVE_PARAMETER_FILE = REPORT_DIR / "adaptive_parameter.json"
+MARKET_REGIME_FILE = REPORT_DIR / "market_regime.json"
 
 MARKET_RISK_FILES = (
     DATA_DIR / "market_risk_latest.json",
@@ -508,6 +509,27 @@ def load_walk_forward() -> dict[str, Any]:
 
 
 
+def load_market_regime() -> dict[str, Any]:
+    data = load_json(MARKET_REGIME_FILE)
+    settings = data.get("settings", {})
+    metrics = data.get("metrics", {})
+    if not isinstance(settings, dict): settings = {}
+    if not isinstance(metrics, dict): metrics = {}
+    return {
+        "available": bool(data),
+        "regime": str(data.get("regime", "SIDEWAYS")).upper(),
+        "confidence": safe_float(data.get("confidence", 0.0)),
+        "score": safe_float(data.get("score", 0.0)),
+        "strategy": str(data.get("strategy", "BALANCED")),
+        "capital_usage_percent": safe_float(settings.get("capital_usage_percent", 70.0)),
+        "max_positions": safe_int(settings.get("max_positions", 3)),
+        "advance_ratio": safe_float(metrics.get("advance_ratio", 50.0)),
+        "above_ma25_ratio": safe_float(metrics.get("above_ma25_ratio", 50.0)),
+        "macd_buy_ratio": safe_float(metrics.get("macd_buy_ratio", 50.0)),
+        "average_rsi": safe_float(metrics.get("average_rsi", 50.0)),
+    }
+
+
 def load_adaptive() -> dict[str, Any]:
     data = load_json(ADAPTIVE_PARAMETER_FILE)
     params = data.get("active_parameters", {})
@@ -524,6 +546,7 @@ def load_adaptive() -> dict[str, Any]:
 
 def build_dashboard() -> dict[str, Any]:
     market = load_market_risk()
+    regime = load_market_regime()
     portfolio = load_portfolio()
     positions = load_positions()
     paper = load_paper_trader()
@@ -544,10 +567,11 @@ def build_dashboard() -> dict[str, Any]:
         overall = "READY"
 
     return {
-        "version": "PHOENIX v6.2",
+        "version": "PHOENIX v6.3",
         "generated_at": now_text(),
         "overall_status": overall,
         "market_risk": market,
+        "market_regime": regime,
         "portfolio": portfolio,
         "positions": positions,
         "paper_trader": paper,
@@ -562,6 +586,7 @@ def build_dashboard() -> dict[str, Any]:
 
 def print_dashboard(data: dict[str, Any]) -> None:
     risk = data["market_risk"]
+    regime = data["market_regime"]
     portfolio = data["portfolio"]
     positions = data["positions"]
     paper = data["paper_trader"]
@@ -573,7 +598,7 @@ def print_dashboard(data: dict[str, Any]) -> None:
     system = data["system"]
 
     print("=" * 120)
-    print("PHOENIX v6.2 DASHBOARD")
+    print("PHOENIX v6.3 DASHBOARD")
     print("=" * 120)
     print(f"生成時刻       : {data['generated_at']}")
     print(f"システム状態   : {data['overall_status']}")
@@ -581,6 +606,20 @@ def print_dashboard(data: dict[str, Any]) -> None:
     print(f"実行状態       : {system['status']}")
     print(f"成功 / 失敗    : {system['success_count']} / {system['failed_count']}")
     print(f"実行時間       : {system['total_seconds']:.2f}秒")
+
+    print("\n" + "=" * 120)
+    print("Market Regime AI")
+    print("=" * 120)
+    print(f"市場状態       : {regime['regime']}")
+    print(f"信頼度         : {regime['confidence']:.2f}%")
+    print(f"Regime Score   : {regime['score']:+.2f}")
+    print(f"推奨戦略       : {regime['strategy']}")
+    print(f"資金使用率     : {regime['capital_usage_percent']:.0f}%")
+    print(f"最大保有数     : {regime['max_positions']}件")
+    print(f"上昇銘柄比率   : {regime['advance_ratio']:.1f}%")
+    print(f"MA25上比率     : {regime['above_ma25_ratio']:.1f}%")
+    print(f"MACD BUY比率   : {regime['macd_buy_ratio']:.1f}%")
+    print(f"平均RSI        : {regime['average_rsi']:.1f}")
 
     print("\n" + "=" * 120)
     print("資産・ポジション")
@@ -741,7 +780,7 @@ def save_text(data: dict[str, Any]) -> None:
     system = data["system"]
 
     lines = [
-        "PHOENIX v6.2 DASHBOARD",
+        "PHOENIX v6.3 DASHBOARD",
         "=" * 120,
         f"生成時刻       : {data['generated_at']}",
         f"システム状態   : {data['overall_status']}",
@@ -913,7 +952,7 @@ section{{margin-top:20px}}h2{{font-size:18px}}.table{{overflow-x:auto;background
 .mini-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}}.mini{{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:14px;display:flex;justify-content:space-between}}.mini span{{color:var(--muted)}}.mini strong{{font-size:22px}}
 footer{{text-align:right;color:var(--muted);font-size:12px;margin-top:22px}}@media(max-width:1000px){{.grid{{grid-template-columns:repeat(2,1fr)}}}}@media(max-width:640px){{.grid{{grid-template-columns:1fr}}header{{flex-direction:column;align-items:start}}.wrap{{padding:16px}}}}
 </style></head><body><div class="wrap">
-<header><div><h1>PHOENIX v6.2</h1><div class="muted">AI Trading Operations Dashboard</div></div><div><span class="badge {status_class(data['overall_status'])}">{escape(data['overall_status'])}</span><div class="muted">{escape(data['generated_at'])}</div></div></header>
+<header><div><h1>PHOENIX v6.3</h1><div class="muted">AI Trading Operations Dashboard</div></div><div><span class="badge {status_class(data['overall_status'])}">{escape(data['overall_status'])}</span><div class="muted">{escape(data['generated_at'])}</div></div></header>
 <div class="grid">
 <div class="card"><div class="title">MARKET RISK</div><div class="value">{escape(risk['level'])}</div><div class="note">Risk Score {risk['score']:.0f}</div></div>
 <div class="card"><div class="title">口座資金</div><div class="value">{positions['account_capital_yen']:,.0f}円</div><div class="note">投資予定 {positions['invested_yen']:,.0f}円</div></div>

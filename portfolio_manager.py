@@ -26,6 +26,7 @@ SECTOR_MASTER_FILE = DATA_DIR / "sector_master.csv"
 OUTPUT_FILE = REPORT_DIR / "portfolio_watchlist.csv"
 SUMMARY_FILE = REPORT_DIR / "portfolio_manager_summary.json"
 TEXT_REPORT_FILE = REPORT_DIR / "portfolio_manager_report.txt"
+MARKET_REGIME_FILE = REPORT_DIR / "market_regime.json"
 
 ACCOUNT_CAPITAL = 300_000
 MAX_SELECTED = 3
@@ -155,6 +156,28 @@ def save_json(file_path: Path, data: dict[str, Any]) -> None:
     with file_path.open("w", encoding="utf-8", newline="\n") as file:
         json.dump(data, file, ensure_ascii=False, indent=2)
 
+
+
+def load_market_regime() -> dict[str, Any]:
+    if not MARKET_REGIME_FILE.exists():
+        return {"regime": "SIDEWAYS", "settings": {}}
+    try:
+        data = json.loads(MARKET_REGIME_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {"regime": "SIDEWAYS", "settings": {}}
+    except (OSError, json.JSONDecodeError):
+        return {"regime": "SIDEWAYS", "settings": {}}
+
+
+def apply_market_regime() -> dict[str, Any]:
+    global MAX_SELECTED, MIN_PORTFOLIO_SCORE
+    data = load_market_regime()
+    settings = data.get("settings", {})
+    if not isinstance(settings, dict):
+        settings = {}
+    MAX_SELECTED = max(1, safe_int(settings.get("max_positions", MAX_SELECTED), MAX_SELECTED))
+    adjustment = safe_float(settings.get("entry_score_adjustment", 0.0), 0.0)
+    MIN_PORTFOLIO_SCORE = max(45.0, min(85.0, 55.0 + adjustment * 0.5))
+    return data
 
 # =========================================================
 # データ読込
@@ -656,6 +679,8 @@ def print_result(
 
 def main() -> None:
     configure_console()
+    regime_data = apply_market_regime()
+    print(f"Market Regime : {regime_data.get('regime', 'SIDEWAYS')}")
 
     try:
         data = load_watchlist()
