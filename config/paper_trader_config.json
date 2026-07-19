@@ -13,7 +13,8 @@
       "BUY",
       "STRONG BUY",
       "買い",
-      "強い買い"
+      "強い買い",
+      "買い候補"
     ],
     "minimum_ai_score": 70,
     "minimum_phoenix_score": 70
