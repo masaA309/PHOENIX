@@ -21,3 +21,5 @@ reports/
 runtime/
 logs/scheduler/
 reports/v7_environment_report.json
+
+state/*.json
