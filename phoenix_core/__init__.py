@@ -22,6 +22,17 @@ from phoenix_core.portfolio import (
     save_portfolio_outputs,
     update_market_prices,
 )
+from phoenix_core.risk_controller import (
+    RiskConfig,
+    RiskDecision,
+    RiskReport,
+    RiskState,
+    evaluate_orders,
+    load_order_requests,
+    load_risk_state,
+    save_risk_outputs,
+    save_risk_state,
+)
 from phoenix_core.position_sizer import (
     PositionSizingConfig,
     SizingDecision,
@@ -46,6 +57,15 @@ __all__ = [
     "Position",
     "PositionSizingConfig",
     "SizingDecision",
+    "save_risk_state",
+    "save_risk_outputs",
+    "load_risk_state",
+    "load_order_requests",
+    "evaluate_orders",
+    "RiskState",
+    "RiskReport",
+    "RiskDecision",
+    "RiskConfig",
     "build_order_requests",
     "build_portfolio_summary",
     "calculate_sizing",

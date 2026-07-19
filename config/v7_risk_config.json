@@ -1,0 +1,25 @@
+{
+  "broker": {
+    "type": "paper",
+    "initial_cash_yen": 300000,
+    "commission_rate": 0.0,
+    "state_file": "state/v7_paper_broker.json"
+  },
+  "risk": {
+    "max_daily_loss_pct": 0.03,
+    "max_drawdown_pct": 0.1,
+    "max_positions": 5,
+    "max_total_invested_pct": 0.8,
+    "max_single_position_pct": 0.3,
+    "max_orders_per_run": 3,
+    "max_consecutive_losses": 3,
+    "minimum_cash_reserve_pct": 0.1,
+    "block_on_broker_health_failure": true
+  },
+  "files": {
+    "orders": "reports/v7_order_requests.json",
+    "approved_orders": "reports/v7_risk_approved_orders.json",
+    "report": "reports/v7_risk_report.txt",
+    "state": "state/v7_risk_state.json"
+  }
+}
