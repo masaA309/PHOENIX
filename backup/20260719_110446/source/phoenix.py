@@ -14,6 +14,8 @@ import sys
 import time
 import traceback
 from typing import Any
+from execution_core import bootstrap_environment
+
 
 ROOT_DIR = Path(__file__).resolve().parent
 REPORT_DIR = ROOT_DIR / "reports"
@@ -46,8 +48,17 @@ STAGES = (
     Stage("market_risk", "Market Risk AI", "market_risk_ai.py"),
     Stage("daily_report", "Daily Report", "daily_report.py"),
     Stage("ai_judgement", "AI Judgement", "ai_judgement.py"),
+    Stage("market_regime", "Market Regime AI", "market_regime_ai.py"),
     Stage("trade_engine", "Trade Engine", "trade_engine.py"),
+    Stage("portfolio_optimizer", "Portfolio Optimizer", "portfolio_optimizer.py"),
+    Stage("portfolio_manager", "Portfolio Manager", "portfolio_manager.py"),
     Stage("position_sizer", "Position Sizer", "position_sizer.py"),
+    Stage("system_auditor", "Pro Coder / Debugger / QA", "system_auditor.py"),
+    Stage("data_health", "Data Health Monitor", "data_health_monitor.py"),
+    Stage("risk_controller", "Risk Controller", "risk_controller.py"),
+    Stage("execution_ai", "Execution AI", "execution_ai.py"),
+    Stage("order_manager", "Order Manager", "order_manager.py"),
+    Stage("broker_gateway", "Broker Gateway", "broker_gateway.py"),
     Stage(
         "price_monitor",
         "Price Monitor",
@@ -58,6 +69,11 @@ STAGES = (
     ),
     Stage("paper_trader", "Paper Trader", "paper_trader.py"),
     Stage("learning_engine", "Learning Engine", "learning_engine.py"),
+    Stage("backtest", "Backtest Engine", "backtest_engine.py"),
+    Stage("optimization", "Optimization Engine", "optimization_engine.py"),
+    Stage("walk_forward", "Walk Forward Engine", "walk_forward_engine.py"),
+    Stage("adaptive_parameter", "Adaptive Parameter", "adaptive_parameter_engine.py"),
+    Stage("dashboard", "Dashboard", "dashboard.py"),
     Stage("notify", "Notify", "notify.py", (), False),
 )
 
@@ -112,7 +128,7 @@ def append_log(path: Path, text: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="PHOENIX v4.0 統合オートパイロット"
+        description="PHOENIX v6.6 分析データ保護・RSSリアルタイム執行"
     )
     parser.add_argument("--from", dest="from_stage")
     parser.add_argument("--only", dest="only_stage")
@@ -225,14 +241,31 @@ def create_backup(run_id: str) -> Path:
 
     source_dir = target / "source"
     for file_name in [
+        "market_data_manager.py",
         "market_risk_ai.py",
         "daily_report.py",
         "ai_judgement.py",
         "trade_engine.py",
+        "portfolio_optimizer.py",
+        "portfolio_manager.py",
         "position_sizer.py",
+        "system_auditor.py",
+        "market_data_gateway.py",
+        "realtime_gateway.py",
+        "data_health_monitor.py",
+        "execution_core.py",
+        "risk_controller.py",
+        "execution_ai.py",
+        "order_manager.py",
+        "broker_gateway.py",
         "price_monitor.py",
         "paper_trader.py",
         "learning_engine.py",
+        "backtest_engine.py",
+        "optimization_engine.py",
+        "walk_forward_engine.py",
+        "adaptive_parameter_engine.py",
+        "dashboard.py",
         "notify.py",
         "phoenix.py",
     ]:
@@ -456,7 +489,7 @@ def build_summary(
     )
 
     return {
-        "version": "PHOENIX v4.0",
+        "version": "PHOENIX v6.5.1",
         "run_id": run_id,
         "started_at": started_at,
         "finished_at": now_text(),
@@ -478,7 +511,7 @@ def save_report(summary: dict[str, Any]) -> None:
     save_json(LATEST_SUMMARY_FILE, summary)
 
     lines = [
-        "PHOENIX v4.0 EXECUTION REPORT",
+        "PHOENIX v6.5.1 EXECUTION REPORT",
         separator(),
         f"RUN ID        : {summary['run_id']}",
         f"START         : {summary['started_at']}",
@@ -536,6 +569,7 @@ def print_summary(summary: dict[str, Any], log_path: Path) -> None:
 def main() -> None:
     configure_console()
     args = parse_args()
+    bootstrap_environment()
 
     if args.list:
         show_stage_list()
@@ -554,7 +588,7 @@ def main() -> None:
     log_path = LOG_DIR / f"{datetime.now():%Y-%m-%d}.log"
 
     print(separator())
-    print("PHOENIX v4.0 AUTOPILOT START")
+    print("PHOENIX v6.5.1 AUTOPILOT START")
     print(separator())
     print(f"ROOT DIR : {ROOT_DIR}")
     print(f"RUN ID   : {run_id}")
@@ -562,7 +596,7 @@ def main() -> None:
 
     append_log(
         log_path,
-        f"\n{separator()}\nPHOENIX v4.0 AUTOPILOT START\n"
+        f"\n{separator()}\nPHOENIX v6.5.1 AUTOPILOT START\n"
         f"RUN ID: {run_id}\nSTART : {started_at}\n{separator()}\n",
     )
 
@@ -580,7 +614,7 @@ def main() -> None:
     stages = resolve_stages(args)
 
     state = {
-        "version": "PHOENIX v4.0",
+        "version": "PHOENIX v6.5.1",
         "run_id": run_id,
         "started_at": started_at,
         "finished_at": "",

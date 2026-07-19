@@ -1,84 +1,84 @@
 {
   "1605.T": {
-    "updated_at": "2026-07-19 11:10:26",
+    "updated_at": "2026-07-19 10:54:51",
     "source": "cache",
     "rows": 1340,
     "error": ""
   },
   "5406.T": {
-    "updated_at": "2026-07-19 11:10:26",
+    "updated_at": "2026-07-19 10:54:51",
     "source": "cache",
     "rows": 1340,
     "error": ""
   },
   "6988.T": {
-    "updated_at": "2026-07-19 11:10:26",
+    "updated_at": "2026-07-19 10:54:51",
     "source": "cache",
     "rows": 1340,
     "error": ""
   },
   "9501.T": {
-    "updated_at": "2026-07-19 11:10:26",
+    "updated_at": "2026-07-19 10:54:51",
     "source": "cache",
     "rows": 1340,
     "error": ""
   },
   "9101.T": {
-    "updated_at": "2026-07-19 11:10:26",
+    "updated_at": "2026-07-19 10:54:51",
     "source": "cache",
     "rows": 1340,
     "error": ""
   },
   "3405.T": {
-    "updated_at": "2026-07-19 11:10:26",
+    "updated_at": "2026-07-19 10:54:51",
     "source": "cache",
     "rows": 1340,
     "error": ""
   },
   "9107.T": {
-    "updated_at": "2026-07-19 11:10:33",
+    "updated_at": "2026-07-19 10:54:59",
     "source": "cache",
     "rows": 1340,
     "error": ""
   },
   "3697.T": {
-    "updated_at": "2026-07-19 11:10:54",
+    "updated_at": "2026-07-19 10:55:20",
     "source": "cache",
     "rows": 1340,
     "error": ""
   },
   "1332.T": {
-    "updated_at": "2026-07-19 11:11:08",
+    "updated_at": "2026-07-19 10:55:35",
     "source": "cache",
     "rows": 1340,
     "error": ""
   },
   "1721.T": {
-    "updated_at": "2026-07-19 11:11:08",
+    "updated_at": "2026-07-19 10:55:36",
     "source": "cache",
     "rows": 1340,
     "error": ""
   },
   "1801.T": {
-    "updated_at": "2026-07-19 11:11:08",
+    "updated_at": "2026-07-19 10:55:36",
     "source": "cache",
     "rows": 1340,
     "error": ""
   },
   "1802.T": {
-    "updated_at": "2026-07-19 11:11:08",
+    "updated_at": "2026-07-19 10:55:36",
     "source": "cache",
     "rows": 1340,
     "error": ""
   },
   "1803.T": {
-    "updated_at": "2026-07-19 11:11:08",
+    "updated_at": "2026-07-19 10:55:36",
     "source": "cache",
     "rows": 1340,
     "error": ""
   },
   "1808.T": {
-    "updated_at": "2026-07-19 11:11:08",
+    "updated_at": "2026-07-19 10:55:36",
     "source": "cache",
     "rows": 1340,
     "error": ""
@@ -120,37 +120,37 @@
     "error": ""
   },
   "4005.T": {
-    "updated_at": "2026-07-19 11:10:33",
+    "updated_at": "2026-07-19 10:54:59",
     "source": "failed",
     "rows": 0,
     "error": "yf.download(period): empty | Ticker.history: empty | yf.download(date): empty | yf.download(period): empty | Ticker.history: empty | yf.download(date): empty"
   },
   "9001.T": {
-    "updated_at": "2026-07-19 11:10:40",
+    "updated_at": "2026-07-19 10:55:06",
     "source": "failed",
     "rows": 0,
     "error": "yf.download(period): empty | Ticker.history: empty | yf.download(date): empty | yf.download(period): empty | Ticker.history: empty | yf.download(date): empty"
   },
   "6724.T": {
-    "updated_at": "2026-07-19 11:10:47",
+    "updated_at": "2026-07-19 10:55:13",
     "source": "failed",
     "rows": 0,
     "error": "yf.download(period): empty | Ticker.history: empty | yf.download(date): empty | yf.download(period): empty | Ticker.history: empty | yf.download(date): empty"
   },
   "4902.T": {
-    "updated_at": "2026-07-19 11:10:54",
+    "updated_at": "2026-07-19 10:55:20",
     "source": "failed",
     "rows": 0,
     "error": "yf.download(period): empty | Ticker.history: empty | yf.download(date): empty | yf.download(period): empty | Ticker.history: empty | yf.download(date): empty"
   },
   "3436.T": {
-    "updated_at": "2026-07-19 11:11:01",
+    "updated_at": "2026-07-19 10:55:28",
     "source": "failed",
     "rows": 0,
     "error": "yf.download(period): empty | Ticker.history: empty | yf.download(date): empty | yf.download(period): empty | Ticker.history: empty | yf.download(date): empty"
   },
   "9984.T": {
-    "updated_at": "2026-07-19 11:11:08",
+    "updated_at": "2026-07-19 10:55:35",
     "source": "failed",
     "rows": 0,
     "error": "yf.download(period): empty | Ticker.history: empty | yf.download(date): empty | yf.download(period): empty | Ticker.history: empty | yf.download(date): empty"

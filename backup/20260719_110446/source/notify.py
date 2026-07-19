@@ -24,6 +24,8 @@ AI_JUDGEMENT_FILE = (
     / "ai_judgement.csv"
 )
 
+ADAPTIVE_PARAMETER_FILE = REPORT_DIR / "adaptive_parameter.json"
+
 NOTIFICATION_LOG_FILE = (
     REPORT_DIR
     / "notification_log.txt"
@@ -414,11 +416,31 @@ def build_notification_messages(
         "チャート: reports/charts/",
     ])
 
-    return [
-        buy_message,
-        pullback_message,
-    ]
+    messages = [buy_message, pullback_message]
+    adaptive_message = build_adaptive_message()
+    if adaptive_message:
+        messages.append(adaptive_message)
+    return messages
 
+
+
+def build_adaptive_message() -> str:
+    if not ADAPTIVE_PARAMETER_FILE.exists():
+        return ""
+    try:
+        import json
+        data = json.loads(ADAPTIVE_PARAMETER_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    return "\n".join([
+        "🧠 PHOENIX ADAPTIVE PARAMETER",
+        datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "",
+        f"判定: {data.get('decision', 'WAITING')}",
+        f"処理: {data.get('action', 'WAITING')}",
+        f"信頼度: {safe_float(data.get('confidence', 0)):.2f}%",
+        f"理由: {data.get('reason', '')}",
+    ])
 
 def split_message(
     message: str,
