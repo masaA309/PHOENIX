@@ -27,8 +27,8 @@
   },
   "files": {
     "watchlist": "reports/price_watchlist.csv",
-    "events": "reports/price_alert_history.csv",
-    "state": "reports/price_monitor_state.csv",
+    "events": "reports/price_alert_dry_run.csv",
+    "state": "reports/price_monitor_state_dry_run.csv",
     "trades": "reports/paper_trades.csv",
     "learning": "reports/paper_learning_data.csv",
     "summary": "reports/paper_trade_summary.json",
