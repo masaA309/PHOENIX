@@ -16,6 +16,12 @@ from phoenix_core.models import (
     OrderType,
     Position,
 )
+from phoenix_core.portfolio import (
+    build_portfolio_summary,
+    position_frame,
+    save_portfolio_outputs,
+    update_market_prices,
+)
 
 __all__ = [
     "AccountSnapshot",
@@ -28,9 +34,13 @@ __all__ = [
     "OrderType",
     "PaperBroker",
     "Position",
+    "build_portfolio_summary",
     "create_broker",
     "execute_events",
     "normalize_events",
     "normalize_plan",
+    "position_frame",
+    "save_portfolio_outputs",
     "save_snapshot",
+    "update_market_prices",
 ]

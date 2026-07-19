@@ -1,0 +1,14 @@
+{
+  "broker": {
+    "type": "paper",
+    "initial_cash_yen": 300000,
+    "commission_rate": 0.0,
+    "state_file": "state/v7_paper_broker.json"
+  },
+  "files": {
+    "quotes": "reports/price_monitor_state.csv",
+    "summary": "reports/v7_portfolio_summary.json",
+    "positions": "reports/v7_portfolio_positions.csv",
+    "report": "reports/v7_portfolio_report.txt"
+  }
+}
