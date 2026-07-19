@@ -1,0 +1,37 @@
+{
+  "capital": {
+    "initial_capital_yen": 300000
+  },
+  "risk": {
+    "max_open_positions": 3,
+    "max_position_yen": 120000,
+    "lot_size": 100,
+    "allow_odd_lot": false
+  },
+  "entry": {
+    "allowed_ai_judgements": [
+      "BUY",
+      "STRONG BUY",
+      "買い",
+      "強い買い"
+    ],
+    "minimum_ai_score": 70,
+    "minimum_phoenix_score": 70
+  },
+  "exit": {
+    "max_holding_days": 10
+  },
+  "costs": {
+    "commission_rate": 0.0,
+    "slippage_rate": 0.001
+  },
+  "files": {
+    "watchlist": "reports/price_watchlist.csv",
+    "events": "reports/price_alert_history.csv",
+    "state": "reports/price_monitor_state.csv",
+    "trades": "reports/paper_trades.csv",
+    "learning": "reports/paper_learning_data.csv",
+    "summary": "reports/paper_trade_summary.json",
+    "report": "reports/paper_trade_report.txt"
+  }
+}
