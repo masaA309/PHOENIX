@@ -20,6 +20,7 @@ PORTFOLIO_FILE = REPORT_DIR / "portfolio_watchlist.csv"
 PRICE_WATCHLIST_FILE = REPORT_DIR / "price_watchlist.csv"
 POSITION_PLAN_FILE = REPORT_DIR / "position_plan.csv"
 POSITION_SUMMARY_FILE = REPORT_DIR / "position_sizer_summary.json"
+PORTFOLIO_OPTIMIZER_SUMMARY_FILE = REPORT_DIR / "portfolio_optimizer_summary.json"
 PAPER_SUMMARY_FILE = REPORT_DIR / "paper_trade_summary.csv"
 PAPER_TRADES_FILE = REPORT_DIR / "paper_trades.csv"
 LEARNING_REPORT_FILE = REPORT_DIR / "learning_report.csv"
@@ -544,6 +545,19 @@ def load_adaptive() -> dict[str, Any]:
         "parameters": params,
     }
 
+
+def load_portfolio_optimizer() -> dict[str, Any]:
+    data = load_json(PORTFOLIO_OPTIMIZER_SUMMARY_FILE)
+    return {
+        "available": bool(data),
+        "input_count": safe_int(data.get("input_count", 0)),
+        "learned_win_rate": safe_float(data.get("learned_win_rate", 0)),
+        "average_expected_score": safe_float(data.get("average_expected_score", 0)),
+        "average_expected_r": safe_float(data.get("average_expected_r", 0)),
+        "diversification_grade": str(data.get("diversification_grade", "-")),
+        "sector_count": safe_int(data.get("sector_count", 0)),
+    }
+
 def build_dashboard() -> dict[str, Any]:
     market = load_market_risk()
     regime = load_market_regime()
@@ -555,6 +569,7 @@ def build_dashboard() -> dict[str, Any]:
     optimization = load_optimization()
     walk_forward = load_walk_forward()
     adaptive = load_adaptive()
+    portfolio_optimizer = load_portfolio_optimizer()
     system = load_system()
 
     if system["failed_count"] > 0:
@@ -567,11 +582,12 @@ def build_dashboard() -> dict[str, Any]:
         overall = "READY"
 
     return {
-        "version": "PHOENIX v6.3",
+        "version": "PHOENIX v6.4",
         "generated_at": now_text(),
         "overall_status": overall,
         "market_risk": market,
         "market_regime": regime,
+        "portfolio_optimizer": portfolio_optimizer,
         "portfolio": portfolio,
         "positions": positions,
         "paper_trader": paper,
@@ -587,6 +603,7 @@ def build_dashboard() -> dict[str, Any]:
 def print_dashboard(data: dict[str, Any]) -> None:
     risk = data["market_risk"]
     regime = data["market_regime"]
+    portfolio_optimizer = data["portfolio_optimizer"]
     portfolio = data["portfolio"]
     positions = data["positions"]
     paper = data["paper_trader"]
@@ -598,7 +615,7 @@ def print_dashboard(data: dict[str, Any]) -> None:
     system = data["system"]
 
     print("=" * 120)
-    print("PHOENIX v6.3 DASHBOARD")
+    print("PHOENIX v6.4 DASHBOARD")
     print("=" * 120)
     print(f"生成時刻       : {data['generated_at']}")
     print(f"システム状態   : {data['overall_status']}")
@@ -620,6 +637,19 @@ def print_dashboard(data: dict[str, Any]) -> None:
     print(f"MA25上比率     : {regime['above_ma25_ratio']:.1f}%")
     print(f"MACD BUY比率   : {regime['macd_buy_ratio']:.1f}%")
     print(f"平均RSI        : {regime['average_rsi']:.1f}")
+
+    print("\n" + "=" * 120)
+    print("Portfolio Optimizer")
+    print("=" * 120)
+    if portfolio_optimizer["available"]:
+        print(f"候補数         : {portfolio_optimizer['input_count']}件")
+        print(f"学習勝率       : {portfolio_optimizer['learned_win_rate']:.2f}%")
+        print(f"平均期待値R    : {portfolio_optimizer['average_expected_r']:+.3f}")
+        print(f"Expected Score : {portfolio_optimizer['average_expected_score']:.2f}")
+        print(f"分散評価       : {portfolio_optimizer['diversification_grade']}")
+        print(f"セクター数     : {portfolio_optimizer['sector_count']}")
+    else:
+        print("最適化結果はまだありません。")
 
     print("\n" + "=" * 120)
     print("資産・ポジション")

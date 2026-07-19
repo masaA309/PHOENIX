@@ -13,7 +13,7 @@ ROOT_DIR = Path(__file__).resolve().parent
 REPORT_DIR = ROOT_DIR / "reports"
 DATA_DIR = ROOT_DIR / "data"
 
-WATCHLIST_FILE = REPORT_DIR / "price_watchlist.csv"
+WATCHLIST_FILE = REPORT_DIR / "portfolio_watchlist.csv"
 AI_PARAMETER_FILE = REPORT_DIR / "ai_parameter.json"
 MARKET_REGIME_FILE = REPORT_DIR / "market_regime.json"
 KABUMINI_SYMBOLS_FILE = DATA_DIR / "rakuten_kabumini_symbols.csv"
@@ -149,6 +149,8 @@ def load_watchlist() -> pd.DataFrame:
             data[column] = pd.to_numeric(data[column], errors="coerce")
 
     data["Trade判定"] = data["Trade判定"].astype(str).str.strip().str.upper()
+    if "Portfolio判定" in data.columns:
+        data = data[data["Portfolio判定"].astype(str).eq("採用")].copy()
     data = data[data["Trade判定"].isin(["BUY", "WATCH"])].copy()
     data = data.dropna(subset=["押し目価格", "利確価格", "損切価格"])
     data = data[(data["押し目価格"] > 0) & (data["利確価格"] > data["押し目価格"]) & (data["損切価格"] < data["押し目価格"])].copy()
@@ -167,7 +169,8 @@ def calculate_plan(watchlist: pd.DataFrame, settings: dict[str, Any]) -> pd.Data
 
     data = watchlist.copy()
     data["__priority"] = data["Trade判定"].map({"BUY": 0, "WATCH": 1}).fillna(2)
-    data = data.sort_values(["__priority", "AI判断点", "PHOENIX_SCORE"], ascending=[True, False, False]).reset_index(drop=True)
+    sort_col = "OptimizerScore" if "OptimizerScore" in data.columns else ("PortfolioScore" if "PortfolioScore" in data.columns else "AI判断点")
+    data = data.sort_values(["__priority", sort_col, "AI判断点"], ascending=[True, False, False]).reset_index(drop=True)
 
     rows: list[dict[str, Any]] = []
     used = 0.0
@@ -192,7 +195,10 @@ def calculate_plan(watchlist: pd.DataFrame, settings: dict[str, Any]) -> pd.Data
         max_by_single = safe_int(max_single / entry) if entry > 0 else 0
         remaining = max(0.0, max_total - used)
         max_by_remaining = safe_int(remaining / entry) if entry > 0 else 0
-        shares = min(max_by_risk, max_by_single, max_by_remaining)
+        allocation_ratio = safe_float(row.get("資金配分比率", row.get("推奨配分比率", 0.0)), 0.0)
+        allocation_cap = max_total * allocation_ratio if allocation_ratio > 0 else max_single
+        max_by_allocation = safe_int(allocation_cap / entry) if entry > 0 else 0
+        shares = min(max_by_risk, max_by_single, max_by_remaining, max_by_allocation if max_by_allocation > 0 else max_by_single)
 
         decision = "採用"
         reason = "1株単位・資金管理条件クリア"
@@ -258,7 +264,7 @@ def build_summary(plan: pd.DataFrame, settings: dict[str, Any]) -> dict[str, Any
     profit = safe_float(adopted["想定利益円"].sum()) if not adopted.empty else 0.0
     loss = safe_float(adopted["想定損失円"].sum()) if not adopted.empty else 0.0
     return {
-        "version": "PHOENIX v6.3.1",
+        "version": "PHOENIX v6.4",
         "generated_at": now_text(),
         "settings": settings,
         "result": {
@@ -285,7 +291,7 @@ def save_outputs(plan: pd.DataFrame, summary: dict[str, Any]) -> None:
     result = summary["result"]
     settings = summary["settings"]
     lines = [
-        "PHOENIX v6.3.1 POSITION SIZER REPORT",
+        "PHOENIX v6.4 POSITION SIZER REPORT",
         now_text(),
         "=" * 120,
         f"証券会社: {BROKER_NAME}",
@@ -306,7 +312,7 @@ def print_result(plan: pd.DataFrame, summary: dict[str, Any]) -> None:
     settings = summary["settings"]
     result = summary["result"]
     print("=" * 120)
-    print("PHOENIX v6.3.1 POSITION SIZER - 楽天かぶミニ対応")
+    print("PHOENIX v6.4 POSITION SIZER - 楽天かぶミニ対応")
     print("=" * 120)
     print(f"証券会社       : {BROKER_NAME}")
     print(f"取引サービス   : {TRADING_SERVICE}")

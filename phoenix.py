@@ -48,6 +48,7 @@ STAGES = (
     Stage("ai_judgement", "AI Judgement", "ai_judgement.py"),
     Stage("market_regime", "Market Regime AI", "market_regime_ai.py"),
     Stage("trade_engine", "Trade Engine", "trade_engine.py"),
+    Stage("portfolio_optimizer", "Portfolio Optimizer", "portfolio_optimizer.py"),
     Stage("portfolio_manager", "Portfolio Manager", "portfolio_manager.py"),
     Stage("position_sizer", "Position Sizer", "position_sizer.py"),
     Stage(
@@ -119,7 +120,7 @@ def append_log(path: Path, text: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="PHOENIX v6.3 統合オートパイロット"
+        description="PHOENIX v6.4 統合オートパイロット"
     )
     parser.add_argument("--from", dest="from_stage")
     parser.add_argument("--only", dest="only_stage")
@@ -237,6 +238,7 @@ def create_backup(run_id: str) -> Path:
         "daily_report.py",
         "ai_judgement.py",
         "trade_engine.py",
+        "portfolio_optimizer.py",
         "portfolio_manager.py",
         "position_sizer.py",
         "price_monitor.py",
