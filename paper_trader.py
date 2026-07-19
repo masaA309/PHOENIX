@@ -147,16 +147,23 @@ def available_cash(trades: pd.DataFrame, initial_capital: float) -> float:
 
 
 def calculate_quantity(entry_price: float, cash: float, config: dict[str, Any]) -> int:
-    risk = config.get("risk", {})
     if entry_price <= 0 or cash <= 0:
         return 0
-    max_amount = min(safe_float(risk.get("max_position_yen"), 100000), cash)
+
+    risk = config.get("risk", {})
+    commission_rate = max(0.0, safe_float(config.get("costs", {}).get("commission_rate"), 0.0))
     lot = max(1, safe_int(risk.get("lot_size"), 100))
-    quantity = int(max_amount // entry_price)
-    quantity = (quantity // lot) * lot
-    if quantity == 0 and bool(risk.get("allow_odd_lot", False)):
-        quantity = int(max_amount // entry_price)
-    return max(0, quantity)
+    allow_odd_lot = bool(risk.get("allow_odd_lot", False))
+
+    cost_per_share = entry_price * (1.0 + commission_rate)
+    if cost_per_share <= 0:
+        return 0
+
+    maximum_shares = int(cash // cost_per_share)
+    if allow_odd_lot:
+        return max(0, maximum_shares)
+
+    return max(0, (maximum_shares // lot) * lot)
 
 
 def already_processed(trades: pd.DataFrame, ticker: str, event_type: str, event_time: pd.Timestamp) -> bool:
@@ -190,7 +197,12 @@ def open_trade(trades: pd.DataFrame, event: pd.Series, row: pd.Series, config: d
     entry = buy_price(safe_float(event["現在価格"]), slippage)
     quantity = calculate_quantity(entry, cash, config)
     if quantity <= 0:
-        print(f"新規見送り: {ticker} 購入可能株数なし")
+        lot = max(1, safe_int(config.get("risk", {}).get("lot_size"), 100))
+        minimum_required = entry * lot
+        print(
+            f"新規見送り: {ticker} 購入可能株数なし "
+            f"(現金 {cash:,.0f}円 / 最低必要額 約{minimum_required:,.0f}円)"
+        )
         return trades
     gross = round(entry * quantity, 2)
     fee = round(gross * commission_rate, 2)
@@ -206,7 +218,11 @@ def open_trade(trades: pd.DataFrame, event: pd.Series, row: pd.Series, config: d
         "決済理由": "", "状態": OPEN_STATUS, "損益額": 0.0, "損益率%": 0.0, "保有日数": 0, "保有時間": "", "最高価格": entry,
         "最低価格": entry, "最大含み益率%": 0.0, "最大含み損率%": 0.0, "最終更新日時": now_text()
     }
-    print(f"仮想買付: {new_trade['銘柄']} {ticker} {quantity}株 {entry:,.2f}円")
+    remaining_cash = max(0.0, cash - total)
+    print(
+        f"仮想買付: {new_trade['銘柄']} {ticker} {quantity}株 {entry:,.2f}円 "
+        f"投資額 {total:,.0f}円 / 残金 {remaining_cash:,.0f}円"
+    )
     return pd.concat([trades, pd.DataFrame([new_trade])], ignore_index=True)[trade_columns()]
 
 
@@ -237,24 +253,58 @@ def close_position(trades: pd.DataFrame, index: int, market_price: float, when: 
 
 
 def process_events(trades: pd.DataFrame, events: pd.DataFrame, watchlist: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
-    for _, event in events.iterrows():
+    reason_map = {
+        "TAKE_PROFIT": "利確",
+        "TARGET": "利確",
+        "STOP_LOSS": "損切",
+        "STOP": "損切",
+        "EXIT": "手動決済",
+        "CLOSE": "手動決済",
+    }
+
+    exit_events = events[events["イベント"].astype(str).str.strip().str.upper() != "ENTRY"].sort_values("日時")
+    for _, event in exit_events.iterrows():
         ticker = str(event["ticker"])
         kind = str(event["イベント"]).strip().upper()
         when = pd.Timestamp(event["日時"])
         if already_processed(trades, ticker, kind, when):
             continue
-        matched = watchlist[watchlist["ticker"].astype(str) == ticker]
-        if kind == "ENTRY":
-            if not matched.empty:
-                trades = open_trade(trades, event, matched.iloc[-1], config)
+        reason = reason_map.get(kind)
+        if not reason:
             continue
         open_indexes = trades.index[(trades["ticker"].astype(str) == ticker) & (trades["状態"] == OPEN_STATUS)].tolist()
-        if not open_indexes:
-            continue
-        reason_map = {"TAKE_PROFIT": "利確", "TARGET": "利確", "STOP_LOSS": "損切", "STOP": "損切", "EXIT": "手動決済", "CLOSE": "手動決済"}
-        reason = reason_map.get(kind)
-        if reason:
+        if open_indexes:
             close_position(trades, open_indexes[-1], safe_float(event["現在価格"]), when, reason, config)
+
+    entry_events = events[events["イベント"].astype(str).str.strip().str.upper() == "ENTRY"].copy()
+    if entry_events.empty:
+        return trades
+
+    entry_events = entry_events.sort_values("日時").drop_duplicates(subset=["ticker"], keep="last")
+    candidates = entry_events.merge(watchlist, on="ticker", how="left", suffixes=("_event", ""))
+    candidates["AI判断点"] = pd.to_numeric(candidates.get("AI判断点"), errors="coerce").fillna(0)
+    candidates["PHOENIX_SCORE"] = pd.to_numeric(candidates.get("PHOENIX_SCORE"), errors="coerce").fillna(0)
+    candidates["総合優先点"] = candidates["AI判断点"] * 0.6 + candidates["PHOENIX_SCORE"] * 0.4
+    candidates = candidates.sort_values(["総合優先点", "AI判断点", "PHOENIX_SCORE", "日時"], ascending=[False, False, False, True])
+
+    max_positions = max(1, safe_int(config.get("risk", {}).get("max_open_positions"), 3))
+    for _, candidate in candidates.iterrows():
+        ticker = str(candidate["ticker"])
+        when = pd.Timestamp(candidate["日時"])
+        if already_processed(trades, ticker, "ENTRY", when):
+            continue
+        if int((trades["状態"] == OPEN_STATUS).sum()) >= max_positions:
+            print(f"新規受付終了: 最大保有数 {max_positions} に到達")
+            break
+        event = pd.Series({
+            "日時": when,
+            "イベント": "ENTRY",
+            "銘柄": candidate.get("銘柄_event", candidate.get("銘柄", "")),
+            "ticker": ticker,
+            "現在価格": candidate.get("現在価格", 0),
+        })
+        trades = open_trade(trades, event, candidate, config)
+
     return trades
 
 

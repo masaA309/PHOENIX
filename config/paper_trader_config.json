@@ -4,7 +4,6 @@
   },
   "risk": {
     "max_open_positions": 3,
-    "max_position_yen": 120000,
     "lot_size": 100,
     "allow_odd_lot": false
   },
