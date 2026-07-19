@@ -1,3 +1,10 @@
+from phoenix_core.pipeline import (
+    PipelineResult,
+    execute_approved_orders,
+    run_direct_pipeline,
+    run_direct_pipeline_from_csv,
+    save_pipeline_logs,
+)
 from phoenix_core.broker import BrokerAdapter, PaperBroker
 from phoenix_core.execution import (
     execute_events,
@@ -81,4 +88,9 @@ __all__ = [
     "save_snapshot",
     "size_candidates",
     "update_market_prices",
+    "PipelineResult",
+    "execute_approved_orders",
+    "run_direct_pipeline",
+    "run_direct_pipeline_from_csv",
+    "save_pipeline_logs",
 ]
