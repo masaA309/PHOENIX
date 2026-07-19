@@ -1,0 +1,26 @@
+{
+  "version": "PHOENIX v6.5.1",
+  "team_name": "PHOENIX Professional Trading & Engineering Team",
+  "members": [
+    {
+      "role": "プロトレーダー",
+      "responsibility": "売買戦略・相場判断・執行ルール監督"
+    },
+    {
+      "role": "リスクマネージャー",
+      "responsibility": "損失上限・資金配分・緊急停止監督"
+    },
+    {
+      "role": "クオンツ",
+      "responsibility": "期待値・バックテスト・最適化検証"
+    },
+    {
+      "role": "プロコーダー",
+      "responsibility": "実装品質・保守性・互換性監督"
+    },
+    {
+      "role": "デバッカー",
+      "responsibility": "構文・入出力・設定・異常系の自動検査"
+    }
+  ]
+}
