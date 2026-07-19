@@ -1,0 +1,19 @@
+{
+  "state_version": 1,
+  "broker_name": "PAPER",
+  "updated_at": "2026-07-20T01:23:09",
+  "initial_cash_yen": 300000.0,
+  "cash_yen": 247760.0,
+  "commission_rate": 0.0,
+  "realized_pnl_yen": 0.0,
+  "positions": {
+    "4005.T": {
+      "quantity": 100,
+      "average_price": 522.4,
+      "market_price": 522.4
+    }
+  },
+  "processed_client_order_ids": [
+    "PHX-493E7F1185DCD721"
+  ]
+}

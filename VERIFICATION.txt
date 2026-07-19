@@ -1,7 +1,9 @@
-PHOENIX v6.8 verification
-- Python py_compile: PASS
-- Synthetic ENTRY: PASS
-- Automatic take-profit EXIT: PASS
-- P&L/slippage calculation: PASS
-- Learning CSV generation: PASS
-- Performance Analyzer compatibility: PASS (paper_trades.csv keeps 決済日時/損益額/損益率%/状態)
+PHOENIX v6.9.1 Learning Engine Compatibility Update
+
+Python compile: PASS
+Current Japanese CSV schema: PASS
+損益額 alias: PASS
+損益率% alias: PASS
+AI判断点 alias: PASS
+MACD判定 alias: PASS
+Four report files generated: PASS

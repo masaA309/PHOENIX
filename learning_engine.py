@@ -1,1151 +1,482 @@
-# learning_engine.py
-
 from __future__ import annotations
 
-from datetime import datetime
-from pathlib import Path
+import argparse
 import json
 import math
-import sys
-from typing import Any
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterable
 
 import pandas as pd
 
 
-# =========================================================
-# 基本設定
-# =========================================================
-
-ROOT_DIR = Path(__file__).resolve().parent
-REPORT_DIR = ROOT_DIR / "reports"
-
-LEARNING_SOURCE_FILE = REPORT_DIR / "paper_learning_data.csv"
-LEARNING_REPORT_FILE = REPORT_DIR / "learning_report.csv"
-PARAMETER_FILE = REPORT_DIR / "ai_parameter.json"
-TEXT_REPORT_FILE = REPORT_DIR / "learning_engine_report.txt"
-
-ACCOUNT_CAPITAL = 300_000
-
-MIN_SAMPLE_FOR_ADJUSTMENT = 10
-STRONG_SAMPLE_COUNT = 30
-MAX_SCORE_ADJUSTMENT = 20
-BASELINE_SCORE = 0
-
-RSI_BINS = [
-    (-math.inf, 29.9999, "RSI 30未満"),
-    (30.0, 39.9999, "RSI 30-39"),
-    (40.0, 49.9999, "RSI 40-49"),
-    (50.0, 59.9999, "RSI 50-59"),
-    (60.0, 69.9999, "RSI 60-69"),
-    (70.0, math.inf, "RSI 70以上"),
-]
-
-AI_SCORE_BINS = [
-    (-math.inf, 59.9999, "AI判断点 60未満"),
-    (60.0, 69.9999, "AI判断点 60-69"),
-    (70.0, 79.9999, "AI判断点 70-79"),
-    (80.0, math.inf, "AI判断点 80以上"),
-]
-
-PHOENIX_SCORE_BINS = [
-    (-math.inf, 59.9999, "PHOENIX_SCORE 60未満"),
-    (60.0, 69.9999, "PHOENIX_SCORE 60-69"),
-    (70.0, 79.9999, "PHOENIX_SCORE 70-79"),
-    (80.0, math.inf, "PHOENIX_SCORE 80以上"),
-]
+VERSION = "6.9.1"
+DEFAULT_INPUT_CANDIDATES = (
+    Path("reports/paper_learning_data.csv"),
+    Path("reports/paper_trades.csv"),
+)
+DEFAULT_CONFIG_PATH = Path("config/learning_config.json")
 
 
-# =========================================================
-# 共通処理
-# =========================================================
+COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
+    "ticker": ("ticker", "symbol", "code", "銘柄コード"),
+    "name": ("name", "stock_name", "company", "銘柄名"),
+    "entry_date": ("entry_date", "opened_at", "buy_date", "entry_time", "エントリー日"),
+    "exit_date": ("exit_date", "closed_at", "sell_date", "exit_time", "決済日"),
+    "entry_price": ("entry_price", "buy_price", "open_price", "取得価格"),
+    "exit_price": ("exit_price", "sell_price", "close_price", "決済価格"),
+    "quantity": ("quantity", "qty", "shares", "株数"),
+    "trade_id": ("trade_id", "取引ID"),
+    "pnl": ("pnl", "profit", "profit_loss", "realized_pnl", "損益", "損益額"),
+    "pnl_pct": ("pnl_pct", "return_pct", "profit_pct", "損益率", "損益率%"),
+    "holding_days": ("holding_days", "days_held", "保有日数"),
+    "rsi": ("rsi", "entry_rsi", "RSI"),
+    "macd": ("macd", "macd_signal", "entry_macd", "MACD", "MACD判定"),
+    "volume_ratio": ("volume_ratio", "volume_multiple", "volume_rate", "出来高倍率"),
+    "ai_score": ("ai_score", "final_ai_score", "AI_SCORE", "AIスコア", "AI判断点"),
+    "phoenix_score": ("phoenix_score", "score", "PHOENIX_SCORE", "PHOENIXスコア"),
+    "market_regime": ("market_regime", "regime", "market_phase", "地合い"),
+    "result": ("result", "win_loss", "勝敗"),
+    "entry_reason": ("entry_reason", "reason", "buy_reason", "エントリー理由"),
+    "exit_reason": ("exit_reason", "sell_reason", "close_reason", "決済理由"),
+}
 
-def configure_console() -> None:
-    try:
-        sys.stdout.reconfigure(
-            encoding="utf-8",
-            errors="replace",
-        )
-        sys.stderr.reconfigure(
-            encoding="utf-8",
-            errors="replace",
-        )
-    except (
-        AttributeError,
-        OSError,
-    ):
-        pass
+
+@dataclass(frozen=True)
+class Paths:
+    input_csv: Path
+    config_json: Path
+    report_csv: Path
+    summary_csv: Path
+    adjustments_json: Path
+    report_txt: Path
 
 
-def now_text() -> str:
-    return datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S"
+def load_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(f"設定ファイルが見つかりません: {path}")
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def resolve_input(explicit: str | None) -> Path:
+    if explicit:
+        p = Path(explicit)
+        if not p.exists():
+            raise FileNotFoundError(f"入力CSVが見つかりません: {p}")
+        return p
+
+    for candidate in DEFAULT_INPUT_CANDIDATES:
+        if candidate.exists():
+            return candidate
+
+    candidates = "\n".join(f"  - {p}" for p in DEFAULT_INPUT_CANDIDATES)
+    raise FileNotFoundError(
+        "Paper Traderの学習データが見つかりません。\n"
+        f"確認対象:\n{candidates}"
     )
 
 
-def safe_float(
-    value: Any,
-    default: float = 0.0,
-) -> float:
-    try:
-        if pd.isna(value):
-            return default
+def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    original_lookup = {str(c).strip().lower(): c for c in df.columns}
+    rename_map: dict[Any, str] = {}
 
-        result = float(value)
+    for canonical, aliases in COLUMN_ALIASES.items():
+        for alias in aliases:
+            found = original_lookup.get(alias.strip().lower())
+            if found is not None:
+                rename_map[found] = canonical
+                break
 
-        if not math.isfinite(result):
-            return default
-
-        return result
-
-    except (
-        TypeError,
-        ValueError,
-    ):
-        return default
+    return df.rename(columns=rename_map).copy()
 
 
-def safe_int(
-    value: Any,
-    default: int = 0,
-) -> int:
-    try:
-        return int(
-            round(
-                safe_float(
-                    value,
-                    default,
-                )
+def numeric(series: pd.Series) -> pd.Series:
+    if series.dtype == object:
+        series = (
+            series.astype(str)
+            .str.replace(",", "", regex=False)
+            .str.replace("%", "", regex=False)
+            .str.replace("円", "", regex=False)
+            .str.strip()
+            .replace({"": None, "None": None, "nan": None})
+        )
+    return pd.to_numeric(series, errors="coerce")
+
+
+def prepare_trade_data(df: pd.DataFrame) -> pd.DataFrame:
+    df = normalize_columns(df)
+
+    for col in ("entry_price", "exit_price", "quantity", "pnl", "pnl_pct",
+                "holding_days", "rsi", "volume_ratio", "ai_score", "phoenix_score"):
+        if col in df.columns:
+            df[col] = numeric(df[col])
+
+    if "pnl" not in df.columns:
+        needed = {"entry_price", "exit_price", "quantity"}
+        if needed.issubset(df.columns):
+            df["pnl"] = (df["exit_price"] - df["entry_price"]) * df["quantity"]
+        else:
+            raise ValueError(
+                "損益列がありません。pnl、または entry_price/exit_price/quantity が必要です。"
             )
-        )
-    except (
-        TypeError,
-        ValueError,
-    ):
-        return default
+
+    if "pnl_pct" not in df.columns and {"entry_price", "exit_price"}.issubset(df.columns):
+        valid = df["entry_price"].replace(0, pd.NA)
+        df["pnl_pct"] = (df["exit_price"] - df["entry_price"]) / valid * 100.0
+
+    if "holding_days" not in df.columns and {"entry_date", "exit_date"}.issubset(df.columns):
+        entry = pd.to_datetime(df["entry_date"], errors="coerce")
+        exit_ = pd.to_datetime(df["exit_date"], errors="coerce")
+        df["holding_days"] = (exit_ - entry).dt.days.clip(lower=0)
+
+    # Closed trades only. Open trades normally have no realized P/L.
+    df = df[df["pnl"].notna()].copy()
+    df["is_win"] = df["pnl"] > 0
+    df["is_loss"] = df["pnl"] < 0
+    return df
 
 
-def read_csv_safe(
-    file_path: Path,
-) -> pd.DataFrame:
-    if not file_path.exists():
-        return pd.DataFrame()
-
-    last_error: Exception | None = None
-
-    for encoding in (
-        "utf-8-sig",
-        "utf-8",
-        "cp932",
-    ):
-        try:
-            return pd.read_csv(
-                file_path,
-                encoding=encoding,
-            )
-        except Exception as error:
-            last_error = error
-
-    if last_error is not None:
-        raise last_error
-
-    return pd.DataFrame()
+def assign_bins(
+    series: pd.Series,
+    edges: list[float],
+    labels: list[str],
+) -> pd.Series:
+    if len(labels) != len(edges) - 1:
+        raise ValueError("bin labels数はedges数-1である必要があります。")
+    return pd.cut(
+        numeric(series),
+        bins=edges,
+        labels=labels,
+        include_lowest=True,
+        right=False,
+    ).astype("object").fillna("不明")
 
 
-def write_json(
-    file_path: Path,
-    data: dict[str, Any],
-) -> None:
-    with open(
-        file_path,
-        "w",
-        encoding="utf-8",
-        newline="\n",
-    ) as file:
-        json.dump(
-            data,
-            file,
-            ensure_ascii=False,
-            indent=2,
-        )
+def safe_pf(profits: pd.Series) -> float | None:
+    gross_profit = profits[profits > 0].sum()
+    gross_loss = abs(profits[profits < 0].sum())
+    if gross_loss == 0:
+        return None if gross_profit == 0 else math.inf
+    return float(gross_profit / gross_loss)
 
 
-# =========================================================
-# 学習データ読込
-# =========================================================
+def grade_group(
+    trades: int,
+    expectancy: float,
+    pf: float | None,
+    min_samples: int,
+    strengthen_expectancy: float,
+    weaken_expectancy: float,
+    strengthen_pf: float,
+    weaken_pf: float,
+) -> tuple[str, int]:
+    if trades < min_samples:
+        return "観察", 0
 
-def create_empty_learning_source() -> pd.DataFrame:
-    return pd.DataFrame(
-        columns=[
-            "ticker",
-            "銘柄",
-            "AI判断",
-            "AI判断点",
-            "PHOENIX_SCORE",
-            "RSI",
-            "MACD判定",
-            "エントリー価格",
-            "決済価格",
-            "損益率%",
-            "結果",
-            "決済理由",
-            "エントリー日時",
-            "決済日時",
-        ]
-    )
+    pf_value = float("inf") if pf is not None and math.isinf(pf) else (pf or 0.0)
+
+    if expectancy >= strengthen_expectancy and pf_value >= strengthen_pf:
+        return "強化", 1
+    if expectancy <= weaken_expectancy or pf_value <= weaken_pf:
+        return "抑制", -1
+    return "維持", 0
 
 
-def load_learning_source() -> pd.DataFrame:
-    if not LEARNING_SOURCE_FILE.exists():
-        REPORT_DIR.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        empty = create_empty_learning_source()
-
-        empty.to_csv(
-            LEARNING_SOURCE_FILE,
-            index=False,
-            encoding="utf-8-sig",
-        )
-
-        return empty
-
-    data = read_csv_safe(
-        LEARNING_SOURCE_FILE
-    )
-
-    if data.empty:
-        return create_empty_learning_source()
-
-    required_columns = {
-        "ticker",
-        "銘柄",
-        "AI判断",
-        "AI判断点",
-        "PHOENIX_SCORE",
-        "RSI",
-        "MACD判定",
-        "損益率%",
-        "結果",
-        "決済理由",
-    }
-
-    missing_columns = (
-        required_columns
-        - set(data.columns)
-    )
-
-    if missing_columns:
-        raise ValueError(
-            "paper_learning_data.csv に必要な列がありません: "
-            + ", ".join(
-                sorted(missing_columns)
-            )
-        )
-
-    numeric_columns = [
-        "AI判断点",
-        "PHOENIX_SCORE",
-        "RSI",
-        "損益率%",
-    ]
-
-    for column in numeric_columns:
-        data[column] = pd.to_numeric(
-            data[column],
-            errors="coerce",
-        )
-
-    data["ticker"] = (
-        data["ticker"]
-        .astype(str)
-        .str.strip()
-    )
-
-    data["AI判断"] = (
-        data["AI判断"]
-        .astype(str)
-        .str.strip()
-    )
-
-    data["MACD判定"] = (
-        data["MACD判定"]
-        .astype(str)
-        .str.strip()
-        .str.upper()
-    )
-
-    data["結果"] = (
-        data["結果"]
-        .astype(str)
-        .str.strip()
-        .str.upper()
-    )
-
-    data["決済理由"] = (
-        data["決済理由"]
-        .astype(str)
-        .str.strip()
-    )
-
-    data = data.dropna(
-        subset=[
-            "ticker",
-            "損益率%",
-        ]
-    )
-
-    data = data[
-        data["結果"].isin(
-            [
-                "WIN",
-                "LOSS",
-                "DRAW",
-            ]
-        )
-    ].copy()
-
-    data = data.drop_duplicates(
-        subset=[
-            "ticker",
-            "エントリー日時",
-            "決済日時",
-        ],
-        keep="last",
-    )
-
-    return data.reset_index(
-        drop=True
-    )
-
-
-# =========================================================
-# 統計
-# =========================================================
-
-def wilson_shrunk_win_rate(
-    wins: int,
-    total: int,
-    prior_rate: float,
-    prior_weight: int = 10,
-) -> float:
-    if total <= 0:
-        return prior_rate
-
-    return (
-        wins
-        + prior_rate * prior_weight
-    ) / (
-        total
-        + prior_weight
-    )
-
-
-def sample_confidence(
-    sample_count: int,
-) -> float:
-    if sample_count <= 0:
-        return 0.0
-
-    return min(
-        sample_count
-        / STRONG_SAMPLE_COUNT,
-        1.0,
-    )
-
-
-def calculate_adjustment(
-    win_rate: float,
-    average_return: float,
-    profit_factor: float,
-    sample_count: int,
-    baseline_win_rate: float,
-) -> int:
-    if sample_count < MIN_SAMPLE_FOR_ADJUSTMENT:
-        return BASELINE_SCORE
-
-    confidence = sample_confidence(
-        sample_count
-    )
-
-    win_component = (
-        win_rate
-        - baseline_win_rate
-    ) * 40.0
-
-    return_component = max(
-        min(
-            average_return * 1.5,
-            8.0,
-        ),
-        -8.0,
-    )
-
-    if profit_factor >= 2.0:
-        pf_component = 4.0
-    elif profit_factor >= 1.3:
-        pf_component = 2.0
-    elif profit_factor >= 1.0:
-        pf_component = 0.0
-    elif profit_factor > 0:
-        pf_component = -3.0
-    else:
-        pf_component = -5.0
-
-    raw_adjustment = (
-        win_component
-        + return_component
-        + pf_component
-    ) * confidence
-
-    return int(
-        max(
-            min(
-                round(raw_adjustment),
-                MAX_SCORE_ADJUSTMENT,
-            ),
-            -MAX_SCORE_ADJUSTMENT,
-        )
-    )
-
-
-def create_group_row(
+def summarize_group(
     data: pd.DataFrame,
-    category: str,
-    condition: str,
-    baseline_win_rate: float,
-) -> dict[str, Any]:
-    total = len(data)
+    dimension: str,
+    group_col: str,
+    config: dict[str, Any],
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    learn = config["learning"]
 
-    if total <= 0:
-        return {
-            "カテゴリ": category,
-            "条件": condition,
-            "取引数": 0,
-            "勝ち": 0,
-            "負け": 0,
-            "引分": 0,
-            "勝率%": 0.0,
-            "補正勝率%": round(
-                baseline_win_rate * 100,
-                2,
+    for group_value, g in data.groupby(group_col, dropna=False, observed=False):
+        pnl = g["pnl"].dropna()
+        trades = int(len(g))
+        wins = int((pnl > 0).sum())
+        losses = int((pnl < 0).sum())
+        win_rate = wins / trades * 100 if trades else 0.0
+        avg_profit = pnl[pnl > 0].mean() if wins else 0.0
+        avg_loss = pnl[pnl < 0].mean() if losses else 0.0
+        expectancy = pnl.mean() if trades else 0.0
+        total_pnl = pnl.sum() if trades else 0.0
+        pf = safe_pf(pnl)
+
+        judgement, direction = grade_group(
+            trades=trades,
+            expectancy=float(expectancy),
+            pf=pf,
+            min_samples=int(learn["minimum_samples"]),
+            strengthen_expectancy=float(learn["strengthen_expectancy_yen"]),
+            weaken_expectancy=float(learn["weaken_expectancy_yen"]),
+            strengthen_pf=float(learn["strengthen_profit_factor"]),
+            weaken_pf=float(learn["weaken_profit_factor"]),
+        )
+
+        rows.append({
+            "dimension": dimension,
+            "group": str(group_value),
+            "trades": trades,
+            "wins": wins,
+            "losses": losses,
+            "win_rate_pct": round(win_rate, 2),
+            "gross_profit_yen": round(float(pnl[pnl > 0].sum()), 2),
+            "gross_loss_yen": round(float(pnl[pnl < 0].sum()), 2),
+            "profit_factor": "INF" if pf is not None and math.isinf(pf) else (
+                round(pf, 4) if pf is not None else ""
             ),
-            "平均損益率%": 0.0,
-            "中央値損益率%": 0.0,
-            "総損益率%": 0.0,
-            "PF": 0.0,
-            "信頼度%": 0.0,
-            "AI点補正": 0,
-            "判定": "データ不足",
+            "average_profit_yen": round(float(avg_profit), 2),
+            "average_loss_yen": round(float(avg_loss), 2),
+            "expectancy_yen": round(float(expectancy), 2),
+            "total_pnl_yen": round(float(total_pnl), 2),
+            "judgement": judgement,
+            "direction": direction,
+        })
+
+    return pd.DataFrame(rows)
+
+
+def build_statistics(data: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    bins = config["bins"]
+
+    numeric_dimensions = (
+        ("RSI", "rsi", bins["rsi"]),
+        ("AI_SCORE", "ai_score", bins["ai_score"]),
+        ("PHOENIX_SCORE", "phoenix_score", bins["phoenix_score"]),
+        ("VOLUME_RATIO", "volume_ratio", bins["volume_ratio"]),
+        ("HOLDING_DAYS", "holding_days", bins["holding_days"]),
+    )
+
+    for dimension, column, definition in numeric_dimensions:
+        if column not in data.columns:
+            continue
+        working = data.copy()
+        working["_group"] = assign_bins(
+            working[column],
+            [float(v) for v in definition["edges"]],
+            [str(v) for v in definition["labels"]],
+        )
+        frames.append(summarize_group(working, dimension, "_group", config))
+
+    categorical_dimensions = (
+        ("MACD", "macd"),
+        ("MARKET_REGIME", "market_regime"),
+        ("ENTRY_REASON", "entry_reason"),
+        ("EXIT_REASON", "exit_reason"),
+    )
+
+    for dimension, column in categorical_dimensions:
+        if column not in data.columns:
+            continue
+        working = data.copy()
+        working["_group"] = (
+            working[column]
+            .fillna("不明")
+            .astype(str)
+            .str.strip()
+            .replace({"": "不明"})
+        )
+        frames.append(summarize_group(working, dimension, "_group", config))
+
+    if not frames:
+        return pd.DataFrame(columns=[
+            "dimension", "group", "trades", "wins", "losses",
+            "win_rate_pct", "gross_profit_yen", "gross_loss_yen",
+            "profit_factor", "average_profit_yen", "average_loss_yen",
+            "expectancy_yen", "total_pnl_yen", "judgement", "direction",
+        ])
+
+    result = pd.concat(frames, ignore_index=True)
+    return result.sort_values(
+        ["dimension", "trades", "expectancy_yen"],
+        ascending=[True, False, False],
+    ).reset_index(drop=True)
+
+
+def build_adjustments(stats: pd.DataFrame, config: dict[str, Any]) -> dict[str, Any]:
+    learn = config["learning"]
+    step = int(learn["adjustment_step"])
+    max_abs = int(learn["maximum_absolute_adjustment"])
+
+    adjustments: dict[str, dict[str, int]] = {}
+    evidence: dict[str, dict[str, dict[str, Any]]] = {}
+
+    for row in stats.to_dict(orient="records"):
+        dimension = str(row["dimension"])
+        group = str(row["group"])
+        direction = int(row["direction"])
+        adjustment = max(-max_abs, min(max_abs, direction * step))
+
+        adjustments.setdefault(dimension, {})[group] = adjustment
+        evidence.setdefault(dimension, {})[group] = {
+            "trades": int(row["trades"]),
+            "win_rate_pct": float(row["win_rate_pct"]),
+            "profit_factor": row["profit_factor"],
+            "expectancy_yen": float(row["expectancy_yen"]),
+            "judgement": str(row["judgement"]),
         }
 
-    returns = pd.to_numeric(
-        data["損益率%"],
-        errors="coerce",
-    ).fillna(0.0)
-
-    wins = int(
-        (
-            returns > 0
-        ).sum()
-    )
-
-    losses = int(
-        (
-            returns < 0
-        ).sum()
-    )
-
-    draws = total - wins - losses
-
-    gross_profit = safe_float(
-        returns[
-            returns > 0
-        ].sum()
-    )
-
-    gross_loss = abs(
-        safe_float(
-            returns[
-                returns < 0
-            ].sum()
-        )
-    )
-
-    if gross_loss > 0:
-        profit_factor = (
-            gross_profit
-            / gross_loss
-        )
-    elif gross_profit > 0:
-        profit_factor = 99.0
-    else:
-        profit_factor = 0.0
-
-    raw_win_rate = (
-        wins
-        / total
-    )
-
-    adjusted_win_rate = (
-        wilson_shrunk_win_rate(
-            wins=wins,
-            total=total,
-            prior_rate=baseline_win_rate,
-        )
-    )
-
-    average_return = safe_float(
-        returns.mean()
-    )
-
-    adjustment = calculate_adjustment(
-        win_rate=adjusted_win_rate,
-        average_return=average_return,
-        profit_factor=profit_factor,
-        sample_count=total,
-        baseline_win_rate=baseline_win_rate,
-    )
-
-    if total < MIN_SAMPLE_FOR_ADJUSTMENT:
-        judgement = "データ不足"
-    elif adjustment >= 8:
-        judgement = "強化"
-    elif adjustment >= 3:
-        judgement = "やや強化"
-    elif adjustment <= -8:
-        judgement = "大幅抑制"
-    elif adjustment <= -3:
-        judgement = "やや抑制"
-    else:
-        judgement = "維持"
-
     return {
-        "カテゴリ": category,
-        "条件": condition,
-        "取引数": total,
-        "勝ち": wins,
-        "負け": losses,
-        "引分": draws,
-        "勝率%": round(
-            raw_win_rate * 100,
-            2,
-        ),
-        "補正勝率%": round(
-            adjusted_win_rate * 100,
-            2,
-        ),
-        "平均損益率%": round(
-            average_return,
-            4,
-        ),
-        "中央値損益率%": round(
-            safe_float(
-                returns.median()
-            ),
-            4,
-        ),
-        "総損益率%": round(
-            safe_float(
-                returns.sum()
-            ),
-            4,
-        ),
-        "PF": round(
-            profit_factor,
-            3,
-        ),
-        "信頼度%": round(
-            sample_confidence(total)
-            * 100,
-            2,
-        ),
-        "AI点補正": adjustment,
-        "判定": judgement,
+        "version": VERSION,
+        "mode": "statistical_rule_adjustment",
+        "minimum_samples": int(learn["minimum_samples"]),
+        "adjustments": adjustments,
+        "evidence": evidence,
+        "safety": {
+            "apply_only_after_minimum_samples": True,
+            "maximum_absolute_adjustment_per_condition": max_abs,
+            "note": "このファイルは統計的補正候補です。実売買へ直接接続しないでください。",
+        },
     }
 
 
-def bin_label(
-    value: float,
-    bins: list[
-        tuple[
-            float,
-            float,
-            str,
-        ]
-    ],
-) -> str:
-    for minimum, maximum, label in bins:
-        if minimum <= value <= maximum:
-            return label
+def overall_summary(data: pd.DataFrame) -> pd.DataFrame:
+    pnl = data["pnl"].dropna()
+    trades = int(len(data))
+    wins = int((pnl > 0).sum())
+    losses = int((pnl < 0).sum())
+    pf = safe_pf(pnl)
 
-    return "不明"
-
-
-def build_learning_report(
-    data: pd.DataFrame,
-) -> pd.DataFrame:
-    if data.empty:
-        return pd.DataFrame(
-            columns=[
-                "カテゴリ",
-                "条件",
-                "取引数",
-                "勝ち",
-                "負け",
-                "引分",
-                "勝率%",
-                "補正勝率%",
-                "平均損益率%",
-                "中央値損益率%",
-                "総損益率%",
-                "PF",
-                "信頼度%",
-                "AI点補正",
-                "判定",
-            ]
-        )
-
-    baseline_wins = int(
-        (
-            data["損益率%"] > 0
-        ).sum()
-    )
-
-    baseline_win_rate = (
-        baseline_wins
-        / len(data)
-        if len(data) > 0
-        else 0.5
-    )
-
-    rows: list[
-        dict[str, Any]
-    ] = []
-
-    rows.append(
-        create_group_row(
-            data=data,
-            category="全体",
-            condition="全取引",
-            baseline_win_rate=baseline_win_rate,
-        )
-    )
-
-    data = data.copy()
-
-    data["RSI条件"] = data["RSI"].apply(
-        lambda value:
-            bin_label(
-                safe_float(value),
-                RSI_BINS,
-            )
-    )
-
-    data["AI点条件"] = data[
-        "AI判断点"
-    ].apply(
-        lambda value:
-            bin_label(
-                safe_float(value),
-                AI_SCORE_BINS,
-            )
-    )
-
-    data["PHOENIX条件"] = data[
-        "PHOENIX_SCORE"
-    ].apply(
-        lambda value:
-            bin_label(
-                safe_float(value),
-                PHOENIX_SCORE_BINS,
-            )
-    )
-
-    grouping_definitions = [
-        (
-            "RSI",
-            "RSI条件",
-        ),
-        (
-            "MACD",
-            "MACD判定",
-        ),
-        (
-            "AI判断",
-            "AI判断",
-        ),
-        (
-            "AI判断点",
-            "AI点条件",
-        ),
-        (
-            "PHOENIX_SCORE",
-            "PHOENIX条件",
-        ),
-        (
-            "決済理由",
-            "決済理由",
-        ),
-    ]
-
-    for category, column in grouping_definitions:
-        for condition, group in data.groupby(
-            column,
-            dropna=False,
-        ):
-            condition_text = str(
-                condition
-            ).strip()
-
-            if (
-                not condition_text
-                or condition_text.lower()
-                == "nan"
-            ):
-                condition_text = "不明"
-
-            rows.append(
-                create_group_row(
-                    data=group,
-                    category=category,
-                    condition=condition_text,
-                    baseline_win_rate=baseline_win_rate,
-                )
-            )
-
-    report = pd.DataFrame(
-        rows
-    )
-
-    report = report.sort_values(
-        by=[
-            "カテゴリ",
-            "取引数",
-            "AI点補正",
-        ],
-        ascending=[
-            True,
-            False,
-            False,
-        ],
-    ).reset_index(
-        drop=True
-    )
-
-    return report
-
-
-# =========================================================
-# AIパラメータ作成
-# =========================================================
-
-def report_adjustments(
-    report: pd.DataFrame,
-    category: str,
-) -> dict[str, int]:
-    if report.empty:
-        return {}
-
-    matched = report[
-        (
-            report["カテゴリ"]
-            == category
-        )
-        & (
-            report["取引数"]
-            >= MIN_SAMPLE_FOR_ADJUSTMENT
-        )
-    ]
-
-    return {
-        str(row["条件"]): safe_int(
-            row["AI点補正"]
-        )
-        for _, row in matched.iterrows()
-    }
-
-
-def overall_statistics(
-    data: pd.DataFrame,
-) -> dict[str, Any]:
-    if data.empty:
-        return {
-            "trades": 0,
-            "wins": 0,
-            "losses": 0,
-            "draws": 0,
-            "win_rate_percent": 0.0,
-            "average_return_percent": 0.0,
-            "total_return_percent": 0.0,
-            "profit_factor": 0.0,
-        }
-
-    returns = pd.to_numeric(
-        data["損益率%"],
-        errors="coerce",
-    ).fillna(0.0)
-
-    wins = int(
-        (
-            returns > 0
-        ).sum()
-    )
-
-    losses = int(
-        (
-            returns < 0
-        ).sum()
-    )
-
-    draws = len(data) - wins - losses
-
-    gross_profit = safe_float(
-        returns[
-            returns > 0
-        ].sum()
-    )
-
-    gross_loss = abs(
-        safe_float(
-            returns[
-                returns < 0
-            ].sum()
-        )
-    )
-
-    if gross_loss > 0:
-        profit_factor = (
-            gross_profit
-            / gross_loss
-        )
-    elif gross_profit > 0:
-        profit_factor = 99.0
-    else:
-        profit_factor = 0.0
-
-    return {
-        "trades": len(data),
+    row = {
+        "version": VERSION,
+        "closed_trades": trades,
         "wins": wins,
         "losses": losses,
-        "draws": draws,
-        "win_rate_percent": round(
-            wins
-            / len(data)
-            * 100,
-            2,
+        "win_rate_pct": round(wins / trades * 100, 2) if trades else 0.0,
+        "gross_profit_yen": round(float(pnl[pnl > 0].sum()), 2),
+        "gross_loss_yen": round(float(pnl[pnl < 0].sum()), 2),
+        "profit_factor": "INF" if pf is not None and math.isinf(pf) else (
+            round(pf, 4) if pf is not None else ""
         ),
-        "average_return_percent": round(
-            safe_float(
-                returns.mean()
-            ),
-            4,
-        ),
-        "total_return_percent": round(
-            safe_float(
-                returns.sum()
-            ),
-            4,
-        ),
-        "profit_factor": round(
-            profit_factor,
-            3,
-        ),
+        "expectancy_yen": round(float(pnl.mean()), 2) if trades else 0.0,
+        "total_pnl_yen": round(float(pnl.sum()), 2),
     }
+    return pd.DataFrame([row])
 
 
-def build_parameter_data(
-    data: pd.DataFrame,
-    report: pd.DataFrame,
-) -> dict[str, Any]:
-    total_trades = len(data)
+def render_text(
+    input_path: Path,
+    summary: pd.DataFrame,
+    stats: pd.DataFrame,
+) -> str:
+    s = summary.iloc[0].to_dict()
+    lines = [
+        "=" * 72,
+        f"PHOENIX v{VERSION} LEARNING ENGINE 2.0",
+        "=" * 72,
+        f"入力: {input_path}",
+        f"決済済み取引: {int(s['closed_trades'])}件",
+        f"勝率: {s['win_rate_pct']}%",
+        f"Profit Factor: {s['profit_factor']}",
+        f"期待値: {s['expectancy_yen']}円/取引",
+        f"累計損益: {s['total_pnl_yen']}円",
+        "",
+        "強化候補 TOP10",
+        "-" * 72,
+    ]
 
-    learning_active = (
-        total_trades
-        >= MIN_SAMPLE_FOR_ADJUSTMENT
+    strengthen = (
+        stats[stats["judgement"] == "強化"]
+        .sort_values(["expectancy_yen", "trades"], ascending=[False, False])
+        .head(10)
     )
-
-    return {
-        "version": "PHOENIX v3.4",
-        "generated_at": now_text(),
-        "account_capital_yen": ACCOUNT_CAPITAL,
-        "learning": {
-            "active": learning_active,
-            "minimum_sample_for_adjustment": (
-                MIN_SAMPLE_FOR_ADJUSTMENT
-            ),
-            "strong_sample_count": STRONG_SAMPLE_COUNT,
-            "maximum_score_adjustment": (
-                MAX_SCORE_ADJUSTMENT
-            ),
-            "message": (
-                "学習補正を有効化"
-                if learning_active
-                else (
-                    f"決済済み取引が"
-                    f"{MIN_SAMPLE_FOR_ADJUSTMENT}件未満のため"
-                    "AI点補正は0"
-                )
-            ),
-        },
-        "overall": overall_statistics(
-            data
-        ),
-        "score_adjustments": {
-            "rsi": report_adjustments(
-                report,
-                "RSI",
-            ),
-            "macd": report_adjustments(
-                report,
-                "MACD",
-            ),
-            "ai_judgement": report_adjustments(
-                report,
-                "AI判断",
-            ),
-            "ai_score": report_adjustments(
-                report,
-                "AI判断点",
-            ),
-            "phoenix_score": report_adjustments(
-                report,
-                "PHOENIX_SCORE",
-            ),
-        },
-        "risk_management": {
-            "account_capital_yen": ACCOUNT_CAPITAL,
-            "default_risk_per_trade_percent": 1.0,
-            "default_max_loss_yen": int(
-                ACCOUNT_CAPITAL
-                * 0.01
-            ),
-            "maximum_total_exposure_percent": 80.0,
-            "maximum_single_position_percent": 30.0,
-            "maximum_open_positions": 3,
-        },
-    }
-
-
-# =========================================================
-# 保存・表示
-# =========================================================
-
-def save_outputs(
-    report: pd.DataFrame,
-    parameters: dict[str, Any],
-) -> None:
-    REPORT_DIR.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    report.to_csv(
-        LEARNING_REPORT_FILE,
-        index=False,
-        encoding="utf-8-sig",
-    )
-
-    write_json(
-        PARAMETER_FILE,
-        parameters,
-    )
-
-    overall = parameters["overall"]
-    learning = parameters["learning"]
-
-    with open(
-        TEXT_REPORT_FILE,
-        "w",
-        encoding="utf-8",
-        newline="\n",
-    ) as file:
-        file.write(
-            "PHOENIX LEARNING ENGINE REPORT\n"
-        )
-        file.write(
-            now_text()
-            + "\n"
-        )
-        file.write(
-            "=" * 100
-            + "\n"
-        )
-        file.write(
-            f"口座資金: "
-            f"{ACCOUNT_CAPITAL:,}円\n"
-        )
-        file.write(
-            f"学習対象: "
-            f"{overall['trades']}件\n"
-        )
-        file.write(
-            f"勝率: "
-            f"{overall['win_rate_percent']:.2f}%\n"
-        )
-        file.write(
-            f"平均損益率: "
-            f"{overall['average_return_percent']:+.4f}%\n"
-        )
-        file.write(
-            f"PF: "
-            f"{overall['profit_factor']:.3f}\n"
-        )
-        file.write(
-            f"学習状態: "
-            f"{learning['message']}\n"
-        )
-        file.write(
-            "\n"
-        )
-
-        if report.empty:
-            file.write(
-                "決済済みの学習データはありません。\n"
-            )
-        else:
-            file.write(
-                report.to_string(
-                    index=False
-                )
-            )
-            file.write(
-                "\n"
-            )
-
-
-def print_result(
-    data: pd.DataFrame,
-    report: pd.DataFrame,
-    parameters: dict[str, Any],
-) -> None:
-    overall = parameters["overall"]
-    learning = parameters["learning"]
-
-    print("=" * 100)
-    print("PHOENIX LEARNING ENGINE")
-    print("=" * 100)
-    print(
-        f"口座資金       : "
-        f"{ACCOUNT_CAPITAL:,}円"
-    )
-    print(
-        f"学習対象取引   : "
-        f"{len(data)}件"
-    )
-    print(
-        f"勝ち           : "
-        f"{overall['wins']}件"
-    )
-    print(
-        f"負け           : "
-        f"{overall['losses']}件"
-    )
-    print(
-        f"勝率           : "
-        f"{overall['win_rate_percent']:.2f}%"
-    )
-    print(
-        f"平均損益率     : "
-        f"{overall['average_return_percent']:+.4f}%"
-    )
-    print(
-        f"PF             : "
-        f"{overall['profit_factor']:.3f}"
-    )
-    print(
-        f"学習状態       : "
-        f"{learning['message']}"
-    )
-
-    print()
-    print("=" * 100)
-    print("学習結果")
-    print("=" * 100)
-
-    if report.empty:
-        print(
-            "決済済み取引がないため、"
-            "初期パラメータを保存しました。"
-        )
+    if strengthen.empty:
+        lines.append("該当なし（サンプル不足または基準未達）")
     else:
-        display_columns = [
-            "カテゴリ",
-            "条件",
-            "取引数",
-            "勝率%",
-            "平均損益率%",
-            "PF",
-            "信頼度%",
-            "AI点補正",
-            "判定",
-        ]
-
-        print(
-            report[
-                display_columns
-            ].to_string(
-                index=False
+        for _, r in strengthen.iterrows():
+            lines.append(
+                f"{r['dimension']} / {r['group']} | "
+                f"{int(r['trades'])}件 | 勝率 {r['win_rate_pct']}% | "
+                f"PF {r['profit_factor']} | 期待値 {r['expectancy_yen']}円"
             )
-        )
 
-    print()
-    print(
-        f"保存完了: {LEARNING_REPORT_FILE}"
+    lines += ["", "抑制候補 TOP10", "-" * 72]
+    weaken = (
+        stats[stats["judgement"] == "抑制"]
+        .sort_values(["expectancy_yen", "trades"], ascending=[True, False])
+        .head(10)
     )
-    print(
-        f"保存完了: {PARAMETER_FILE}"
+    if weaken.empty:
+        lines.append("該当なし（サンプル不足または基準未達）")
+    else:
+        for _, r in weaken.iterrows():
+            lines.append(
+                f"{r['dimension']} / {r['group']} | "
+                f"{int(r['trades'])}件 | 勝率 {r['win_rate_pct']}% | "
+                f"PF {r['profit_factor']} | 期待値 {r['expectancy_yen']}円"
+            )
+
+    lines += [
+        "",
+        "安全条件",
+        "-" * 72,
+        "・最低サンプル数未満は補正しません。",
+        "・学習結果はPaper Trade検証用です。",
+        "・実売買へ直接接続しません。",
+        "=" * 72,
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=f"PHOENIX v{VERSION} Learning Engine 2.0"
     )
-    print(
-        f"保存完了: {TEXT_REPORT_FILE}"
+    parser.add_argument("--input", help="Paper Trade履歴CSV")
+    parser.add_argument(
+        "--config",
+        default=str(DEFAULT_CONFIG_PATH),
+        help="設定JSON",
+    )
+    parser.add_argument(
+        "--report-dir",
+        default="reports",
+        help="出力ディレクトリ",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    input_path = resolve_input(args.input)
+    config_path = Path(args.config)
+    report_dir = Path(args.report_dir)
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    paths = Paths(
+        input_csv=input_path,
+        config_json=config_path,
+        report_csv=report_dir / "learning_statistics.csv",
+        summary_csv=report_dir / "learning_summary.csv",
+        adjustments_json=report_dir / "learning_adjustments.json",
+        report_txt=report_dir / "learning_report.txt",
     )
 
+    config = load_json(paths.config_json)
+    raw = pd.read_csv(paths.input_csv, encoding="utf-8-sig")
+    data = prepare_trade_data(raw)
+    summary = overall_summary(data)
+    stats = build_statistics(data, config)
+    adjustments = build_adjustments(stats, config)
+    report_text = render_text(paths.input_csv, summary, stats)
 
-# =========================================================
-# メイン
-# =========================================================
+    summary.to_csv(paths.summary_csv, index=False, encoding="utf-8-sig")
+    stats.to_csv(paths.report_csv, index=False, encoding="utf-8-sig")
+    with paths.adjustments_json.open("w", encoding="utf-8") as f:
+        json.dump(adjustments, f, ensure_ascii=False, indent=2)
+    paths.report_txt.write_text(report_text, encoding="utf-8-sig")
 
-def main() -> None:
-    configure_console()
-
-    try:
-        REPORT_DIR.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        data = load_learning_source()
-
-        report = build_learning_report(
-            data
-        )
-
-        parameters = build_parameter_data(
-            data=data,
-            report=report,
-        )
-
-        save_outputs(
-            report=report,
-            parameters=parameters,
-        )
-
-        print_result(
-            data=data,
-            report=report,
-            parameters=parameters,
-        )
-
-    except Exception as error:
-        print(
-            f"エラー: {error}"
-        )
-
-        raise SystemExit(
-            1
-        )
+    print(report_text)
+    print("保存完了:")
+    print(f"  {paths.summary_csv}")
+    print(f"  {paths.report_csv}")
+    print(f"  {paths.adjustments_json}")
+    print(f"  {paths.report_txt}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

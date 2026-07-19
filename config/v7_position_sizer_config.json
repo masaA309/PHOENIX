@@ -1,0 +1,25 @@
+{
+  "broker": {
+    "type": "paper",
+    "initial_cash_yen": 300000,
+    "commission_rate": 0.0,
+    "state_file": "state/v7_paper_broker.json"
+  },
+  "position_sizing": {
+    "risk_per_trade_pct": 0.01,
+    "max_position_pct": 0.30,
+    "max_total_invested_pct": 0.80,
+    "minimum_cash_reserve_pct": 0.10,
+    "fallback_stop_distance_pct": 0.03,
+    "lot_size": 100,
+    "maximum_quantity_per_ticker": 1000,
+    "allow_pyramiding": false,
+    "commission_buffer_pct": 0.001
+  },
+  "files": {
+    "candidates": "reports/portfolio_selection.csv",
+    "position_plan": "reports/v7_position_plan.csv",
+    "orders": "reports/v7_order_requests.json",
+    "report": "reports/v7_position_sizer_report.txt"
+  }
+}
