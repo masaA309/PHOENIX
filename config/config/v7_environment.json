@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "minimum_python": "3.11.0",
+  "require_virtual_environment": true,
+  "required_modules": [
+    "pandas",
+    "numpy",
+    "yfinance",
+    "requests",
+    "lxml"
+  ],
+  "required_directories": [
+    "phoenix_core",
+    "config",
+    "tests"
+  ],
+  "create_directories": [
+    "logs",
+    "logs/scheduler",
+    "reports",
+    "runtime",
+    "state"
+  ],
+  "required_files": [
+    "direct_pipeline_v7.py",
+    "scheduled_runner_v7.py",
+    "scheduled_entry_v7.py",
+    "verify_v7_step8.py",
+    "phoenix_core/__init__.py",
+    "phoenix_core/run_guard.py",
+    "phoenix_core/environment_validator.py",
+    "config/v7_environment.json",
+    "config/v7_risk_config.json",
+    "config/v7_scheduler_config.json",
+    "tests/test_v7_step8.py",
+    "install_v7_scheduler.ps1",
+    "uninstall_v7_scheduler.ps1",
+    "setup_runtime_ignore_v7.ps1"
+  ],
+  "required_json_files": [
+    "config/v7_environment.json",
+    "config/v7_risk_config.json",
+    "config/v7_scheduler_config.json"
+  ],
+  "source_files": [
+    "direct_pipeline_v7.py",
+    "scheduled_runner_v7.py",
+    "scheduled_entry_v7.py",
+    "verify_v7_step8.py",
+    "phoenix_core/run_guard.py",
+    "phoenix_core/environment_validator.py",
+    "config/v7_environment.json",
+    "config/v7_risk_config.json",
+    "config/v7_scheduler_config.json",
+    "tests/test_v7_step8.py",
+    "install_v7_scheduler.ps1",
+    "uninstall_v7_scheduler.ps1",
+    "setup_runtime_ignore_v7.ps1"
+  ],
+  "writable_directories": [
+    "logs",
+    "logs/scheduler",
+    "reports",
+    "runtime",
+    "state"
+  ],
+  "minimum_free_disk_mb": 512,
+  "powershell_scripts": [
+    "install_v7_scheduler.ps1",
+    "uninstall_v7_scheduler.ps1",
+    "setup_runtime_ignore_v7.ps1"
+  ],
+  "report_file": "reports/v7_environment_report.json"
+}

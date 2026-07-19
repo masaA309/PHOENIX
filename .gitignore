@@ -16,3 +16,8 @@ logs/
 
 # Reports
 reports/
+*.py[cod]
+.pytest_cache/
+runtime/
+logs/scheduler/
+reports/v7_environment_report.json

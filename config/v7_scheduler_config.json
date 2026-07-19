@@ -1,0 +1,14 @@
+{
+  "scheduler": {
+    "enabled": true,
+    "weekdays": [0, 1, 2, 3, 4],
+    "once_per_day": true,
+    "dry_run": false
+  },
+  "files": {
+    "pipeline_config": "config/v7_direct_pipeline_config.json",
+    "scheduler_state": "state/v7_scheduler_state.json",
+    "lock": "state/v7_scheduler.lock",
+    "log_dir": "logs/scheduler"
+  }
+}

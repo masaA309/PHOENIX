@@ -1,3 +1,10 @@
+from phoenix_core.run_guard import (
+    RunPolicy,
+    SingleInstanceLock,
+    load_state as load_scheduler_state,
+    save_state as save_scheduler_state,
+    should_run,
+)
 from phoenix_core.pipeline import (
     PipelineResult,
     execute_approved_orders,
@@ -52,6 +59,11 @@ from phoenix_core.position_sizer import (
 )
 
 __all__ = [
+    "RunPolicy",
+    "SingleInstanceLock",
+    "load_scheduler_state",
+    "save_scheduler_state",
+    "should_run",
     "AccountSnapshot",
     "BrokerAdapter",
     "BrokerHealth",
