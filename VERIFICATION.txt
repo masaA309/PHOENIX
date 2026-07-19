@@ -1,17 +1,20 @@
-PHOENIX v6.5.1 VERIFIED COMPLETE
+PHOENIX v6.6 VERIFIED COMPLETE
+Verification date: 2026-07-19
 
-検証日: 2026-07-19
+PASS:
+- All Python files compiled with py_compile.
+- Missing folders/configs are created automatically.
+- Professional team includes Pro Trader, Pro Coder, Debugger, QA Tester, Data Engineer.
+- Data Health Monitor validates RSS heartbeat and realtime quote file.
+- Realtime Gateway rejects missing, stale, invalid bid/ask, excessive spread, and non-trading status.
+- Execution AI uses RSS best ask, not Yahoo/cache price, for order value and limit price.
+- Execution AI blocks price deviation over configured tolerance.
+- Broker Gateway revalidates RSS quote immediately before queue creation.
+- LIVE cannot be permitted without heartbeat, fresh quote, unlock phrase, and live_trading=true.
+- DRY_RUN remains default and generated queue trigger remains 0.
+- Market Data Gateway includes same-day cache and Yahoo circuit breaker.
+- phoenix.py stage list includes Data Health Monitor before Risk Controller.
 
-実施済み検証:
-1. 全Pythonファイル py_compile 成功
-2. config/execution_config.json 不在状態から安全設定の自動生成成功
-3. config/professional_team.json 不在状態からチーム定義の自動生成成功
-4. System Auditor（プロコーダー / デバッカー）PASS
-5. Risk Controller DRY_RUN / ALLOW を確認
-6. 通常100株候補: Execution AI READY → Order Manager登録 → Broker Gatewayキュー生成成功
-7. かぶミニ候補: MANUAL_ONLYへの安全分離を確認
-8. LIVE_TRADING=false、成行禁止、信用禁止を確認
-
-注意:
-- 本版はDRY_RUNです。楽天証券へ実注文は送信しません。
-- 既存PHOENIXルートへファイル単位で上書きしてください。
+IMPORTANT:
+- execution/rss_realtime_quotes.csv must be written by the user's MarketSpeed II RSS Excel/VBA bridge.
+- Yahoo/cache data is analysis-only and is never accepted as LIVE execution price.

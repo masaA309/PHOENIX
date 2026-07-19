@@ -1,250 +1,27 @@
 {
   "version": "PHOENIX v6.5.1",
-  "run_id": "20260719_100950",
-  "started_at": "2026-07-19 10:09:50",
-  "finished_at": "2026-07-19 10:15:03",
-  "status": "SUCCESS",
-  "last_completed_stage": "notify",
+  "run_id": "20260719_110255",
+  "started_at": "2026-07-19 11:02:55",
+  "finished_at": "",
+  "status": "RUNNING",
+  "last_completed_stage": "market_risk",
   "stages": {
-    "system_auditor": {
-      "key": "system_auditor",
-      "title": "Pro Coder / Debugger",
-      "script": "system_auditor.py",
+    "market_risk": {
+      "key": "market_risk",
+      "title": "Market Risk AI",
+      "script": "market_risk_ai.py",
       "required": true,
       "status": "OK",
       "return_code": 0,
-      "seconds": 0.455,
-      "started_at": "2026-07-19 10:09:50",
-      "finished_at": "2026-07-19 10:09:51",
+      "seconds": 47.061,
+      "started_at": "2026-07-19 11:02:55",
+      "finished_at": "2026-07-19 11:03:42",
       "message": "正常終了",
       "command": [
         "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.venv\\Scripts\\python.exe",
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\system_auditor.py"
+        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\market_risk_ai.py"
       ],
-      "output_tail": "==============================================================================================================\nPHOENIX v6.5.1 PROFESSIONAL CODER / DEBUGGER\n==============================================================================================================\n監査判定 : PASS\n設定生成 : False\nチーム生成: False\n"
-    },
-    "risk_controller": {
-      "key": "risk_controller",
-      "title": "Risk Controller",
-      "script": "risk_controller.py",
-      "required": true,
-      "status": "OK",
-      "return_code": 0,
-      "seconds": 0.487,
-      "started_at": "2026-07-19 10:09:51",
-      "finished_at": "2026-07-19 10:09:51",
-      "message": "正常終了",
-      "command": [
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.venv\\Scripts\\python.exe",
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\risk_controller.py"
-      ],
-      "output_tail": "====================================================================================================\nPHOENIX v6.5.1 RISK CONTROLLER\n====================================================================================================\nモード : DRY_RUN\n判定   : BLOCK\nOK     設定検証: 正常\nOK     緊急停止: 停止ファイルなし\nOK     信用取引禁止: 現物のみ\nOK     成行注文禁止: 指値のみ\nOK     日次損失上限: 本日確定損益 0円\nBLOCK  総エクスポージャー: 予定 78.94% / 上限 30.00%\nOK     実売買禁止: mode=DRY_RUN\n"
-    },
-    "execution_ai": {
-      "key": "execution_ai",
-      "title": "Execution AI",
-      "script": "execution_ai.py",
-      "required": true,
-      "status": "OK",
-      "return_code": 0,
-      "seconds": 0.493,
-      "started_at": "2026-07-19 10:09:51",
-      "finished_at": "2026-07-19 10:09:52",
-      "message": "正常終了",
-      "command": [
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.venv\\Scripts\\python.exe",
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\execution_ai.py"
-      ],
-      "output_tail": "====================================================================================================\nPHOENIX v6.5.1 EXECUTION AI\n====================================================================================================\nRSS発注可能 : 0件\n手動のみ    : 0件\n停止        : 5件\n"
-    },
-    "order_manager": {
-      "key": "order_manager",
-      "title": "Order Manager",
-      "script": "order_manager.py",
-      "required": true,
-      "status": "OK",
-      "return_code": 0,
-      "seconds": 0.48,
-      "started_at": "2026-07-19 10:09:52",
-      "finished_at": "2026-07-19 10:09:52",
-      "message": "正常終了",
-      "command": [
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.venv\\Scripts\\python.exe",
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\order_manager.py"
-      ],
-      "output_tail": "====================================================================================================\nPHOENIX v6.5.1 ORDER MANAGER\n====================================================================================================\n新規作成 : 0件\n注文台帳 : 0件\n"
-    },
-    "broker_gateway": {
-      "key": "broker_gateway",
-      "title": "Broker Gateway",
-      "script": "broker_gateway.py",
-      "required": true,
-      "status": "OK",
-      "return_code": 0,
-      "seconds": 0.448,
-      "started_at": "2026-07-19 10:09:52",
-      "finished_at": "2026-07-19 10:09:53",
-      "message": "正常終了",
-      "command": [
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.venv\\Scripts\\python.exe",
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\broker_gateway.py"
-      ],
-      "output_tail": "====================================================================================================\nPHOENIX v6.5.1 BROKER GATEWAY\n====================================================================================================\nモード       : DRY_RUN\n状態         : QUEUE_CREATED\nキュー件数   : 0\nLIVE許可     : False\nキューファイル: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\execution\\rss_order_queue.csv\n"
-    },
-    "price_monitor": {
-      "key": "price_monitor",
-      "title": "Price Monitor",
-      "script": "price_monitor.py",
-      "required": true,
-      "status": "OK",
-      "return_code": 0,
-      "seconds": 1.062,
-      "started_at": "2026-07-19 10:09:53",
-      "finished_at": "2026-07-19 10:09:54",
-      "message": "正常終了",
-      "command": [
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.venv\\Scripts\\python.exe",
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\price_monitor.py",
-        "--once"
-      ],
-      "output_tail": "===================================================================================================================\nPHOENIX TRADE ENGINE PRICE MONITOR\n===================================================================================================================\n 順位           銘柄 ticker  ランキング点  監視区分   基準価格   押し目価格    利確価格    損切価格   監視状態\n  1        INPEX 1605.T    76.6  買い監視 3524.0 3453.52 3700.20 3418.28 初回価格待ち\n  2 東京電力ホールディングス 9501.T    69.6  買い監視  503.1  493.04  528.25  488.01 初回価格待ち\n  3         日本郵船 9101.T    68.4 押し目監視 5506.0 5395.88 5781.30 5340.82 初回価格待ち\n  4        神戸製鋼所 5406.T    71.8 押し目監視 1917.0 1878.66 2012.85 1859.49 初回価格待ち\n  5          クラレ 3405.T    69.0 押し目監視 1747.0 1712.06 1834.35 1694.59 初回価格待ち\n  6         住友化学 4005.T    65.8 押し目監視  535.6  524.89  562.38  519.53 初回価格待ち\n  7         日東電工 6988.T    71.2 押し目監視 3324.0 3257.52 3490.20 3224.28 初回価格待ち\n  8         川崎汽船 9107.T    66.0 押し目監視 2657.0 2603.86 2789.85 2577.29 初回価格待ち\n  9         東武鉄道 9001.T    62.8 押し目監視 2974.5 2915.01 3123.22 2885.26 初回価格待ち\n 10     セイコーエプソン 6724.T    62.8 押し目監視 2851.5 2794.47 2994.08 2765.95 初回価格待ち\n 11      コニカミノルタ 4902.T    62.8 押し目監視  605.6  593.49  635.88  587.43 初回価格待ち\n 12        SHIFT 3697.T    63.6 押し目監視  726.2  711.68  762.51  704.41 初回価格待ち\n 13        SUMCO 3436.T    62.8 押し目監視 5307.0 5200.86 5572.35 5147.79 初回価格待ち\n 14   ソフトバンクグループ 9984.T    60.4 押し目監視 6574.0 6442.52 6902.70 6376.78 初回価格待ち\n\n通知モード: DRY RUN\n監視元: Trade Engine\n監視リスト: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\price_watchlist.csv\n状態ファイル: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\price_monitor_state_dry_run.csv\nイベント履歴: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\price_alert_dry_run.csv\n[2026-07-19 10:09:53] 株価取得開始: 14銘柄\n$9101.T: possibly delisted; no price data found  (period=1d)\n$3405.T: possibly delisted; no price data found  (period=1d)\n$4005.T: possibly delisted; no price data found  (period=1d)\n$9001.T: possibly delisted; no price data found  (period=1d)\n$9107.T: possibly delisted; no price data found  (period=1d)\n$6724.T: possibly delisted; no price data found  (period=1d)\n$4902.T: possibly delisted; no price data found  (period=1d)\n$1605.T: possibly delisted; no price data found  (period=1d)\n$9501.T: possibly delisted; no price data found  (period=1d)\n$5406.T: possibly delisted; no price data found  (period=1d)\n$6988.T: possibly delisted; no price data found  (period=1d)\n$9984.T: possibly delisted; no price data found  (period=1d)\n$3697.T: possibly delisted; no price data found  (period=1d)\n$3436.T: possibly delisted; no price data found  (period=1d)\n\n14 Failed downloads:\n['9101.T', '3405.T', '4005.T', '9001.T', '9107.T', '6724.T', '4902.T', '1605.T', '9501.T', '5406.T', '6988.T', '9984.T', '3697.T', '3436.T']: possibly delisted; no price data found  (period=1d)\n[2026-07-19 10:09:54] 株価取得成功: 0/14銘柄\n[2026-07-19 10:09:54] 1回監視完了\n"
-    },
-    "paper_trader": {
-      "key": "paper_trader",
-      "title": "Paper Trader",
-      "script": "paper_trader.py",
-      "required": true,
-      "status": "OK",
-      "return_code": 0,
-      "seconds": 0.478,
-      "started_at": "2026-07-19 10:09:54",
-      "finished_at": "2026-07-19 10:09:54",
-      "message": "正常終了",
-      "command": [
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.venv\\Scripts\\python.exe",
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\paper_trader.py"
-      ],
-      "output_tail": "====================================================================================================\nPHOENIX PAPER TRADING ENGINE\n====================================================================================================\n監視連携モード : DRY RUN\n状態ファイル : C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\price_monitor_state_dry_run.csv\nイベント履歴 : C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\price_alert_dry_run.csv\n監視銘柄数 : 14\n価格イベント数 : 0\n既存仮想取引数 : 0\n\n====================================================================================================\nPHOENIX PAPER TRADER\n====================================================================================================\n初期資金     : 300,000円\n現在資産     : 300,000円\n総損益       : +0円\n保有中       : 0件\n決済済み     : 0件\n勝率         : 0.00%\n平均損益率   : +0.0000%\nPF           : 0.000\n最大DD       : 0.0000%\n\n====================================================================================================\n取引一覧\n====================================================================================================\n取引はありません。\n\n保存完了 : C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\paper_trades.csv\n保存完了 : C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\paper_trade_summary.csv\n保存完了 : C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\paper_learning_data.csv\n保存完了 : C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\paper_trade_report.txt\n"
-    },
-    "learning_engine": {
-      "key": "learning_engine",
-      "title": "Learning Engine",
-      "script": "learning_engine.py",
-      "required": true,
-      "status": "OK",
-      "return_code": 0,
-      "seconds": 0.431,
-      "started_at": "2026-07-19 10:09:54",
-      "finished_at": "2026-07-19 10:09:55",
-      "message": "正常終了",
-      "command": [
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.venv\\Scripts\\python.exe",
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\learning_engine.py"
-      ],
-      "output_tail": "====================================================================================================\nPHOENIX LEARNING ENGINE\n====================================================================================================\n口座資金       : 300,000円\n学習対象取引   : 0件\n勝ち           : 0件\n負け           : 0件\n勝率           : 0.00%\n平均損益率     : +0.0000%\nPF             : 0.000\n学習状態       : 決済済み取引が10件未満のためAI点補正は0\n\n====================================================================================================\n学習結果\n====================================================================================================\n決済済み取引がないため、初期パラメータを保存しました。\n\n保存完了: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\learning_report.csv\n保存完了: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\ai_parameter.json\n保存完了: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\learning_engine_report.txt\n"
-    },
-    "backtest": {
-      "key": "backtest",
-      "title": "Backtest Engine",
-      "script": "backtest_engine.py",
-      "required": true,
-      "status": "OK",
-      "return_code": 0,
-      "seconds": 44.953,
-      "started_at": "2026-07-19 10:09:55",
-      "finished_at": "2026-07-19 10:10:40",
-      "message": "正常終了",
-      "command": [
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.venv\\Scripts\\python.exe",
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\backtest_engine.py"
-      ],
-      "output_tail": "no price data found  (1d 2023-04-06 -> 2026-07-20)\n$3436.T: possibly delisted; no price data found  (period=3y)\n\n1 Failed download:\n['3436.T']: possibly delisted; no price data found  (period=3y)\n$3436.T: possibly delisted; no price data found  (period=3y)\n$3436.T: possibly delisted; no price data found  (1d 2023-04-06 -> 2026-07-20)\n\n1 Failed download:\n['3436.T']: possibly delisted; no price data found  (1d 2023-04-06 -> 2026-07-20)\n$3436.T: possibly delisted; no price data found  (period=3y)\n\n1 Failed download:\n['3436.T']: possibly delisted; no price data found  (period=3y)\n$3436.T: possibly delisted; no price data found  (period=3y)\n$3436.T: possibly delisted; no price data found  (1d 2023-04-06 -> 2026-07-20)\n\n1 Failed download:\n['3436.T']: possibly delisted; no price data found  (1d 2023-04-06 -> 2026-07-20)\n$9984.T: possibly delisted; no price data found  (period=3y)\n\n1 Failed download:\n['9984.T']: possibly delisted; no price data found  (period=3y)\n$9984.T: possibly delisted; no price data found  (period=3y)\n$9984.T: possibly delisted; no price data found  (1d 2023-04-06 -> 2026-07-20)\n\n1 Failed download:\n['9984.T']: possibly delisted; no price data found  (1d 2023-04-06 -> 2026-07-20)\n$9984.T: possibly delisted; no price data found  (period=3y)\n\n1 Failed download:\n['9984.T']: possibly delisted; no price data found  (period=3y)\n$9984.T: possibly delisted; no price data found  (period=3y)\n$9984.T: possibly delisted; no price data found  (1d 2023-04-06 -> 2026-07-20)\n\n1 Failed download:\n['9984.T']: possibly delisted; no price data found  (1d 2023-04-06 -> 2026-07-20)\n$9984.T: possibly delisted; no price data found  (period=3y)\n\n1 Failed download:\n['9984.T']: possibly delisted; no price data found  (period=3y)\n$9984.T: possibly delisted; no price data found  (period=3y)\n$9984.T: possibly delisted; no price data found  (1d 2023-04-06 -> 2026-07-20)\n\n1 Failed download:\n['9984.T']: possibly delisted; no price data found  (1d 2023-04-06 -> 2026-07-20)\n====================================================================================================\nPHOENIX BACKTEST DATA DOWNLOAD\n====================================================================================================\n取得中: 1605.T INPEX\n  DATA SOURCE: cache\n  OK: 803日\n取得中: 9501.T 東京電力ホールディングス\n  DATA SOURCE: cache\n  OK: 803日\n取得中: 5406.T 神戸製鋼所\n  DATA SOURCE: cache\n  OK: 803日\n取得中: 6988.T 日東電工\n  DATA SOURCE: cache\n  OK: 803日\n取得中: 3405.T クラレ\n  DATA SOURCE: cache\n  OK: 803日\n取得中: 9101.T 日本郵船\n  DATA SOURCE: cache\n  OK: 803日\n取得中: 4005.T 住友化学\n  SKIP: データ不足 0日\n取得中: 9107.T 川崎汽船\n  DATA SOURCE: cache\n  OK: 803日\n取得中: 9001.T 東武鉄道\n  SKIP: データ不足 0日\n取得中: 6724.T セイコーエプソン\n  SKIP: データ不足 0日\n取得中: 4902.T コニカミノルタ\n  SKIP: データ不足 0日\n取得中: 3697.T SHIFT\n  DATA SOURCE: cache\n  OK: 803日\n取得中: 3436.T SUMCO\n  SKIP: データ不足 0日\n取得中: 9984.T ソフトバンクグループ\n  SKIP: データ不足 0日\n取得中: 1332.T ニッスイ\n  DATA SOURCE: cache\n  OK: 803日\n取得中: 1721.T コムシスホールディングス\n  DATA SOURCE: cache\n  OK: 803日\n取得中: 1801.T 大成建設\n  DATA SOURCE: cache\n  OK: 803日\n取得中: 1802.T 大林組\n  DATA SOURCE: cache\n  OK: 803日\n取得中: 1803.T 清水建設\n  DATA SOURCE: cache\n  OK: 803日\n取得中: 1808.T 長谷工コーポレーション\n  DATA SOURCE: cache\n  OK: 803日\n\n====================================================================================================\nPHOENIX v6.0 BACKTEST RESULT\n====================================================================================================\n検証期間       : 2023-04-06 ～ 2026-07-17\n取引日数       : 803日\n初期資金       : 300,000円\n最終資産       : 328,384円\n総損益         : +28,384円\n総リターン     : +9.46%\n年率リターン   : +2.79%\n最大DD         : 7.86%\nシャープレシオ : 0.587\n取引回数       : 55回\n勝率           : 45.45%\nProfit Factor  : 1.367\n平均損益率     : +0.56%\n平均保有日数   : 8.07日\n\n保存完了: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\backtest_trades.csv\n保存完了: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\backtest_equity.csv\n保存完了: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\backtest_summary.json\n保存完了: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\backtest_report.txt\n"
-    },
-    "optimization": {
-      "key": "optimization",
-      "title": "Optimization Engine",
-      "script": "optimization_engine.py",
-      "required": true,
-      "status": "OK",
-      "return_code": 0,
-      "seconds": 190.677,
-      "started_at": "2026-07-19 10:10:40",
-      "finished_at": "2026-07-19 10:13:50",
-      "message": "正常終了",
-      "command": [
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.venv\\Scripts\\python.exe",
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\optimization_engine.py"
-      ],
-      "output_tail": "20] Score=  60.04 PF=1.407 Sharpe=0.940 DD=11.32% Trades=371\n[  76/120] Score=  29.84 PF=1.268 Sharpe=0.582 DD=16.60% Trades=292\n[  77/120] Score=  41.75 PF=1.409 Sharpe=0.843 DD=19.34% Trades=305\n[  78/120] Score=  16.31 PF=1.135 Sharpe=0.401 DD=16.68% Trades=352\n[  79/120] Score=  36.59 PF=1.333 Sharpe=0.721 DD=16.05% Trades=282\n[  80/120] Score=  52.30 PF=1.408 Sharpe=0.796 DD=10.03% Trades=251\n[  81/120] Score=  56.60 PF=1.544 Sharpe=0.860 DD=11.19% Trades=206\n[  82/120] Score=  36.89 PF=1.268 Sharpe=0.547 DD=9.42% Trades=218\n[  83/120] Score=  35.61 PF=1.247 Sharpe=0.514 DD=9.10% Trades=211\n[  84/120] Score=  29.16 PF=1.271 Sharpe=0.511 DD=12.87% Trades=182\n[  85/120] Score=  16.82 PF=1.125 Sharpe=0.263 DD=12.34% Trades=208\n[  86/120] Score=  28.61 PF=1.251 Sharpe=0.481 DD=12.97% Trades=237\n[  87/120] Score=  21.01 PF=1.123 Sharpe=0.265 DD=9.68% Trades=175\n[  88/120] Score=  20.65 PF=1.131 Sharpe=0.252 DD=9.62% Trades=150\n[  89/120] Score=  20.90 PF=1.139 Sharpe=0.239 DD=9.08% Trades=126\n[  90/120] Score=  36.64 PF=1.351 Sharpe=0.533 DD=9.59% Trades=143\n[  91/120] Score=  44.49 PF=1.456 Sharpe=0.616 DD=7.71% Trades=123\n[  92/120] Score=  35.60 PF=1.299 Sharpe=0.458 DD=7.65% Trades=121\n[  93/120] Score=   2.61 PF=1.115 Sharpe=0.177 DD=17.69% Trades=93\n[  94/120] Score=  24.58 PF=1.351 Sharpe=0.420 DD=13.53% Trades=97\n[  95/120] Score=  22.15 PF=1.296 Sharpe=0.375 DD=12.77% Trades=78\n[  96/120] Score=  26.41 PF=1.369 Sharpe=0.432 DD=13.06% Trades=87\n[  97/120] Score=  -9.15 PF=1.119 Sharpe=0.383 DD=22.50% Trades=438\n[  98/120] Score=  24.54 PF=1.207 Sharpe=0.570 DD=18.55% Trades=429\n[  99/120] Score=   1.03 PF=1.197 Sharpe=0.549 DD=22.92% Trades=418\n[ 100/120] Score=  36.25 PF=1.275 Sharpe=0.642 DD=14.85% Trades=353\n[ 101/120] Score=  11.97 PF=1.106 Sharpe=0.338 DD=17.03% Trades=366\n[ 102/120] Score=  11.94 PF=1.129 Sharpe=0.390 DD=18.67% Trades=366\n[ 103/120] Score=  26.62 PF=1.272 Sharpe=0.676 DD=19.39% Trades=309\n[ 104/120] Score=  51.89 PF=1.443 Sharpe=0.853 DD=12.64% Trades=254\n[ 105/120] Score=  41.73 PF=1.432 Sharpe=0.758 DD=15.53% Trades=229\n[ 106/120] Score=  -0.28 PF=1.056 Sharpe=0.162 DD=18.69% Trades=233\n[ 107/120] Score=  16.78 PF=1.200 Sharpe=0.398 DD=16.33% Trades=190\n[ 108/120] Score=  26.16 PF=1.262 Sharpe=0.507 DD=14.38% Trades=186\n[ 109/120] Score=  34.31 PF=1.287 Sharpe=0.509 DD=10.31% Trades=175\n[ 110/120] Score=  36.01 PF=1.314 Sharpe=0.529 DD=10.48% Trades=207\n[ 111/120] Score=   9.05 PF=1.069 Sharpe=0.182 DD=14.15% Trades=224\n[ 112/120] Score=  26.69 PF=1.202 Sharpe=0.352 DD=9.30% Trades=163\n[ 113/120] Score=  17.48 PF=1.143 Sharpe=0.252 DD=11.72% Trades=148\n[ 114/120] Score=  11.99 PF=1.116 Sharpe=0.216 DD=13.33% Trades=133\n[ 115/120] Score=  31.80 PF=1.313 Sharpe=0.495 DD=10.96% Trades=147\n[ 116/120] Score=   7.99 PF=1.106 Sharpe=0.194 DD=15.17% Trades=115\n[ 117/120] Score=  30.57 PF=1.337 Sharpe=0.456 DD=10.99% Trades=110\n[ 118/120] Score=   8.97 PF=1.185 Sharpe=0.254 DD=16.57% Trades=89\n[ 119/120] Score=   5.49 PF=1.157 Sharpe=0.206 DD=17.37% Trades=87\n[ 120/120] Score=  18.17 PF=1.302 Sharpe=0.349 DD=14.76% Trades=75\n\n==============================================================================================================\nPHOENIX v6.2 OPTIMIZATION BEST\n==============================================================================================================\nRSI            : 45.0 ～ 70.0\nATR損切倍率    : 1.00\n利確R倍率      : 2.50\nMA             : 5 / 20 / 60\nシグナル点数   : 70.0\n最大保有日数   : 10日\n\nOptimization   : 60.038\n取引回数       : 371回\n勝率           : 40.70%\nProfit Factor  : 1.407\n総リターン     : +62.16%\n年率リターン   : +9.24%\n最大DD         : 11.32%\nSharpe         : 0.940\n\n保存完了: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\optimization_results.csv\n保存完了: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\optimization_best.json\n保存完了: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\optimization_report.txt\n候補保存: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\optimization_candidate.json\n"
-    },
-    "walk_forward": {
-      "key": "walk_forward",
-      "title": "Walk Forward Engine",
-      "script": "walk_forward_engine.py",
-      "required": true,
-      "status": "OK",
-      "return_code": 0,
-      "seconds": 69.315,
-      "started_at": "2026-07-19 10:13:50",
-      "finished_at": "2026-07-19 10:15:00",
-      "message": "正常終了",
-      "command": [
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.venv\\Scripts\\python.exe",
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\walk_forward_engine.py"
-      ],
-      "output_tail": "y)\n\n1 Failed download:\n['3436.T']: possibly delisted; no price data found  (period=5y)\n$3436.T: possibly delisted; no price data found  (period=5y)\n$3436.T: possibly delisted; no price data found  (1d 2021-01-26 -> 2026-07-20)\n\n1 Failed download:\n['3436.T']: possibly delisted; no price data found  (1d 2021-01-26 -> 2026-07-20)\n$9984.T: possibly delisted; no price data found  (period=5y)\n\n1 Failed download:\n['9984.T']: possibly delisted; no price data found  (period=5y)\n$9984.T: possibly delisted; no price data found  (period=5y)\n$9984.T: possibly delisted; no price data found  (1d 2021-01-26 -> 2026-07-20)\n\n1 Failed download:\n['9984.T']: possibly delisted; no price data found  (1d 2021-01-26 -> 2026-07-20)\n$9984.T: possibly delisted; no price data found  (period=5y)\n\n1 Failed download:\n['9984.T']: possibly delisted; no price data found  (period=5y)\n$9984.T: possibly delisted; no price data found  (period=5y)\n$9984.T: possibly delisted; no price data found  (1d 2021-01-26 -> 2026-07-20)\n\n1 Failed download:\n['9984.T']: possibly delisted; no price data found  (1d 2021-01-26 -> 2026-07-20)\n$9984.T: possibly delisted; no price data found  (period=5y)\n\n1 Failed download:\n['9984.T']: possibly delisted; no price data found  (period=5y)\n$9984.T: possibly delisted; no price data found  (period=5y)\n$9984.T: possibly delisted; no price data found  (1d 2021-01-26 -> 2026-07-20)\n\n1 Failed download:\n['9984.T']: possibly delisted; no price data found  (1d 2021-01-26 -> 2026-07-20)\n==============================================================================================================\nPHOENIX OPTIMIZATION DATA DOWNLOAD\n==============================================================================================================\n取得中: 1605.T INPEX\n  DATA SOURCE: cache\n  OK: 1340日\n取得中: 9501.T 東京電力ホールディングス\n  DATA SOURCE: cache\n  OK: 1340日\n取得中: 5406.T 神戸製鋼所\n  DATA SOURCE: cache\n  OK: 1340日\n取得中: 6988.T 日東電工\n  DATA SOURCE: cache\n  OK: 1340日\n取得中: 3405.T クラレ\n  DATA SOURCE: cache\n  OK: 1340日\n取得中: 9101.T 日本郵船\n  DATA SOURCE: cache\n  OK: 1340日\n取得中: 4005.T 住友化学\n  SKIP: データ不足 0日\n取得中: 9107.T 川崎汽船\n  DATA SOURCE: cache\n  OK: 1340日\n取得中: 9001.T 東武鉄道\n  SKIP: データ不足 0日\n取得中: 6724.T セイコーエプソン\n  SKIP: データ不足 0日\n取得中: 4902.T コニカミノルタ\n  SKIP: データ不足 0日\n取得中: 3697.T SHIFT\n  DATA SOURCE: cache\n  OK: 1340日\n取得中: 3436.T SUMCO\n  SKIP: データ不足 0日\n取得中: 9984.T ソフトバンクグループ\n  SKIP: データ不足 0日\n取得中: 1332.T ニッスイ\n  DATA SOURCE: cache\n  OK: 1340日\n取得中: 1721.T コムシスホールディングス\n  DATA SOURCE: cache\n  OK: 1340日\n取得中: 1801.T 大成建設\n  DATA SOURCE: cache\n  OK: 1340日\n取得中: 1802.T 大林組\n  DATA SOURCE: cache\n  OK: 1340日\n取得中: 1803.T 清水建設\n  DATA SOURCE: cache\n  OK: 1340日\n取得中: 1808.T 長谷工コーポレーション\n  DATA SOURCE: cache\n  OK: 1340日\n\n========================================================================================================================\nPHOENIX v6.2 WALK-FORWARD TEST\n========================================================================================================================\n候補パラメータ : 20\n作成期間数     : 3\n[ 1/3] Train 2021-01-26～2024-01-25 | Test 2024-01-26～2025-01-25 | PF=2.967 Sharpe=1.242 DD=2.89% Return=+7.16% PASS\n[ 2/3] Train 2022-01-26～2025-01-25 | Test 2025-01-26～2026-01-25 | PF=3.779 Sharpe=1.740 DD=2.44% Return=+9.46% PASS\n[3/3] SKIP 学習・検証の共通銘柄なし\n\n========================================================================================================================\nPHOENIX v6.2 WALK-FORWARD SUMMARY\n========================================================================================================================\n判定           : PASS\n検証期間数     : 2\n成功率         : 100.00%\n検証取引数     : 21回\n平均PF         : 3.373\n平均Sharpe     : 1.491\n平均最大DD     : 2.66%\n平均年率       : +8.38%\n\n採用候補       : RSI 40-65, ATR 1.20, R 2.50, MA 5/20/60, Signal 75\n\n保存完了: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\walk_forward_results.csv\n保存完了: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\walk_forward_summary.json\n保存完了: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\walk_forward_report.txt\n"
-    },
-    "adaptive_parameter": {
-      "key": "adaptive_parameter",
-      "title": "Adaptive Parameter",
-      "script": "adaptive_parameter_engine.py",
-      "required": true,
-      "status": "OK",
-      "return_code": 0,
-      "seconds": 0.121,
-      "started_at": "2026-07-19 10:15:00",
-      "finished_at": "2026-07-19 10:15:00",
-      "message": "正常終了",
-      "command": [
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.venv\\Scripts\\python.exe",
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\adaptive_parameter_engine.py"
-      ],
-      "output_tail": "==============================================================================================================\nPHOENIX v6.2 ADAPTIVE PARAMETER ENGINE\n==============================================================================================================\n判定           : PASS\n処理           : UPDATED\nWalk Forward   : PASS\n信頼度         : 98.55%\n理由           : Walk-Forward PASSのため候補パラメータを採用\n保存完了       : C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\adaptive_parameter.json\n履歴保存       : C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\adaptive_history.csv\n"
-    },
-    "dashboard": {
-      "key": "dashboard",
-      "title": "Dashboard",
-      "script": "dashboard.py",
-      "required": true,
-      "status": "OK",
-      "return_code": 0,
-      "seconds": 0.492,
-      "started_at": "2026-07-19 10:15:00",
-      "finished_at": "2026-07-19 10:15:00",
-      "message": "正常終了",
-      "command": [
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.venv\\Scripts\\python.exe",
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\dashboard.py"
-      ],
-      "output_tail": "   1 INPEX                    1605.T     エネルギー              BUY        81.0   70.0      80.48        66,279円\n   2 東京電力ホールディングス             9501.T     電力・ガス              BUY        76.0   60.0      75.80        62,425円\n   3 神戸製鋼所                    5406.T     鉄鋼・非鉄              WATCH      73.0   70.0      70.13        57,755円\n   4 日東電工                     6988.T     電機・精密              WATCH      72.0   70.0      69.78        57,467円\n   5 クラレ                      3405.T     素材・化学              WATCH      73.0   63.0      68.09        56,075円\n\n========================================================================================================================\nPaper Trader / Learning\n========================================================================================================================\n現在資産       : +300,000円\n総損益         : 0円\n保有 / 決済    : 0 / 0\nPaper勝率      : 0.00%\nPaper PF       : 0.000\n最大DD         : 0.0000%\n学習状態       : 学習中\n学習対象       : 371件\n学習勝率       : 0.00%\n平均損益率     : 0.0000%\n学習PF         : 0.000\n信頼度         : 0.000\nAI点補正       : +0.00\n\n========================================================================================================================\nBacktest\n========================================================================================================================\n検証期間       : 2023-04-06 ～ 2026-07-17\n取引回数       : 55回\n勝率           : 45.45%\nProfit Factor  : 1.367\n総リターン     : +9.46%\n年率リターン   : +2.79%\n最大DD         : 7.86%\nシャープレシオ : 0.587\n平均保有日数   : 8.07日\n\n========================================================================================================================\nOptimization\n========================================================================================================================\nRSI            : 45.0 ～ 70.0\nATR / Target R : 1.00 / 2.50\nMA             : 5 / 20 / 60\nSignal         : 70.0\nExpected PF    : 1.407\nExpected Sharpe: 0.940\n\n========================================================================================================================\nWalk Forward\n========================================================================================================================\n判定           : PASS\n期間数         : 2\n成功率         : 100.00%\n平均PF         : 3.373\n平均Sharpe     : 1.491\n平均最大DD     : 2.66%\n平均年率       : +8.38%\n\n========================================================================================================================\nステージ実行時間\n========================================================================================================================\nMarket Risk AI               OK                46.81 sec 正常終了\nDaily Report                 OK                52.62 sec 正常終了\nAI Judgement                 OK                 0.44 sec 正常終了\nMarket Regime AI             OK                 0.46 sec 正常終了\nTrade Engine                 OK                 0.43 sec 正常終了\nPortfolio Optimizer          OK                 0.43 sec 正常終了\nPortfolio Manager            OK                 0.44 sec 正常終了\nPosition Sizer               OK                 0.43 sec 正常終了\nPrice Monitor                OK                 1.01 sec 正常終了\nPaper Trader                 OK                 0.44 sec 正常終了\nLearning Engine              OK                 0.42 sec 正常終了\nBacktest Engine              OK                44.60 sec 正常終了\nOptimization Engine          OK               186.70 sec 正常終了\nWalk Forward Engine          OK                68.53 sec 正常終了\nAdaptive Parameter           OK                 0.12 sec 正常終了\nDashboard                    OK                 0.48 sec 正常終了\nNotify                       OK                 3.72 sec 正常終了\n\nJSON保存 : C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\dashboard_summary.json\nTXT保存  : C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\dashboard_report.txt\nHTML保存 : C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\dashboard.html\n========================================================================================================================\n"
-    },
-    "notify": {
-      "key": "notify",
-      "title": "Notify",
-      "script": "notify.py",
-      "required": false,
-      "status": "OK",
-      "return_code": 0,
-      "seconds": 2.97,
-      "started_at": "2026-07-19 10:15:00",
-      "finished_at": "2026-07-19 10:15:03",
-      "message": "正常終了",
-      "command": [
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.venv\\Scripts\\python.exe",
-        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\notify.py"
-      ],
-      "output_tail": "================================================================================\nPHOENIX MULTI NOTIFIER\nLINE + Discord\n買い候補通知 / 押し目買い候補通知\n================================================================================\n\n================================================================================\nNOTIFICATION 1\n================================================================================\n🔥 PHOENIX BUY ALERT\n2026-07-19 10:15\n\n優先監視 0銘柄 / 買い候補 8銘柄\n\n【優先監視】\n該当なし\n\n【買い候補】\n\n1. INPEX (1605.T)\n   価格 3,524.00円 / 前日比 +3.92%\n   AI 81点 / PHOENIX 70点\n   出来高 1.52倍 / RSI 61.45 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n2. 東京電力ホールディングス (9501.T)\n   価格 503.10円 / 前日比 +3.67%\n   AI 76点 / PHOENIX 60点\n   出来高 1.29倍 / RSI 64.73 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n3. 日本郵船 (9101.T)\n   価格 5,506.00円 / 前日比 +3.52%\n   AI 74点 / PHOENIX 60点\n   出来高 1.04倍 / RSI 56.22 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n4. 神戸製鋼所 (5406.T)\n   価格 1,917.00円 / 前日比 +3.76%\n   AI 73点 / PHOENIX 70点\n   出来高 1.66倍 / RSI 56.26 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n5. クラレ (3405.T)\n   価格 1,747.00円 / 前日比 +3.01%\n   AI 73点 / PHOENIX 63点\n   出来高 1.33倍 / RSI 71.01 / MACD BUY\n   リスク 低\n   出来高と株価の継続を確認\n\n6. 住友化学 (4005.T)\n   価格 535.60円 / 前日比 +3.20%\n   AI 73点 / PHOENIX 55点\n   出来高 1.51倍 / RSI 56.65 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n7. 日東電工 (6988.T)\n   価格 3,324.00円 / 前日比 +3.20%\n   AI 72点 / PHOENIX 70点\n   出来高 1.35倍 / RSI 66.86 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n8. 川崎汽船 (9107.T)\n   価格 2,657.00円 / 前日比 +4.73%\n   AI 70点 / PHOENIX 60点\n   出来高 0.86倍 / RSI 58.46 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n※売買推奨ではなく監視候補です。\n詳細: reports/ai_judgement.csv\nチャート: reports/charts/\n\n================================================================================\nNOTIFICATION 2\n================================================================================\n📉 PHOENIX PULLBACK ALERT\n2026-07-19 10:15\n\n押し目買い候補 10銘柄\n\n【押し目買い候補】\n\n1. 東武鉄道 (9001.T)\n   価格 2,974.50円 / 前日比 +1.47%\n   AI 68点 / PHOENIX 55点\n   出来高 1.00倍 / RSI 64.82 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n2. セイコーエプソン (6724.T)\n   価格 2,851.50円 / 前日比 +2.19%\n   AI 68点 / PHOENIX 55点\n   出来高 0.95倍 / RSI 64.08 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n3. コニカミノルタ (4902.T)\n   価格 605.60円 / 前日比 +2.70%\n   AI 68点 / PHOENIX 55点\n   出来高 0.90倍 / RSI 63.93 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n4. SHIFT (3697.T)\n   価格 726.20円 / 前日比 +3.26%\n   AI 66点 / PHOENIX 60点\n   出来高 1.33倍 / RSI 67.81 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n5. SUMCO (3436.T)\n   価格 5,307.00円 / 前日比 +3.39%\n   AI 66点 / PHOENIX 58点\n   出来高 1.46倍 / RSI 73.21 / MACD BUY\n   リスク 低\n   出来高と株価の継続を確認\n\n6. ソフトバンクグループ (9984.T)\n   価格 6,574.00円 / 前日比 +3.30%\n   AI 64点 / PHOENIX 55点\n   出来高 1.25倍 / RSI 49.65 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n7. オリンパス (7733.T)\n   価格 1,794.00円 / 前日比 +1.04%\n   AI 58点 / PHOENIX 55点\n   出来高 0.94倍 / RSI 67.40 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n8. 帝人 (3401.T)\n   価格 1,683.00円 / 前日比 +1.69%\n   AI 58点 / PHOENIX 55点\n   出来高 0.92倍 / RSI 65.04 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n9. SOMPOホールディングス (8630.T)\n   価格 6,584.00円 / 前日比 +1.64%\n   AI 58点 / PHOENIX 55点\n   出来高 0.83倍 / RSI 67.28 / MACD BUY\n   リスク 低\n   翌営業日の寄り付き後、値動きを確認\n\n10. 三菱ケミカルグループ (4188.T)\n   価格 1,203.00円 / 前日比 +3.57%\n   AI 55点 / PHOENIX 58点\n   出来高 0.97倍 / RSI 74.38 / MACD BUY\n   リスク 低\n   出来高と株価の継続を確認\n\n※現在価格での即時買いではなく、押し目を監視する候補です。\n詳細: reports/ai_judgement.csv\nチャート: reports/charts/\n\n================================================================================\nNOTIFICATION 3\n================================================================================\n🧠 PHOENIX ADAPTIVE PARAMETER\n2026-07-19 10:15\n\n判定: PASS\n処理: UPDATED\n信頼度: 98.55%\n理由: Walk-Forward PASSのため候補パラメータを採用\n\n================================================================================\nNOTIFICATION RESULT\n================================================================================\nDiscord通知成功: 3件\nLINE通知成功: 3件\n\n通知ログ保存: reports\\notification_log.txt\n通知成功: 2/2\n"
+      "output_tail": "$^DJI: possibly delisted; no price data found  (period=10d)\n$^DJI: possibly delisted; no price data found  (period=10d)\n$^DJI: possibly delisted; no price data found  (period=10d)\n$^GSPC: possibly delisted; no price data found  (period=10d)\n$^GSPC: possibly delisted; no price data found  (period=10d)\n$^GSPC: possibly delisted; no price data found  (period=10d)\n$^IXIC: possibly delisted; no price data found  (period=10d)\n$^IXIC: possibly delisted; no price data found  (period=10d)\n$^IXIC: possibly delisted; no price data found  (period=10d)\n$^SOX: possibly delisted; no price data found  (period=10d)\n$^SOX: possibly delisted; no price data found  (period=10d)\n$^SOX: possibly delisted; no price data found  (period=10d)\n$^VIX: possibly delisted; no price data found  (period=10d)\n$^VIX: possibly delisted; no price data found  (period=10d)\n$^VIX: possibly delisted; no price data found  (period=10d)\n$JPY=X: possibly delisted; no price data found  (period=10d)\n$JPY=X: possibly delisted; no price data found  (period=10d)\n$JPY=X: possibly delisted; no price data found  (period=10d)\n$^N225: possibly delisted; no price data found  (period=10d)\n$^N225: possibly delisted; no price data found  (period=10d)\n$^N225: possibly delisted; no price data found  (period=10d)\n====================================================================\nPHOENIX MARKET RISK AI\n====================================================================\n海外市場・VIX・為替を取得しています。\n\n取得中: NYダウ (^DJI)\n  WARNING: NYダウの取得失敗\n取得中: S&P500 (^GSPC)\n  WARNING: S&P500の取得失敗\n取得中: NASDAQ (^IXIC)\n  WARNING: NASDAQの取得失敗\n取得中: SOX半導体指数 (^SOX)\n  WARNING: SOX半導体指数の取得失敗\n取得中: VIX恐怖指数 (^VIX)\n  WARNING: VIX恐怖指数の取得失敗\n取得中: ドル円 (JPY=X)\n  WARNING: ドル円の取得失敗\n取得中: 日経平均 (^N225)\n  WARNING: 日経平均の取得失敗\n\nニュースリスクを分析しています。\n  ニュースRisk: +25\n\n====================================================================\nPHOENIX MARKET RISK AI\n====================================================================\n判定時刻       : 2026-07-19T11:03:42\n総合リスク     : ★★☆☆☆ WATCH\nリスクスコア   : 25/100\n\n[ 海外市場・為替 ]\n対象                       現在値       前日比      スコア\n--------------------------------------------------------------------\nNYダウ            取得失敗\nS&P500          取得失敗\nNASDAQ          取得失敗\nSOX半導体指数        取得失敗\nVIX恐怖指数         取得失敗\nドル円             取得失敗\n日経平均            取得失敗\n\n[ 主な警戒理由 ]\n・ニュース・地政学リスク（+25）\n\n[ PHOENIX防御モード ]\n新規エントリー : エントリー条件を通常より厳格化\nポジション     : 通常ロットの75%程度\n現金比率       : 現金余力を確保\n\n[ AIコメント ]\n軽度の警戒材料があります。通常より厳しい条件でエントリーを判断します。 総合リスクスコアは25/100です。\n\n[ リスク関連ニュース ]\n・株価大暴落時に慌てて売却はNG？投資初心者が知っておくべき対策 - aeonbank.co.jp\n・韓国株、3週間で25%暴落し踏み倒し連鎖：32万人の個人投資家が一夜で追証、深セン華強北のメモリ価格も約4000元に高騰 - BigGo ファイナンス\n・日経7万円はバブル!? プロが警告する暴落リスクと「TOPIX投資」4つの正解（FRIDAY） - Yahoo!ニュース\n・初級- 暴落時に、「やらなくていいこと」から考える投資 - SBI証券\n・最高値更新の日本株に下落リスク…「値上がりしてない株」が物語る〈日本経済の危うさ〉 - ダイヤモンド・オンライン\n・日経平均株価が暴落！半導体株売りが示す日本株相場の転換点とは - EBC Financial Group\n・日本株はバブルなのか 株価上昇の正当性と急落リスクを検証 野村證券・岡崎康平 - nomura.co.jp\n・米テック株安一服、ナスダック総合1%高 くすぶる下落リスク - 日本経済新聞\n・米国株式市場＝続伸、対欧関税撤回や堅調な指標受け - ロイター\n・【米国】FRB、2026年に利上げ再開の可能性 過去のデータが示すS&P500種の平均10%超下落リスク - BigGo ファイナンス\n\n====================================================================\n注意: この判定は市場リスク管理用であり、将来の株価や損失回避を保証するものではありません。\n====================================================================\n\n最新リスク保存: C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\data\\market_risk_latest.json\n履歴保存      : C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\data\\market_risk_history.csv\nレポート保存  : C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\market_risk_20260719_110342.txt\n"
     }
-  },
-  "summary_file": "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\reports\\phoenix_latest_summary.json"
+  }
 }

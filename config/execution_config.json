@@ -1,5 +1,5 @@
 {
-  "version": "PHOENIX v6.5.1",
+  "version": "PHOENIX v6.6",
   "broker": "楽天証券",
   "gateway": "MarketSpeed II RSS CSV Bridge",
   "mode": "DRY_RUN",
@@ -18,12 +18,25 @@
   "maximum_order_age_minutes": 15,
   "maximum_signal_age_minutes": 180,
   "entry_price_tolerance_percent": 1.0,
+  "maximum_spread_percent": 1.0,
   "cancel_unfilled_after_minutes": 15,
   "use_settlement_orders": true,
   "emergency_stop_file": "EMERGENCY_STOP",
   "rss_heartbeat_file": "state/rss_bridge_heartbeat.json",
   "rss_heartbeat_max_age_seconds": 90,
+  "rss_quote_file": "execution/rss_realtime_quotes.csv",
+  "rss_quote_max_age_seconds": 15,
+  "require_bid_ask_for_live": true,
+  "require_trading_status_for_live": true,
   "order_queue_file": "execution/rss_order_queue.csv",
   "order_status_file": "execution/rss_order_status.csv",
-  "execution_ledger_file": "execution/execution_ledger.csv"
+  "execution_ledger_file": "execution/execution_ledger.csv",
+  "analysis_cache_enabled": true,
+  "analysis_reuse_today_cache": true,
+  "analysis_force_refresh": false,
+  "yahoo_max_attempts": 2,
+  "yahoo_cooldown_minutes": 60,
+  "yahoo_chunk_size": 10,
+  "yahoo_chunk_pause_seconds": 3,
+  "yahoo_threads": false
 }

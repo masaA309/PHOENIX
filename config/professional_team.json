@@ -1,26 +1,15 @@
 {
-  "version": "PHOENIX v6.5.1",
+  "version": "PHOENIX v6.6",
   "team_name": "PHOENIX Professional Trading & Engineering Team",
   "members": [
-    {
-      "role": "プロトレーダー",
-      "responsibility": "売買戦略・相場判断・執行ルール監督"
-    },
-    {
-      "role": "リスクマネージャー",
-      "responsibility": "損失上限・資金配分・緊急停止監督"
-    },
-    {
-      "role": "クオンツ",
-      "responsibility": "期待値・バックテスト・最適化検証"
-    },
-    {
-      "role": "プロコーダー",
-      "responsibility": "実装品質・保守性・互換性監督"
-    },
-    {
-      "role": "デバッカー",
-      "responsibility": "構文・入出力・設定・異常系の自動検査"
-    }
+    {"role": "チーフトレーダー", "responsibility": "最終売買許可・執行ルール監督"},
+    {"role": "プロトレーダー", "responsibility": "売買戦略・相場判断"},
+    {"role": "リスクマネージャー", "responsibility": "損失上限・資金配分・緊急停止"},
+    {"role": "クオンツ", "responsibility": "期待値・バックテスト・最適化"},
+    {"role": "データエンジニア", "responsibility": "Yahoo・RSS・CSV・キャッシュ品質管理"},
+    {"role": "プロコーダー", "responsibility": "実装品質・保守性・互換性"},
+    {"role": "デバッカー", "responsibility": "構文・入出力・設定・異常系検査"},
+    {"role": "QAテスター", "responsibility": "自動テスト・回帰テスト・安全性検証"},
+    {"role": "システム監査役", "responsibility": "LIVE移行条件・証跡監査"}
   ]
 }
