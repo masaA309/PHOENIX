@@ -23,5 +23,11 @@
     "summary_text": "reports/v7_performance_summary.txt",
     "retention_runs": 365,
     "window_runs": 30
+  },
+  "diagnostics": {
+    "enabled": true,
+    "position_log": "reports/v7_direct_position_log.csv",
+    "report_json": "reports/v7_decision_diagnostics.json",
+    "report_text": "reports/v7_decision_diagnostics.txt"
   }
 }

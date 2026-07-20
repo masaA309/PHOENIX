@@ -10,6 +10,7 @@ from typing import Any
 
 from phoenix_core.operations_monitor import print_operations_summary, run_operations_monitor
 from phoenix_core.performance_tracker import print_performance_summary, update_performance
+from phoenix_core.decision_diagnostics import print_diagnostics_summary, run_decision_diagnostics
 from phoenix_core.run_guard import RunPolicy, SingleInstanceLock, failure_state, load_state, save_state, should_run, success_state
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -58,9 +59,21 @@ def monitor_and_track(config: dict[str, Any], return_code: int, log_path: Path) 
     try:
         summary = update_performance(ROOT_DIR, config, report)
         print_performance_summary(summary)
-        return True
     except Exception as error:
         print("PHOENIX Step10 PERFORMANCE TRACKER ERROR")
+        print(f"{type(error).__name__}: {error}")
+        return False
+
+    diagnostics = config.get("diagnostics", {})
+    if not bool(diagnostics.get("enabled", True)):
+        print("PHOENIX Step11 DECISION DIAGNOSTICS: disabled")
+        return True
+    try:
+        diagnostic_report = run_decision_diagnostics(ROOT_DIR, config, report)
+        print_diagnostics_summary(diagnostic_report)
+        return True
+    except Exception as error:
+        print("PHOENIX Step11 DECISION DIAGNOSTICS ERROR")
         print(f"{type(error).__name__}: {error}")
         return False
 

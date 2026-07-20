@@ -6,7 +6,8 @@ $entries = @(
     "reports/v7_environment_report.json", "reports/v7_environment_report.txt",
     "reports/v7_operations_report.json", "reports/v7_operations_report.txt",
     "reports/v7_run_history.jsonl", "reports/v7_performance_summary.json",
-    "reports/v7_performance_summary.txt"
+    "reports/v7_performance_summary.txt",
+    "reports/v7_decision_diagnostics.json", "reports/v7_decision_diagnostics.txt"
 )
 $existing = if (Test-Path $ignorePath) { Get-Content $ignorePath } else { @() }
 foreach ($entry in $entries) {
