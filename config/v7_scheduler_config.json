@@ -38,5 +38,15 @@
     "report_text": "reports/v7_portfolio_guard.txt",
     "default_stop_loss_pct": 0.05,
     "default_take_profit_pct": 0.10
+  },
+  "market_data_guard": {
+    "enabled": true,
+    "signals_file": "reports/trade_signals.csv",
+    "broker_state": "state/v7_paper_broker.json",
+    "guard_state": "state/v7_market_data_guard.json",
+    "report_json": "reports/v7_market_data_guard.json",
+    "report_text": "reports/v7_market_data_guard.txt",
+    "max_age_hours": 96,
+    "unchanged_warning_days": 2
   }
 }

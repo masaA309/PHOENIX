@@ -12,6 +12,7 @@ from phoenix_core.operations_monitor import print_operations_summary, run_operat
 from phoenix_core.performance_tracker import print_performance_summary, update_performance
 from phoenix_core.decision_diagnostics import print_diagnostics_summary, run_decision_diagnostics
 from phoenix_core.portfolio_guard import print_portfolio_summary, run_portfolio_guard
+from phoenix_core.market_data_guard import print_market_data_summary, run_market_data_guard
 from phoenix_core.run_guard import RunPolicy, SingleInstanceLock, failure_state, load_state, save_state, should_run, success_state
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -77,17 +78,31 @@ def monitor_and_track(config: dict[str, Any], return_code: int, log_path: Path) 
         print(f"{type(error).__name__}: {error}")
         return False
 
+    market_safe = True
+    market_guard = config.get("market_data_guard", {})
+    if bool(market_guard.get("enabled", True)):
+        try:
+            market_report = run_market_data_guard(ROOT_DIR, config)
+            print_market_data_summary(market_report)
+            market_safe = market_report.get("status") != "FAILED"
+        except Exception as error:
+            print("PHOENIX Step13 MARKET DATA GUARD ERROR")
+            print(f"{type(error).__name__}: {error}")
+            market_safe = False
+    else:
+        print("PHOENIX Step13 MARKET DATA GUARD: disabled")
+
     guard = config.get("portfolio_guard", {})
     if not bool(guard.get("enabled", True)):
         print("PHOENIX Step12 PORTFOLIO EXIT GUARD: disabled")
-        return True
+        return market_safe
     if not bool(guard.get("advisory_only", True)):
         print("PHOENIX Step12 PORTFOLIO EXIT GUARD ERROR: advisory_only must remain true")
         return False
     try:
         portfolio_report = run_portfolio_guard(ROOT_DIR, config)
         print_portfolio_summary(portfolio_report)
-        return True
+        return market_safe
     except Exception as error:
         print("PHOENIX Step12 PORTFOLIO EXIT GUARD ERROR")
         print(f"{type(error).__name__}: {error}")
