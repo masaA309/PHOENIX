@@ -10,5 +10,18 @@
     "scheduler_state": "state/v7_scheduler_state.json",
     "lock": "state/v7_scheduler.lock",
     "log_dir": "logs/scheduler"
+  },
+  "operations": {
+    "enabled": true,
+    "pipeline_summary": "reports/v7_direct_pipeline_summary.json",
+    "report_json": "reports/v7_operations_report.json",
+    "report_text": "reports/v7_operations_report.txt",
+    "notification": {
+      "enabled": false,
+      "notify_on_success": false,
+      "notify_on_failure": true,
+      "webhook_env": "PHOENIX_V7_DISCORD_WEBHOOK_URL",
+      "timeout_seconds": 15
+    }
   }
 }

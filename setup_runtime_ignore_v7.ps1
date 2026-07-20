@@ -8,13 +8,18 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $GitIgnore = Join-Path $Root ".gitignore"
 
 $RequiredEntries = @(
+    ".env",
     ".venv/",
     "__pycache__/",
     "*.py[cod]",
     ".pytest_cache/",
     "runtime/",
+    "state/*.json",
+    "state/*.lock",
     "logs/scheduler/",
-    "reports/v7_environment_report.json"
+    "reports/v7_environment_report.json",
+    "reports/v7_operations_report.json",
+    "reports/v7_operations_report.txt"
 )
 
 $Lines = @()

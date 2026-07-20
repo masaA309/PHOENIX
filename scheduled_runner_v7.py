@@ -8,6 +8,10 @@ import subprocess
 import sys
 from typing import Any
 
+from phoenix_core.operations_monitor import (
+    print_operations_summary,
+    run_operations_monitor,
+)
 from phoenix_core.run_guard import (
     RunPolicy,
     SingleInstanceLock,
@@ -42,6 +46,30 @@ def load_config(path: Path) -> dict[str, Any]:
 def resolve_path(value: str) -> Path:
     path = Path(value)
     return path if path.is_absolute() else ROOT_DIR / path
+
+
+def monitor_run(
+    config: dict[str, Any],
+    return_code: int,
+    log_path: Path,
+) -> bool:
+    operations = config.get("operations", {})
+    if not bool(operations.get("enabled", True)):
+        print("PHOENIX Step9 MONITOR: disabled")
+        return True
+    try:
+        report = run_operations_monitor(
+            root=ROOT_DIR,
+            config=config,
+            return_code=return_code,
+            log_path=log_path,
+        )
+        print_operations_summary(report)
+        return True
+    except Exception as error:
+        print("PHOENIX Step9 MONITOR ERROR")
+        print(f"{type(error).__name__}: {error}")
+        return False
 
 
 def main() -> int:
@@ -81,7 +109,9 @@ def main() -> int:
         "--config",
         str(pipeline_config),
     ]
-    if args.dry_run or bool(scheduler.get("dry_run", False)):
+    dry_run = args.dry_run or bool(scheduler.get("dry_run", False))
+    scheduler["dry_run"] = dry_run
+    if dry_run:
         command.append("--dry-run")
 
     try:
@@ -103,13 +133,15 @@ def main() -> int:
 
             if completed.returncode == 0:
                 save_state(state_path, {**state, **success_state(now, 0, log_path)})
+                monitor_ok = monitor_run(config, 0, log_path)
                 print(f"PHOENIX Step7 SUCCESS: {log_path}")
-                return 0
+                return 0 if monitor_ok else 9
 
             save_state(
                 state_path,
                 {**state, **failure_state(now, completed.returncode, log_path)},
             )
+            monitor_run(config, completed.returncode, log_path)
             print(f"PHOENIX Step7 FAILED({completed.returncode}): {log_path}")
             return completed.returncode
     except RuntimeError as exc:
