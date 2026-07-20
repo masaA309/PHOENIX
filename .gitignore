@@ -26,3 +26,7 @@ state/*.json
 state/*.lock
 reports/v7_operations_report.json
 reports/v7_operations_report.txt
+reports/v7_environment_report.txt
+reports/v7_run_history.jsonl
+reports/v7_performance_summary.json
+reports/v7_performance_summary.txt

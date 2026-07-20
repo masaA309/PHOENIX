@@ -1,47 +1,15 @@
-[CmdletBinding()]
-param()
-
-Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$GitIgnore = Join-Path $Root ".gitignore"
-
-$RequiredEntries = @(
-    ".env",
-    ".venv/",
-    "__pycache__/",
-    "*.py[cod]",
-    ".pytest_cache/",
-    "runtime/",
-    "state/*.json",
-    "state/*.lock",
-    "logs/scheduler/",
-    "reports/v7_environment_report.json",
-    "reports/v7_operations_report.json",
-    "reports/v7_operations_report.txt"
+$root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ignorePath = Join-Path $root ".gitignore"
+$entries = @(
+    ".env", "state/*.json", "state/*.lock", "logs/scheduler/",
+    "reports/v7_environment_report.json", "reports/v7_environment_report.txt",
+    "reports/v7_operations_report.json", "reports/v7_operations_report.txt",
+    "reports/v7_run_history.jsonl", "reports/v7_performance_summary.json",
+    "reports/v7_performance_summary.txt"
 )
-
-$Lines = @()
-if (Test-Path -LiteralPath $GitIgnore -PathType Leaf) {
-    $Lines = @([System.IO.File]::ReadAllLines($GitIgnore))
+$existing = if (Test-Path $ignorePath) { Get-Content $ignorePath } else { @() }
+foreach ($entry in $entries) {
+    if ($existing -notcontains $entry) { Add-Content -Path $ignorePath -Value $entry -Encoding utf8; $existing += $entry }
 }
-
-foreach ($Entry in $RequiredEntries) {
-    if (-not ($Lines -contains $Entry)) {
-        $Lines += $Entry
-    }
-}
-
-$Content = ($Lines -join [Environment]::NewLine).TrimEnd()
-$Content += [Environment]::NewLine
-$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-
-[System.IO.File]::WriteAllText(
-    $GitIgnore,
-    $Content,
-    $Utf8NoBom
-)
-
-Write-Output "Runtime exclusions are ready."
-Write-Output "File: $GitIgnore"
+Write-Host "PHOENIX v7 runtime ignore rules are ready."

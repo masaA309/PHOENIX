@@ -1,10 +1,5 @@
 {
-  "scheduler": {
-    "enabled": true,
-    "weekdays": [0, 1, 2, 3, 4],
-    "once_per_day": true,
-    "dry_run": false
-  },
+  "scheduler": {"enabled": true, "weekdays": [0, 1, 2, 3, 4], "once_per_day": true, "dry_run": false},
   "files": {
     "pipeline_config": "config/v7_direct_pipeline_config.json",
     "scheduler_state": "state/v7_scheduler_state.json",
@@ -17,11 +12,16 @@
     "report_json": "reports/v7_operations_report.json",
     "report_text": "reports/v7_operations_report.txt",
     "notification": {
-      "enabled": false,
-      "notify_on_success": false,
-      "notify_on_failure": true,
-      "webhook_env": "PHOENIX_V7_DISCORD_WEBHOOK_URL",
-      "timeout_seconds": 15
+      "enabled": false, "notify_on_success": false, "notify_on_failure": true,
+      "webhook_env": "PHOENIX_V7_DISCORD_WEBHOOK_URL", "timeout_seconds": 15
     }
+  },
+  "performance": {
+    "enabled": true,
+    "history_jsonl": "reports/v7_run_history.jsonl",
+    "summary_json": "reports/v7_performance_summary.json",
+    "summary_text": "reports/v7_performance_summary.txt",
+    "retention_runs": 365,
+    "window_runs": 30
   }
 }

@@ -1,1 +1,1 @@
-"""PHOENIX v7 test package."""
+# Enables unittest discovery on Python 3.13.
