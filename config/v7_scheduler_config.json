@@ -58,7 +58,17 @@
     "operations_report": "reports/v7_operations_report.json",
     "market_data_report": "reports/v7_market_data_guard.json",
     "portfolio_report": "reports/v7_portfolio_guard.json",
+    "lifecycle_report": "reports/v7_order_lifecycle.json",
     "report_json": "reports/v7_readiness_gate.json",
     "report_text": "reports/v7_readiness_gate.txt"
+  },
+  "order_lifecycle": {
+    "enabled": true,
+    "broker_state": "state/v7_paper_broker.json",
+    "snapshot_state": "state/v7_order_lifecycle_snapshot.json",
+    "event_journal": "state/v7_order_lifecycle_events.jsonl",
+    "report_json": "reports/v7_order_lifecycle.json",
+    "report_text": "reports/v7_order_lifecycle.txt",
+    "retention_events": 2000
   }
 }

@@ -97,6 +97,7 @@ def run_readiness_gate(root: Path, config: Mapping[str, Any]) -> dict[str, Any]:
         "operations": str(settings.get("operations_report", "reports/v7_operations_report.json")),
         "market_data": str(settings.get("market_data_report", "reports/v7_market_data_guard.json")),
         "portfolio": str(settings.get("portfolio_report", "reports/v7_portfolio_guard.json")),
+        "lifecycle": str(settings.get("lifecycle_report", "reports/v7_order_lifecycle.json")),
     }
     loaded: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
@@ -104,8 +105,12 @@ def run_readiness_gate(root: Path, config: Mapping[str, Any]) -> dict[str, Any]:
         loaded[name], error = read_json(resolve_path(root, value))
         if error:
             errors.append(error)
+    performance = dict(loaded.get("performance", {}))
+    totals = dict(performance.get("totals", {}))
+    totals["filled"] = int(loaded.get("lifecycle", {}).get("audited_fill_count", 0) or 0)
+    performance["totals"] = totals
     report = build_readiness_report(
-        loaded.get("performance", {}), loaded.get("operations", {}),
+        performance, loaded.get("operations", {}),
         loaded.get("market_data", {}), loaded.get("portfolio", {}), settings, errors,
     )
     json_path = resolve_path(root, str(settings.get("report_json", "reports/v7_readiness_gate.json")))

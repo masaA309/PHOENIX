@@ -14,6 +14,7 @@ from phoenix_core.decision_diagnostics import print_diagnostics_summary, run_dec
 from phoenix_core.portfolio_guard import print_portfolio_summary, run_portfolio_guard
 from phoenix_core.market_data_guard import print_market_data_summary, run_market_data_guard
 from phoenix_core.readiness_gate import print_readiness_summary, run_readiness_gate
+from phoenix_core.order_lifecycle import print_lifecycle_summary, run_order_lifecycle
 from phoenix_core.run_guard import RunPolicy, SingleInstanceLock, failure_state, load_state, save_state, should_run, success_state
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -107,6 +108,18 @@ def monitor_and_track(config: dict[str, Any], return_code: int, log_path: Path) 
         print("PHOENIX Step12 PORTFOLIO EXIT GUARD ERROR")
         print(f"{type(error).__name__}: {error}")
         return False
+
+    lifecycle = config.get("order_lifecycle", {})
+    if bool(lifecycle.get("enabled", True)):
+        try:
+            lifecycle_report = run_order_lifecycle(ROOT_DIR, config)
+            print_lifecycle_summary(lifecycle_report)
+        except Exception as error:
+            print("PHOENIX Step15 ORDER LIFECYCLE ERROR")
+            print(f"{type(error).__name__}: {error}")
+            return False
+    else:
+        print("PHOENIX Step15 ORDER LIFECYCLE: disabled")
 
     readiness = config.get("readiness_gate", {})
     if bool(readiness.get("enabled", True)):
