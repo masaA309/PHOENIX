@@ -39,6 +39,10 @@ class PerformanceTrackerStep10Test(unittest.TestCase):
         self.assertEqual(0.1, value["conversion_rates"]["candidate_to_ready"])
         self.assertEqual(1.0, value["conversion_rates"]["approved_to_filled"])
 
+    def test_distinct_days_ignore_same_day_repeats(self) -> None:
+        items = [record_from_operations(report("2026-07-20T09:00:00")), record_from_operations(report("2026-07-20T15:00:00")), record_from_operations(report("2026-07-21T09:00:00"))]
+        self.assertEqual(2, summarize(items, 30)["distinct_run_days"])
+
     def test_update_creates_all_reports(self) -> None:
         summary = update_performance(self.root, self.config, report("2026-07-20T09:00:00"))
         self.assertEqual(1, summary["run_count"])

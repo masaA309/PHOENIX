@@ -48,5 +48,17 @@
     "report_text": "reports/v7_market_data_guard.txt",
     "max_age_hours": 96,
     "unchanged_warning_days": 2
+  },
+  "readiness_gate": {
+    "enabled": true,
+    "minimum_paper_days": 20,
+    "minimum_success_rate": 0.95,
+    "minimum_filled_orders": 3,
+    "performance_report": "reports/v7_performance_summary.json",
+    "operations_report": "reports/v7_operations_report.json",
+    "market_data_report": "reports/v7_market_data_guard.json",
+    "portfolio_report": "reports/v7_portfolio_guard.json",
+    "report_json": "reports/v7_readiness_gate.json",
+    "report_text": "reports/v7_readiness_gate.txt"
   }
 }

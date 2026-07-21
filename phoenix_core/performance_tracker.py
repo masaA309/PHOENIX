@@ -72,6 +72,13 @@ def record_from_operations(report: Mapping[str, Any]) -> dict[str, Any]:
 def summarize(records: Iterable[Mapping[str, Any]], window_runs: int = 30) -> dict[str, Any]:
     items = list(records)[-max(1, window_runs):]
     total = len(items)
+    observed_days: set[str] = set()
+    for item in items:
+        generated_at = str(item.get("generated_at", ""))
+        try:
+            observed_days.add(datetime.fromisoformat(generated_at).date().isoformat())
+        except ValueError:
+            pass
     status_counts = {name: sum(item.get("status") == name for item in items) for name in ("SUCCESS", "WARNING", "FAILED")}
     candidates = sum(int(item.get("candidate_count", 0) or 0) for item in items)
     ready = sum(int(item.get("ready_count", 0) or 0) for item in items)
@@ -87,6 +94,7 @@ def summarize(records: Iterable[Mapping[str, Any]], window_runs: int = 30) -> di
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "window_runs": max(1, window_runs),
         "run_count": total,
+        "distinct_run_days": len(observed_days),
         "status_counts": status_counts,
         "success_rate": round(status_counts["SUCCESS"] / total, 4) if total else None,
         "totals": {"candidates": candidates, "ready": ready, "approved": approved, "filled": filled},

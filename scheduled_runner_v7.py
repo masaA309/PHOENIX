@@ -13,6 +13,7 @@ from phoenix_core.performance_tracker import print_performance_summary, update_p
 from phoenix_core.decision_diagnostics import print_diagnostics_summary, run_decision_diagnostics
 from phoenix_core.portfolio_guard import print_portfolio_summary, run_portfolio_guard
 from phoenix_core.market_data_guard import print_market_data_summary, run_market_data_guard
+from phoenix_core.readiness_gate import print_readiness_summary, run_readiness_gate
 from phoenix_core.run_guard import RunPolicy, SingleInstanceLock, failure_state, load_state, save_state, should_run, success_state
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -102,11 +103,23 @@ def monitor_and_track(config: dict[str, Any], return_code: int, log_path: Path) 
     try:
         portfolio_report = run_portfolio_guard(ROOT_DIR, config)
         print_portfolio_summary(portfolio_report)
-        return market_safe
     except Exception as error:
         print("PHOENIX Step12 PORTFOLIO EXIT GUARD ERROR")
         print(f"{type(error).__name__}: {error}")
         return False
+
+    readiness = config.get("readiness_gate", {})
+    if bool(readiness.get("enabled", True)):
+        try:
+            readiness_report = run_readiness_gate(ROOT_DIR, config)
+            print_readiness_summary(readiness_report)
+        except Exception as error:
+            print("PHOENIX Step14 READINESS GATE ERROR")
+            print(f"{type(error).__name__}: {error}")
+            return False
+    else:
+        print("PHOENIX Step14 READINESS GATE: disabled")
+    return market_safe
 
 
 def main() -> int:
