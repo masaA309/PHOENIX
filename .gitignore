@@ -40,3 +40,4 @@ reports/v7_readiness_gate.json
 reports/v7_readiness_gate.txt
 reports/v7_order_lifecycle.json
 reports/v7_order_lifecycle.txt
+state/*.jsonl
