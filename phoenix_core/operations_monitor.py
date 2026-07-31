@@ -4,6 +4,7 @@ from datetime import datetime
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 from typing import Any, Callable, Mapping
 from urllib import error as urllib_error
@@ -11,6 +12,7 @@ from urllib import request as urllib_request
 
 
 PostCallable = Callable[..., Any]
+SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
 class HttpStatusResponse:
@@ -70,6 +72,72 @@ def report_status(alerts: list[dict[str, str]]) -> str:
     return "SUCCESS"
 
 
+def safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def validate_candidate_guard(
+    value: Any,
+    pipeline_summary: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], str | None]:
+    if not isinstance(value, Mapping):
+        return {}, "candidate_input_guard must be an object"
+    if value.get("status") != "READY":
+        return value, "candidate input status is not READY"
+    for field in ("input_sha256", "eligible_candidates_sha256"):
+        if not SHA256_PATTERN.fullmatch(str(value.get(field, ""))):
+            return value, f"{field} is not a SHA-256 digest"
+    try:
+        raw_counts = (
+            value["input_rows"],
+            value["eligible_rows"],
+            value["rejected_rows"],
+            pipeline_summary["candidate_count"],
+            pipeline_summary["eligible_candidate_count"],
+        )
+    except KeyError:
+        return value, "candidate input counts are missing or invalid"
+    if any(isinstance(item, bool) or not isinstance(item, int) for item in raw_counts):
+        return value, "candidate input counts must be integers"
+    input_rows, eligible_rows, rejected_rows, summary_input, summary_eligible = raw_counts
+    if min(input_rows, eligible_rows, rejected_rows) < 0:
+        return value, "candidate input counts cannot be negative"
+    if eligible_rows + rejected_rows != input_rows:
+        return value, "candidate input counts are inconsistent"
+    if input_rows != summary_input or eligible_rows != summary_eligible:
+        return value, "candidate input counts do not match pipeline summary"
+    decisions = value.get("decision_counts")
+    rejections = value.get("rejection_counts")
+    if not isinstance(decisions, Mapping) or not isinstance(rejections, Mapping):
+        return value, "candidate decision counts must be objects"
+    if set(decisions) != {"BUY", "WATCH", "SKIP"}:
+        return value, "candidate decision keys are invalid"
+    if any(
+        isinstance(count, bool) or not isinstance(count, int)
+        for count in (*decisions.values(), *rejections.values())
+    ):
+        return value, "candidate decision counts are invalid"
+    decision_counts = dict(decisions)
+    rejection_counts = dict(rejections)
+    if any(count < 0 for count in decision_counts.values()):
+        return value, "candidate decision counts cannot be negative"
+    if sum(decision_counts.values()) != input_rows:
+        return value, "candidate decision counts are inconsistent"
+    if eligible_rows != decision_counts["BUY"]:
+        return value, "eligible candidate count does not equal BUY count"
+    expected_rejections = {
+        key: decision_counts[key]
+        for key in ("WATCH", "SKIP")
+        if decision_counts[key] > 0
+    }
+    if rejection_counts != expected_rejections:
+        return value, "candidate rejection counts are inconsistent"
+    return value, None
+
+
 def build_operations_report(
     root: Path,
     config: Mapping[str, Any],
@@ -117,7 +185,7 @@ def build_operations_report(
     if pipeline_error:
         add_alert(
             alerts,
-            "WARNING" if return_code == 0 else "ERROR",
+            "CRITICAL",
             "PIPELINE_SUMMARY_UNAVAILABLE",
             f"{pipeline_summary_path}: {pipeline_error}",
         )
@@ -128,11 +196,22 @@ def build_operations_report(
             "RISK_HALTED",
             str(pipeline_summary.get("halt_reason", "Risk controller halted the pipeline")),
         )
+    candidate_guard, candidate_guard_error = validate_candidate_guard(
+        pipeline_summary.get("candidate_input_guard", {}),
+        pipeline_summary,
+    )
+    if pipeline_summary and candidate_guard_error:
+        add_alert(
+            alerts,
+            "CRITICAL",
+            "CANDIDATE_INPUT_GUARD_NOT_READY",
+            f"Candidate execution input contract is invalid: {candidate_guard_error}",
+        )
 
     dry_run = bool(scheduler.get("dry_run", False))
     if pipeline_summary and not dry_run:
-        approved = int(pipeline_summary.get("approved_count", 0) or 0)
-        filled = int(pipeline_summary.get("filled_count", 0) or 0)
+        approved = safe_int(pipeline_summary.get("approved_count", 0) or 0)
+        filled = safe_int(pipeline_summary.get("filled_count", 0) or 0)
         if approved > filled:
             add_alert(
                 alerts,
@@ -165,10 +244,20 @@ def build_operations_report(
         "pipeline": {
             "summary_path": str(pipeline_summary_path),
             "summary_available": pipeline_error is None,
-            "candidate_count": int(pipeline_summary.get("candidate_count", 0) or 0),
-            "ready_count": int(pipeline_summary.get("ready_count", 0) or 0),
-            "approved_count": int(pipeline_summary.get("approved_count", 0) or 0),
-            "filled_count": int(pipeline_summary.get("filled_count", 0) or 0),
+            "candidate_count": safe_int(pipeline_summary.get("candidate_count", 0) or 0),
+            "eligible_candidate_count": safe_int(
+                pipeline_summary.get("eligible_candidate_count", 0) or 0
+            ),
+            "candidate_input_status": str(candidate_guard.get("status", "MISSING")),
+            "candidate_input_sha256": str(candidate_guard.get("input_sha256", "")),
+            "candidate_rejection_counts": dict(
+                candidate_guard.get("rejection_counts", {})
+                if isinstance(candidate_guard, Mapping)
+                else {}
+            ),
+            "ready_count": safe_int(pipeline_summary.get("ready_count", 0) or 0),
+            "approved_count": safe_int(pipeline_summary.get("approved_count", 0) or 0),
+            "filled_count": safe_int(pipeline_summary.get("filled_count", 0) or 0),
             "halted": bool(pipeline_summary.get("halted", False)),
             "halt_reason": str(pipeline_summary.get("halt_reason", "") or ""),
         },
@@ -199,6 +288,7 @@ def notification_message(report: Mapping[str, Any]) -> str:
         (
             "Pipeline: "
             f"candidates={pipeline.get('candidate_count', 0)}, "
+            f"eligible={pipeline.get('eligible_candidate_count', 0)}, "
             f"approved={pipeline.get('approved_count', 0)}, "
             f"filled={pipeline.get('filled_count', 0)}"
         ),

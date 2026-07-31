@@ -9,8 +9,19 @@ import unittest
 from phoenix_core.decision_diagnostics import build_diagnostics, infer_reason, read_position_log, run_decision_diagnostics
 
 
-def operations(candidates: int = 20, ready: int = 0) -> dict:
-    return {"pipeline": {"candidate_count": candidates, "ready_count": ready, "approved_count": 0, "filled_count": 0}}
+def operations(candidates: int = 20, ready: int = 0, eligible: int | None = None) -> dict:
+    eligible = candidates if eligible is None else eligible
+    return {
+        "pipeline": {
+            "candidate_count": candidates,
+            "eligible_candidate_count": eligible,
+            "candidate_input_status": "READY",
+            "candidate_rejection_counts": {},
+            "ready_count": ready,
+            "approved_count": 0,
+            "filled_count": 0,
+        }
+    }
 
 
 class DecisionDiagnosticsStep11Test(unittest.TestCase):
@@ -44,10 +55,29 @@ class DecisionDiagnosticsStep11Test(unittest.TestCase):
         self.assertEqual({"TOO_EXPENSIVE": 1}, value["reason_counts"])
         self.assertEqual("1234", value["examples"][0]["symbol"])
 
+    def test_upstream_decision_exclusions_are_separate_from_sizing(self) -> None:
+        report = operations(20, 0, eligible=2)
+        report["pipeline"]["candidate_rejection_counts"] = {"WATCH": 12, "SKIP": 6}
+        value = build_diagnostics(
+            [{"symbol": "1111.T", "reason": "TOO_EXPENSIVE"}], report
+        )
+        self.assertEqual(2, value["pipeline"]["eligible_buy"])
+        self.assertEqual(
+            {"WATCH": 12, "SKIP": 6}, value["upstream_rejection_counts"]
+        )
+
     def test_healthy_when_candidate_is_ready(self) -> None:
         value = build_diagnostics([{"symbol": "1234", "status": "ready"}], operations(20, 1))
         self.assertEqual("HEALTHY", value["status"])
         self.assertEqual(1, value["reason_counts"]["READY"])
+
+    def test_missing_step18_guard_cannot_report_healthy(self) -> None:
+        value = build_diagnostics(
+            [{"symbol": "1234.T", "status": "ready"}],
+            {"pipeline": {"candidate_count": 1, "ready_count": 1}},
+        )
+        self.assertEqual("REVIEW", value["status"])
+        self.assertEqual("MISSING", value["pipeline"]["candidate_input_status"])
 
     def test_utf8_bom_csv_is_supported(self) -> None:
         path = self.root / "reports/positions.csv"

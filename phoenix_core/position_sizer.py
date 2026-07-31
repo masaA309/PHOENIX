@@ -207,6 +207,17 @@ def normalize_candidates(path: Path) -> pd.DataFrame:
     if frame.empty:
         return pd.DataFrame()
 
+    return normalize_candidate_frame(frame)
+
+
+def normalize_candidate_frame(
+    frame: pd.DataFrame,
+    *,
+    apply_portfolio_filter: bool = True,
+) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame()
+
     frame = frame.loc[
         :,
         ~frame.columns.duplicated(keep="first"),
@@ -335,7 +346,7 @@ def normalize_candidates(path: Path) -> pd.DataFrame:
         errors="coerce",
     ).fillna(0.0)
 
-    if "Portfolio判定" in frame.columns:
+    if apply_portfolio_filter and "Portfolio判定" in frame.columns:
         decision_series = (
             _first_series(
                 frame,

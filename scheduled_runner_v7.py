@@ -15,6 +15,18 @@ from phoenix_core.portfolio_guard import print_portfolio_summary, run_portfolio_
 from phoenix_core.market_data_guard import print_market_data_summary, run_market_data_guard
 from phoenix_core.readiness_gate import print_readiness_summary, run_readiness_gate
 from phoenix_core.order_lifecycle import print_lifecycle_summary, run_order_lifecycle
+from phoenix_core.trading_economics import (
+    print_economics_summary,
+    run_trading_economics,
+)
+from phoenix_core.staged_pilot_gate import (
+    print_staged_pilot_summary,
+)
+from phoenix_core.dry_run_integrity import (
+    capture_protected_files,
+    print_integrity_summary,
+    save_integrity_report,
+)
 from phoenix_core.run_guard import RunPolicy, SingleInstanceLock, failure_state, load_state, save_state, should_run, success_state
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -43,7 +55,12 @@ def resolve_path(value: str) -> Path:
     return path if path.is_absolute() else ROOT_DIR / path
 
 
-def monitor_and_track(config: dict[str, Any], return_code: int, log_path: Path) -> bool:
+def monitor_and_track(
+    config: dict[str, Any],
+    return_code: int,
+    log_path: Path,
+    dry_run: bool,
+) -> bool:
     operations = config.get("operations", {})
     if not bool(operations.get("enabled", True)):
         print("PHOENIX Step9 MONITOR: disabled")
@@ -84,7 +101,11 @@ def monitor_and_track(config: dict[str, Any], return_code: int, log_path: Path) 
     market_guard = config.get("market_data_guard", {})
     if bool(market_guard.get("enabled", True)):
         try:
-            market_report = run_market_data_guard(ROOT_DIR, config)
+            market_report = run_market_data_guard(
+                ROOT_DIR,
+                config,
+                persist_state=not dry_run,
+            )
             print_market_data_summary(market_report)
             market_safe = market_report.get("status") != "FAILED"
         except Exception as error:
@@ -109,11 +130,17 @@ def monitor_and_track(config: dict[str, Any], return_code: int, log_path: Path) 
         print(f"{type(error).__name__}: {error}")
         return False
 
+    lifecycle_safe = True
     lifecycle = config.get("order_lifecycle", {})
     if bool(lifecycle.get("enabled", True)):
         try:
-            lifecycle_report = run_order_lifecycle(ROOT_DIR, config)
+            lifecycle_report = run_order_lifecycle(
+                ROOT_DIR,
+                config,
+                persist_state=not dry_run,
+            )
             print_lifecycle_summary(lifecycle_report)
+            lifecycle_safe = lifecycle_report.get("status") == "READY"
         except Exception as error:
             print("PHOENIX Step15 ORDER LIFECYCLE ERROR")
             print(f"{type(error).__name__}: {error}")
@@ -121,10 +148,33 @@ def monitor_and_track(config: dict[str, Any], return_code: int, log_path: Path) 
     else:
         print("PHOENIX Step15 ORDER LIFECYCLE: disabled")
 
+    economics = config.get("trading_economics", {})
+    if bool(economics.get("enabled", True)):
+        try:
+            economics_report = run_trading_economics(
+                ROOT_DIR,
+                config,
+                persist_state=not dry_run,
+            )
+            print_economics_summary(economics_report)
+        except Exception as error:
+            print("PHOENIX Step19 TRADING ECONOMICS ERROR")
+            print(f"{type(error).__name__}: {error}")
+            return False
+    else:
+        print("PHOENIX Step19 TRADING ECONOMICS ERROR: enabled must remain true")
+        return False
+
     readiness = config.get("readiness_gate", {})
+    staged = config.get("staged_pilot_gate", {})
+    if staged.get("enabled") is not True:
+        print("PHOENIX Step19 STAGED PILOT GATE ERROR: enabled must remain true")
+        return False
     if bool(readiness.get("enabled", True)):
         try:
             readiness_report = run_readiness_gate(ROOT_DIR, config)
+            staged_report = readiness_report.pop("_staged_pilot_report", {})
+            print_staged_pilot_summary(staged_report)
             print_readiness_summary(readiness_report)
         except Exception as error:
             print("PHOENIX Step14 READINESS GATE ERROR")
@@ -132,7 +182,23 @@ def monitor_and_track(config: dict[str, Any], return_code: int, log_path: Path) 
             return False
     else:
         print("PHOENIX Step14 READINESS GATE: disabled")
-    return market_safe
+
+    return market_safe and lifecycle_safe
+
+
+def verify_dry_run_integrity(
+    config: dict[str, Any],
+    before: dict[str, dict[str, Any]],
+    generated_at: datetime,
+) -> bool:
+    try:
+        report = save_integrity_report(ROOT_DIR, config, before, generated_at)
+        print_integrity_summary(report)
+        return report.get("status") == "READY"
+    except Exception as error:
+        print("PHOENIX Step16 DRY RUN INTEGRITY ERROR")
+        print(f"{type(error).__name__}: {error}")
+        return False
 
 
 def main() -> int:
@@ -156,7 +222,29 @@ def main() -> int:
     pipeline_config = resolve_path(str(files.get("pipeline_config", "config/v7_direct_pipeline_config.json")))
     pipeline_script = ROOT_DIR / "direct_pipeline_v7.py"
     now = datetime.now()
-    state = load_state(state_path)
+    dry_run = args.dry_run or bool(scheduler.get("dry_run", False))
+    scheduler["dry_run"] = dry_run
+    integrity_settings = config.get("dry_run_integrity", {})
+    integrity_before: dict[str, dict[str, Any]] = {}
+    if dry_run:
+        if not bool(integrity_settings.get("enabled", True)):
+            print("PHOENIX Step16 ERROR: Dry Run integrity guard must remain enabled")
+            return 12
+        try:
+            integrity_before = capture_protected_files(
+                ROOT_DIR,
+                [str(value) for value in integrity_settings.get("protected_files", [])],
+            )
+        except Exception as error:
+            print("PHOENIX Step16 DRY RUN INTEGRITY ERROR")
+            print(f"{type(error).__name__}: {error}")
+            return 12
+    try:
+        state = load_state(state_path)
+    except ValueError as error:
+        print("PHOENIX Step7 STATE ERROR")
+        print(f"{type(error).__name__}: {error}")
+        return 8
     allowed, reason = should_run(policy, state, now)
     if not args.force and not allowed:
         print(f"PHOENIX Step7 SKIP: {reason}")
@@ -164,8 +252,6 @@ def main() -> int:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"v7_scheduler_{now:%Y%m%d_%H%M%S}.log"
     command = [sys.executable, str(pipeline_script), "--config", str(pipeline_config)]
-    dry_run = args.dry_run or bool(scheduler.get("dry_run", False))
-    scheduler["dry_run"] = dry_run
     if dry_run:
         command.append("--dry-run")
     try:
@@ -180,13 +266,27 @@ def main() -> int:
             log_path.write_text(output, encoding="utf-8")
             print(output, end="" if output.endswith("\n") else "\n")
             if completed.returncode == 0:
-                save_state(state_path, {**state, **success_state(now, 0, log_path)})
-                monitor_ok = monitor_and_track(config, 0, log_path)
+                if not dry_run:
+                    save_state(state_path, {**state, **success_state(now, 0, log_path)})
+                monitor_ok = monitor_and_track(config, 0, log_path, dry_run)
+                integrity_ok = (
+                    verify_dry_run_integrity(config, integrity_before, now)
+                    if dry_run else True
+                )
                 print(f"PHOENIX Step7 SUCCESS: {log_path}")
+                if not integrity_ok:
+                    return 11
                 return 0 if monitor_ok else 10
-            save_state(state_path, {**state, **failure_state(now, completed.returncode, log_path)})
-            monitor_and_track(config, completed.returncode, log_path)
+            if not dry_run:
+                save_state(state_path, {**state, **failure_state(now, completed.returncode, log_path)})
+            monitor_and_track(config, completed.returncode, log_path, dry_run)
+            integrity_ok = (
+                verify_dry_run_integrity(config, integrity_before, now)
+                if dry_run else True
+            )
             print(f"PHOENIX Step7 FAILED({completed.returncode}): {log_path}")
+            if not integrity_ok:
+                return 11
             return completed.returncode
     except RuntimeError as error:
         print(f"PHOENIX Step7 SKIP: {error}")

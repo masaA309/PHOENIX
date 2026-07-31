@@ -12,6 +12,12 @@ import pandas as pd
 import yfinance as yf
 
 from indicators import calc_score
+from phoenix_core.data_freshness import (
+    EXPECTED_NIKKEI225_COUNT,
+    JST,
+    latest_completed_jpx_trading_date,
+    verify_market_dates,
+)
 
 
 # =========================================================
@@ -91,28 +97,21 @@ def load_stock_list(
         .str.upper()
     )
 
-    stocks = stocks[
-        stocks["ticker"].str.match(
-            r"^[0-9A-Z]{4}\.T$",
-            na=False,
-        )
-    ]
-
-    stocks = (
-        stocks.drop_duplicates(
-            subset=["ticker"],
-        )
-        .reset_index(
-            drop=True,
-        )
-    )
-
-    if stocks.empty:
+    if len(stocks) != EXPECTED_NIKKEI225_COUNT:
         raise ValueError(
-            "有効な銘柄がありません。"
+            f"日経225ユニバース件数が不正です: "
+            f"{len(stocks)}/{EXPECTED_NIKKEI225_COUNT}"
         )
+    valid_tickers = stocks["ticker"].str.match(
+        r"^[0-9A-Z]{4}\.T$",
+        na=False,
+    )
+    if not valid_tickers.all():
+        raise ValueError("日経225ユニバースに無効なtickerがあります")
+    if stocks["ticker"].duplicated().any():
+        raise ValueError("日経225ユニバースにticker重複があります")
 
-    return stocks
+    return stocks.reset_index(drop=True)
 
 
 # =========================================================
@@ -232,19 +231,60 @@ def cache_has_enough_stocks(
         ):
             continue
 
-        if len(ticker_data) >= MIN_HISTORY_DAYS:
+        completed = completed_session_ticker_data(ticker_data)
+        if len(completed) >= MIN_HISTORY_DAYS:
             valid_count += 1
 
-    # 225銘柄中、ほぼ全件あれば当日キャッシュを使用
-    required_count = max(
-        len(tickers) - 5,
-        1,
-    )
+    # 一部欠落したキャッシュを完全な日経225データとして再利用しない。
+    return valid_count == len(tickers)
 
-    return (
-        valid_count
-        >= required_count
-    )
+
+def ticker_data_is_fresh(
+    ticker_data: pd.DataFrame,
+    *,
+    as_of: datetime | None = None,
+) -> bool:
+    return not completed_session_ticker_data(ticker_data, as_of=as_of).empty
+
+
+def completed_session_ticker_data(
+    ticker_data: pd.DataFrame,
+    *,
+    as_of: datetime | None = None,
+) -> pd.DataFrame:
+    """Return history ending at the latest fully completed JPX session.
+
+    Yahoo may expose an in-progress daily bar before the JPX cash market closes.
+    That row must not be used for indicators, but its presence must not make the
+    preceding completed session look stale.  Truly future-dated rows and history
+    missing the exact expected session still fail closed.
+    """
+    if not isinstance(ticker_data, pd.DataFrame) or ticker_data.empty:
+        return pd.DataFrame()
+
+    try:
+        checked = as_of or datetime.now(JST)
+        if checked.tzinfo is None:
+            checked = checked.replace(tzinfo=JST)
+        else:
+            checked = checked.astimezone(JST)
+        expected = latest_completed_jpx_trading_date(checked)
+        market_dates = [pd.Timestamp(value).date() for value in ticker_data.index]
+    except (AttributeError, TypeError, ValueError):
+        return pd.DataFrame()
+
+    if any(value > checked.date() for value in market_dates):
+        return pd.DataFrame()
+
+    completed_mask = [value <= expected for value in market_dates]
+    completed = ticker_data.loc[completed_mask].copy()
+    if completed.empty:
+        return pd.DataFrame()
+
+    latest = pd.Timestamp(completed.index.max()).date()
+    if verify_market_dates([latest], as_of=checked)["status"] != "READY":
+        return pd.DataFrame()
+    return completed
 
 
 # =========================================================
@@ -408,9 +448,13 @@ def download_market_data(
     dict[str, pd.DataFrame],
     list[str],
 ]:
-    merged_stocks = dict(
-        cached_stocks,
-    )
+    # A cache entry may have been saved today while its last market row is old.
+    # Never carry such data into a newly dated report.
+    merged_stocks = {}
+    for ticker, data in cached_stocks.items():
+        completed = completed_session_ticker_data(data)
+        if not completed.empty:
+            merged_stocks[ticker] = completed
 
     live_success = []
 
@@ -461,6 +505,8 @@ def download_market_data(
                     ticker=ticker,
                     batch_size=len(batch),
                 )
+
+                ticker_data = completed_session_ticker_data(ticker_data)
 
                 if (
                     ticker_data.empty
@@ -594,10 +640,15 @@ def scan_all(
 
     cache = load_cache()
 
-    cached_stocks = cache.get(
+    raw_cached_stocks = cache.get(
         "stocks",
         {},
     )
+    cached_stocks = {}
+    for ticker, data in raw_cached_stocks.items():
+        completed = completed_session_ticker_data(data)
+        if not completed.empty:
+            cached_stocks[ticker] = completed
 
     use_today_cache = (
         not FORCE_REFRESH
@@ -765,8 +816,12 @@ def scan_all(
             f"失敗銘柄例: {preview}"
         )
 
-    if not results:
-        return pd.DataFrame()
+    if len(results) != EXPECTED_NIKKEI225_COUNT or failed_tickers:
+        raise RuntimeError(
+            "日経225の市場データが完全ではありません: "
+            f"success={len(results)} expected={EXPECTED_NIKKEI225_COUNT} "
+            f"failed={len(failed_tickers)}"
+        )
 
     result_df = pd.DataFrame(
         results,

@@ -1,4 +1,19 @@
 {
+  "candidate_input": {
+    "enabled": true,
+    "path": "reports/trade_signals.csv",
+    "decision_column": "Trade判定",
+    "execution_price_column": "押し目価格",
+    "executable_values": [
+      "BUY"
+    ],
+    "known_values": [
+      "BUY",
+      "WATCH",
+      "SKIP"
+    ],
+    "fallback": false
+  },
   "broker": {
     "type": "paper",
     "initial_cash_yen": 300000,
@@ -28,7 +43,6 @@
     "block_on_broker_health_failure": true
   },
   "files": {
-    "candidates": "reports/trade_signals.csv",
     "risk_state": "state/v7_risk_state.json",
     "position_log": "reports/v7_direct_position_log.csv",
     "risk_log": "reports/v7_direct_risk_log.csv",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 import json
 import math
@@ -10,6 +11,8 @@ import sys
 from typing import Any
 
 import pandas as pd
+
+from phoenix_core.data_freshness import JST
 
 
 # =========================================================
@@ -37,6 +40,9 @@ OPTIMIZED_FILE = (
     REPORT_DIR
     / "optimized_signals.csv"
 )
+
+SOURCE_MANIFEST_FILE = REPORT_DIR / "notification_source_manifest.json"
+AI_MANIFEST_FILE = REPORT_DIR / "ai_judgement_manifest.json"
 
 TOP_STOCKS = 20
 MIN_LEARNING_SAMPLES = 30
@@ -174,32 +180,36 @@ def volume_bucket(
 # レポート読込
 # =========================================================
 
-def get_latest_report_file() -> Path:
-    report_files = sorted(
-        REPORT_DIR.glob(
-            "report_*.csv"
-        ),
-        key=lambda path:
-            path.stat().st_mtime,
-        reverse=True,
-    )
+def _file_sha256(path: Path) -> str:
+    return sha256(path.read_bytes()).hexdigest()
 
-    if not report_files:
-        raise FileNotFoundError(
-            "reportsフォルダに"
-            "report_*.csvがありません。"
-        )
 
-    return report_files[0]
+def load_source_manifest() -> dict[str, Any]:
+    if not SOURCE_MANIFEST_FILE.is_file():
+        raise FileNotFoundError(f"通知元manifestがありません: {SOURCE_MANIFEST_FILE}")
+    try:
+        value = json.loads(SOURCE_MANIFEST_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("通知元manifestを読み込めません") from error
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        raise ValueError("通知元manifestのschemaが不正です")
+    for name in ("run_id", "report_file", "report_sha256"):
+        if not isinstance(value.get(name), str) or not value[name]:
+            raise ValueError(f"通知元manifestの{name}が不正です")
+    return value
 
 
 def load_report() -> tuple[
     pd.DataFrame,
     Path,
+    dict[str, Any],
 ]:
-    report_file = (
-        get_latest_report_file()
-    )
+    source_manifest = load_source_manifest()
+    report_file = REPORT_DIR / source_manifest["report_file"]
+    if not report_file.is_file():
+        raise FileNotFoundError(f"manifest指定レポートがありません: {report_file}")
+    if _file_sha256(report_file) != source_manifest["report_sha256"]:
+        raise ValueError("通知元レポートのSHA-256がmanifestと一致しません")
 
     df = pd.read_csv(
         report_file
@@ -271,7 +281,7 @@ def load_report() -> tuple[
         .reset_index(drop=True)
     )
 
-    return df, report_file
+    return df, report_file, source_manifest
 
 
 def load_optimized_tickers() -> set[str]:
@@ -1122,89 +1132,58 @@ def print_results(
 
 def save_results(
     df: pd.DataFrame,
+    source_manifest: dict[str, Any],
 ) -> None:
-    REPORT_DIR.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    csv_temp = OUTPUT_FILE.with_suffix(OUTPUT_FILE.suffix + ".tmp")
+    df.to_csv(csv_temp, index=False, encoding="utf-8-sig")
+    csv_temp.replace(OUTPUT_FILE)
 
-    df.to_csv(
-        OUTPUT_FILE,
-        index=False,
-        encoding="utf-8-sig",
-    )
-
-    with open(
-        TEXT_OUTPUT_FILE,
-        "w",
-        encoding="utf-8",
-    ) as file:
-        file.write(
-            "PHOENIX SELF LEARNING "
-            "AI JUDGEMENT\n"
-        )
-
-        file.write(
-            datetime.now().strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
-        )
-
-        file.write(
-            "\n\n"
-        )
-
+    text_temp = TEXT_OUTPUT_FILE.with_suffix(TEXT_OUTPUT_FILE.suffix + ".tmp")
+    with open(text_temp, "w", encoding="utf-8") as file:
+        file.write("PHOENIX SELF LEARNING AI JUDGEMENT\n")
+        file.write(datetime.now(JST).strftime("%Y-%m-%d %H:%M:%S"))
+        file.write("\n\n")
         for number, row in df.iterrows():
-            file.write(
-                f"[{number + 1}] "
-                f"{row['銘柄']} "
-                f"({row['ticker']})\n"
-            )
+            file.write(f"[{number + 1}] {row['銘柄']} ({row['ticker']})\n")
+            file.write(f"AI判断: {row['AI判断']}\n")
+            file.write(f"基本判断点: {row['基本判断点']}\n")
+            file.write(f"学習補正点: {row['学習補正点']:+d}\n")
+            file.write(f"最終判断点: {row['AI判断点']}\n")
+            file.write(f"自己学習根拠: {row['自己学習根拠']}\n")
+            file.write(f"監視タイミング: {row['監視タイミング']}\n")
+            file.write("-" * 80 + "\n")
+    text_temp.replace(TEXT_OUTPUT_FILE)
 
-            file.write(
-                f"AI判断: "
-                f"{row['AI判断']}\n"
-            )
-
-            file.write(
-                f"基本判断点: "
-                f"{row['基本判断点']}\n"
-            )
-
-            file.write(
-                f"学習補正点: "
-                f"{row['学習補正点']:+d}\n"
-            )
-
-            file.write(
-                f"最終判断点: "
-                f"{row['AI判断点']}\n"
-            )
-
-            file.write(
-                f"自己学習根拠: "
-                f"{row['自己学習根拠']}\n"
-            )
-
-            file.write(
-                f"監視タイミング: "
-                f"{row['監視タイミング']}\n"
-            )
-
-            file.write(
-                "-" * 80
-                + "\n"
-            )
+    generated_at = datetime.now(JST)
+    manifest = {
+        "schema_version": 1,
+        "run_id": source_manifest["run_id"],
+        "generated_at": generated_at.isoformat(),
+        "input_report_file": source_manifest["report_file"],
+        "input_report_sha256": source_manifest["report_sha256"],
+        "ai_judgement_file": OUTPUT_FILE.name,
+        "ai_judgement_sha256": _file_sha256(OUTPUT_FILE),
+        "ticker_count": int(len(df)),
+        "optimized_signals_sha256": (
+            _file_sha256(OPTIMIZED_FILE) if OPTIMIZED_FILE.is_file() else None
+        ),
+        "learning_profile_sha256": (
+            _file_sha256(LEARNING_PROFILE_FILE)
+            if LEARNING_PROFILE_FILE.is_file()
+            else None
+        ),
+    }
+    manifest_temp = AI_MANIFEST_FILE.with_suffix(AI_MANIFEST_FILE.suffix + ".tmp")
+    manifest_temp.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    manifest_temp.replace(AI_MANIFEST_FILE)
 
     print()
-    print(
-        f"保存完了 : {OUTPUT_FILE}"
-    )
-
-    print(
-        f"保存完了 : "
-        f"{TEXT_OUTPUT_FILE}"
-    )
+    print(f"保存完了 : {OUTPUT_FILE}")
+    print(f"保存完了 : {TEXT_OUTPUT_FILE}")
 
 
 # =========================================================
@@ -1219,7 +1198,7 @@ def main() -> None:
     print("=" * 110)
 
     try:
-        report_df, report_file = (
+        report_df, report_file, source_manifest = (
             load_report()
         )
 
@@ -1271,7 +1250,8 @@ def main() -> None:
         )
 
         save_results(
-            result_df
+            result_df,
+            source_manifest,
         )
 
     except Exception as error:

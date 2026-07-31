@@ -19,6 +19,9 @@ reports/
 *.py[cod]
 .pytest_cache/
 runtime/
+excel/*.xlsm
+excel/*.xlsx
+excel/~$*
 logs/scheduler/
 reports/v7_environment_report.json
 

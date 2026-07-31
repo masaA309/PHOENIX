@@ -69,8 +69,7 @@ def record_from_operations(report: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def summarize(records: Iterable[Mapping[str, Any]], window_runs: int = 30) -> dict[str, Any]:
-    items = list(records)[-max(1, window_runs):]
+def _metrics(items: list[Mapping[str, Any]]) -> dict[str, Any]:
     total = len(items)
     observed_days: set[str] = set()
     for item in items:
@@ -89,10 +88,6 @@ def summarize(records: Iterable[Mapping[str, Any]], window_runs: int = 30) -> di
         for code in item.get("alert_codes", []):
             alert_counts[str(code)] = alert_counts.get(str(code), 0) + 1
     return {
-        "schema_version": 1,
-        "version": "PHOENIX v7 Step10",
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "window_runs": max(1, window_runs),
         "run_count": total,
         "distinct_run_days": len(observed_days),
         "status_counts": status_counts,
@@ -108,6 +103,30 @@ def summarize(records: Iterable[Mapping[str, Any]], window_runs: int = 30) -> di
     }
 
 
+def summarize(records: Iterable[Mapping[str, Any]], window_runs: int = 30) -> dict[str, Any]:
+    items = list(records)[-max(1, window_runs):]
+    operational = _metrics(items)
+    eligible = [item for item in items if not bool(item.get("dry_run", False))]
+    paper = _metrics(eligible)
+    paper_evidence = {
+        "schema_version": 1,
+        "version": "PHOENIX v7 Step16",
+        "integrity_status": "VERIFIED",
+        "eligibility_rule": "dry_run == false",
+        "eligible_run_count": paper.pop("run_count"),
+        "excluded_dry_run_count": len(items) - len(eligible),
+        **paper,
+    }
+    return {
+        "schema_version": 1,
+        "version": "PHOENIX v7 Step10 + Step16 evidence isolation",
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "window_runs": max(1, window_runs),
+        **operational,
+        "paper_evidence": paper_evidence,
+    }
+
+
 def text_summary(summary: Mapping[str, Any]) -> str:
     counts = summary.get("status_counts", {})
     totals = summary.get("totals", {})
@@ -116,7 +135,7 @@ def text_summary(summary: Mapping[str, Any]) -> str:
     percentage = "N/A" if success_rate is None else f"{float(success_rate) * 100:.1f}%"
     lines = [
         "PHOENIX v7 STEP10 PERFORMANCE SUMMARY", "=" * 72,
-        f"Runs                 : {summary.get('run_count', 0)} / {summary.get('window_runs', 0)}",
+        f"Operational runs     : {summary.get('run_count', 0)} / {summary.get('window_runs', 0)}",
         f"Success rate         : {percentage}",
         f"SUCCESS/WARNING/FAIL : {counts.get('SUCCESS', 0)}/{counts.get('WARNING', 0)}/{counts.get('FAILED', 0)}",
         f"Candidates           : {totals.get('candidates', 0)}",
@@ -127,6 +146,16 @@ def text_summary(summary: Mapping[str, Any]) -> str:
         f"Approved -> Filled   : {rates.get('approved_to_filled')}",
         f"Risk halts           : {summary.get('risk_halt_count', 0)}", "-" * 72,
     ]
+    evidence = summary.get("paper_evidence", {})
+    lines.extend([
+        "PHOENIX v7 STEP16 PAPER EVIDENCE",
+        f"Integrity            : {evidence.get('integrity_status', 'MISSING')}",
+        f"Eligible paper runs  : {evidence.get('eligible_run_count', 0)}",
+        f"Excluded dry runs    : {evidence.get('excluded_dry_run_count', 0)}",
+        f"Eligible paper days  : {evidence.get('distinct_run_days', 0)}",
+        f"Paper success rate   : {evidence.get('success_rate')}",
+        "-" * 72,
+    ])
     alerts = summary.get("alert_counts", {})
     lines.extend([f"{code}: {count}" for code, count in alerts.items()] or ["No alerts in window"])
     return "\n".join(lines + ["=" * 72, ""])
@@ -156,6 +185,7 @@ def update_performance(root: Path, config: Mapping[str, Any], operations_report:
 
 def print_performance_summary(summary: Mapping[str, Any]) -> None:
     totals = summary.get("totals", {})
+    evidence = summary.get("paper_evidence", {})
     print("=" * 80)
     print("PHOENIX v7 STEP10 PERFORMANCE TRACKER")
     print("=" * 80)
@@ -165,5 +195,8 @@ def print_performance_summary(summary: Mapping[str, Any]) -> None:
     print(f"Ready        : {totals.get('ready', 0)}")
     print(f"Approved     : {totals.get('approved', 0)}")
     print(f"Filled       : {totals.get('filled', 0)}")
+    print(f"Paper runs   : {evidence.get('eligible_run_count', 0)}")
+    print(f"Paper days   : {evidence.get('distinct_run_days', 0)}")
+    print(f"Dry excluded : {evidence.get('excluded_dry_run_count', 0)}")
     print(f"Report       : {summary.get('summary_text', '')}")
     print("=" * 80)

@@ -228,11 +228,9 @@ def main():
         df = scan_all()
 
         if df.empty:
-            print(
-                "データ取得失敗"
+            raise RuntimeError(
+                "最新JPX取引日の市場データを取得できませんでした"
             )
-            print_footer()
-            return
 
         print_rankings(
             df
@@ -273,6 +271,8 @@ def main():
         print(
             f"PHOENIXエラー: {error}"
         )
+        print_footer()
+        raise SystemExit(1) from error
 
     print_footer()
 

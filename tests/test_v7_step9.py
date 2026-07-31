@@ -48,6 +48,17 @@ class OperationsMonitorStep9Test(unittest.TestCase):
             json.dumps(
                 {
                     "candidate_count": 3,
+                    "eligible_candidate_count": 1,
+                    "candidate_input_guard": {
+                        "status": "READY",
+                        "input_sha256": "a" * 64,
+                        "eligible_candidates_sha256": "b" * 64,
+                        "input_rows": 3,
+                        "eligible_rows": 1,
+                        "rejected_rows": 2,
+                        "decision_counts": {"BUY": 1, "WATCH": 1, "SKIP": 1},
+                        "rejection_counts": {"WATCH": 1, "SKIP": 1},
+                    },
                     "ready_count": 2,
                     "approved_count": approved,
                     "filled_count": filled,
@@ -98,6 +109,20 @@ class OperationsMonitorStep9Test(unittest.TestCase):
         self.assertEqual("FAILED", report["status"])
         self.assertIn("PIPELINE_FAILED", {item["code"] for item in report["alerts"]})
 
+    def test_missing_pipeline_summary_is_critical(self) -> None:
+        self.summary_path.unlink()
+        report = build_operations_report(
+            self.root,
+            self.config(),
+            0,
+            self.log_path,
+        )
+        self.assertEqual("FAILED", report["status"])
+        self.assertIn(
+            "PIPELINE_SUMMARY_UNAVAILABLE",
+            {item["code"] for item in report["alerts"]},
+        )
+
     def test_risk_halt_is_failed(self) -> None:
         self.write_summary(halted=True, approved=0, filled=0)
         report = build_operations_report(
@@ -136,6 +161,45 @@ class OperationsMonitorStep9Test(unittest.TestCase):
         self.assertTrue(text_path.is_file())
         saved = json.loads(json_path.read_text(encoding="utf-8"))
         self.assertEqual("SUCCESS", saved["status"])
+
+    def test_non_object_candidate_guard_fails_without_crashing(self) -> None:
+        payload = json.loads(self.summary_path.read_text(encoding="utf-8"))
+        payload["candidate_input_guard"] = ["READY"]
+        self.summary_path.write_text(json.dumps(payload), encoding="utf-8")
+        report = build_operations_report(self.root, self.config(), 0, self.log_path)
+        self.assertEqual("FAILED", report["status"])
+        self.assertEqual("MISSING", report["pipeline"]["candidate_input_status"])
+
+    def test_inconsistent_candidate_counts_fail_closed(self) -> None:
+        payload = json.loads(self.summary_path.read_text(encoding="utf-8"))
+        payload["candidate_input_guard"]["eligible_rows"] = 2
+        self.summary_path.write_text(json.dumps(payload), encoding="utf-8")
+        report = build_operations_report(self.root, self.config(), 0, self.log_path)
+        self.assertEqual("FAILED", report["status"])
+        self.assertIn(
+            "CANDIDATE_INPUT_GUARD_NOT_READY",
+            {item["code"] for item in report["alerts"]},
+        )
+
+    def test_unknown_or_non_integer_decision_counts_fail_closed(self) -> None:
+        original = json.loads(self.summary_path.read_text(encoding="utf-8"))
+        variants = []
+        unknown = json.loads(json.dumps(original))
+        unknown["candidate_input_guard"]["decision_counts"]["SELL"] = 0
+        variants.append(unknown)
+        boolean = json.loads(json.dumps(original))
+        boolean["candidate_input_guard"]["decision_counts"]["BUY"] = True
+        variants.append(boolean)
+        decimal = json.loads(json.dumps(original))
+        decimal["candidate_input_guard"]["eligible_rows"] = 1.5
+        variants.append(decimal)
+        for payload in variants:
+            with self.subTest(payload=payload["candidate_input_guard"]):
+                self.summary_path.write_text(json.dumps(payload), encoding="utf-8")
+                report = build_operations_report(
+                    self.root, self.config(), 0, self.log_path
+                )
+                self.assertEqual("FAILED", report["status"])
 
     def test_discord_notification_uses_safe_payload(self) -> None:
         calls: list[dict] = []

@@ -7,6 +7,7 @@ import sys
 from typing import Any
 
 from phoenix_core import create_broker
+from phoenix_core.candidate_input_guard import CandidateInputPolicy
 from phoenix_core.pipeline import (
     run_direct_pipeline_from_csv,
     save_pipeline_logs,
@@ -37,24 +38,12 @@ def load_config(path: Path) -> dict[str, Any]:
 
 def resolve_path(value: str) -> Path:
     path = Path(value)
-    return path if path.is_absolute() else ROOT_DIR / path
-
-
-def find_candidate_file(files: dict[str, Any]) -> Path:
-    configured = str(files.get("candidates", "")).strip()
-    paths = []
-    if configured:
-        paths.append(resolve_path(configured))
-    paths.extend([
-        ROOT_DIR / "reports" / "portfolio_selection.csv",
-        ROOT_DIR / "reports" / "portfolio_plan.csv",
-        ROOT_DIR / "reports" / "trade_signals.csv",
-        ROOT_DIR / "reports" / "price_watchlist.csv",
-    ])
-    for path in paths:
-        if path.exists():
-            return path
-    return paths[0]
+    resolved = path.resolve() if path.is_absolute() else (ROOT_DIR / path).resolve()
+    try:
+        resolved.relative_to(ROOT_DIR.resolve())
+    except ValueError as error:
+        raise ValueError(f"パスがPHOENIXフォルダ外を指しています: {value}") from error
+    return resolved
 
 
 def sizing_config(payload: dict[str, Any]) -> PositionSizingConfig:
@@ -99,11 +88,12 @@ def main() -> None:
     args = parser.parse_args()
 
     config = load_config(Path(args.config))
-    broker = create_broker(config, ROOT_DIR)
     files = config.get("files", {})
-    candidate_path = find_candidate_file(files)
-    if not candidate_path.exists():
-        raise FileNotFoundError(f"候補CSVが見つかりません: {candidate_path}")
+    candidate_policy = CandidateInputPolicy.from_mapping(
+        config.get("candidate_input", {})
+    )
+    candidate_path = resolve_path(candidate_policy.path)
+    broker = create_broker(config, ROOT_DIR)
 
     result = run_direct_pipeline_from_csv(
         broker=broker,
@@ -111,6 +101,7 @@ def main() -> None:
         sizing_config=sizing_config(config),
         risk_config=risk_config(config),
         risk_state_path=resolve_path(str(files.get("risk_state", "state/v7_risk_state.json"))),
+        candidate_policy=candidate_policy,
         execute_orders=not args.dry_run,
     )
 
@@ -129,7 +120,13 @@ def main() -> None:
     print(f"Broker             : {broker.broker_name}")
     print(f"Mode               : {'DRY RUN' if args.dry_run else 'PAPER EXECUTION'}")
     print(f"候補ファイル       : {candidate_path}")
-    print(f"候補数             : {result.candidate_count}件")
+    print(f"入力候補数         : {result.candidate_count}件")
+    print(f"BUY適格候補        : {result.eligible_candidate_count}件")
+    if result.candidate_input_audit is not None:
+        print(
+            "上流除外             : "
+            f"{dict(result.candidate_input_audit.rejection_counts)}"
+        )
     print(f"Position Sizer通過 : {result.ready_count}件")
     print(f"Risk承認           : {result.approved_count}件")
     print(f"約定               : {result.filled_count}件")

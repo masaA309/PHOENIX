@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 import json
 import os
 from pathlib import Path
 from typing import Any
+
+from phoenix_core.performance_tracker import atomic_write
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,7 +33,16 @@ class SingleInstanceLock:
             )
         except FileExistsError:
             return False
-        os.write(self._fd, str(os.getpid()).encode("ascii"))
+        try:
+            os.write(self._fd, str(os.getpid()).encode("ascii"))
+        except BaseException:
+            os.close(self._fd)
+            self._fd = None
+            try:
+                self.path.unlink()
+            except FileNotFoundError:
+                pass
+            raise
         return True
 
     def release(self) -> None:
@@ -57,19 +68,15 @@ def load_state(path: Path) -> dict[str, Any]:
         return {}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Scheduler state could not be read: {path}: {error}") from error
+    if not isinstance(payload, dict):
+        raise ValueError(f"Scheduler state root is not an object: {path}")
+    return payload
 
 
 def save_state(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temporary.replace(path)
+    atomic_write(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
 
 def should_run(
@@ -97,7 +104,7 @@ def success_state(now: datetime, return_code: int, log_path: Path) -> dict[str, 
 
 def failure_state(now: datetime, return_code: int, log_path: Path) -> dict[str, Any]:
     return {
-        "last_failure_date": date.today().isoformat(),
+        "last_failure_date": now.date().isoformat(),
         "last_failure_at": now.isoformat(timespec="seconds"),
         "last_return_code": return_code,
         "last_log": str(log_path),

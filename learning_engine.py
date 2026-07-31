@@ -259,7 +259,9 @@ def build_statistics(data: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame
             [float(v) for v in definition["edges"]],
             [str(v) for v in definition["labels"]],
         )
-        frames.append(summarize_group(working, dimension, "_group", config))
+        frame = summarize_group(working, dimension, "_group", config)
+        if not frame.empty:
+            frames.append(frame)
 
     categorical_dimensions = (
         ("MACD", "macd"),
@@ -279,7 +281,9 @@ def build_statistics(data: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame
             .str.strip()
             .replace({"": "不明"})
         )
-        frames.append(summarize_group(working, dimension, "_group", config))
+        frame = summarize_group(working, dimension, "_group", config)
+        if not frame.empty:
+            frames.append(frame)
 
     if not frames:
         return pd.DataFrame(columns=[

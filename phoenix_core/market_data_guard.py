@@ -57,9 +57,11 @@ def load_guard_state(path: Path) -> dict[str, Any]:
         return {}
     try:
         value = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"Market data guard state could not be read: {path}: {error}") from error
+    if not isinstance(value, dict):
+        raise ValueError(f"Market data guard state root is not an object: {path}")
+    return value
 
 
 def next_guard_state(previous: Mapping[str, Any], fingerprint: str, observed_at: datetime) -> dict[str, Any]:
@@ -117,6 +119,7 @@ def text_report(report: Mapping[str, Any]) -> str:
         "PHOENIX v7 STEP13 MARKET DATA GUARD", "=" * 82,
         f"Status              : {report.get('status', '')}",
         f"Advisory only       : {report.get('advisory_only', True)}",
+        f"State persisted     : {report.get('state_persisted', False)}",
         f"Position prices     : {report.get('position_price_count', 0)}",
         f"Unchanged days      : {report.get('unchanged_days', 0)}", "-" * 82,
     ]
@@ -128,7 +131,12 @@ def text_report(report: Mapping[str, Any]) -> str:
     return "\n".join(lines + ["=" * 82, ""])
 
 
-def run_market_data_guard(root: Path, config: Mapping[str, Any], now: datetime | None = None) -> dict[str, Any]:
+def run_market_data_guard(
+    root: Path,
+    config: Mapping[str, Any],
+    now: datetime | None = None,
+    persist_state: bool = True,
+) -> dict[str, Any]:
     now = now or datetime.now()
     settings = config.get("market_data_guard", {})
     signals = resolve_path(root, str(settings.get("signals_file", "reports/trade_signals.csv")))
@@ -144,9 +152,11 @@ def run_market_data_guard(root: Path, config: Mapping[str, Any], now: datetime |
     fingerprint = price_fingerprint(prices) if prices else ""
     previous = load_guard_state(state_path)
     current = next_guard_state(previous, fingerprint, now)
-    atomic_write(state_path, json.dumps(current, ensure_ascii=False, indent=2) + "\n")
+    if persist_state:
+        atomic_write(state_path, json.dumps(current, ensure_ascii=False, indent=2) + "\n")
     threshold = max(1, int(settings.get("unchanged_warning_days", 2)))
     report = build_report(file_results, prices, price_warnings, int(current["unchanged_days"]), threshold, now)
+    report["state_persisted"] = persist_state
     atomic_write(report_json, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     atomic_write(report_text, text_report(report))
     report["report_json"] = str(report_json)
@@ -159,6 +169,7 @@ def print_market_data_summary(report: Mapping[str, Any]) -> None:
     print("PHOENIX v7 STEP13 MARKET DATA GUARD")
     print("=" * 80)
     print(f"Status          : {report.get('status', '')}")
+    print(f"State persisted : {report.get('state_persisted', False)}")
     print(f"Position prices : {report.get('position_price_count', 0)}")
     print(f"Unchanged days  : {report.get('unchanged_days', 0)}")
     print(f"Alerts          : {len(report.get('alerts', []))}")

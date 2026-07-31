@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import argparse
 import os
 import subprocess
 import sys
 import time
 from typing import Any
+
+from phoenix_core.virtual_rss_paper import prepare_quote_environment
 
 
 # =========================================================
@@ -68,6 +71,7 @@ TASKS: list[dict[str, Any]] = [
     {
         "name": "Price Monitor",
         "script": "price_monitor.py",
+        "args": ["--once"],
         "required": False,
         "enabled": True,
     },
@@ -86,12 +90,18 @@ TASKS: list[dict[str, Any]] = [
     {
         "name": "自己学習エンジン",
         "script": "learning_engine.py",
-        "required": False,
+        "required": True,
         "enabled": True,
     },
     {
         "name": "AI売買判断",
         "script": "ai_judgement.py",
+        "required": True,
+        "enabled": True,
+    },
+    {
+        "name": "取引候補生成",
+        "script": "trade_engine.py",
         "required": True,
         "enabled": True,
     },
@@ -114,6 +124,15 @@ TASKS: list[dict[str, Any]] = [
         "enabled": True,
     },
 ]
+
+REFRESH_ONLY_SCRIPTS = {
+    "market_risk_ai.py",
+    "get_nikkei225.py",
+    "daily_report.py",
+    "learning_engine.py",
+    "ai_judgement.py",
+    "trade_engine.py",
+}
 
 
 # =========================================================
@@ -187,6 +206,18 @@ def build_environment() -> dict[str, str]:
     return environment
 
 
+def configure_quote_transport() -> dict[str, Any]:
+    environment, ca_bundle = prepare_quote_environment()
+    if ca_bundle is None or environment.get("status") != "READY":
+        raise RuntimeError(
+            "Quote transport is unavailable: "
+            f"{environment.get('code')} / {environment.get('remediation')}"
+        )
+    for name in ("SSL_CERT_FILE", "CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE"):
+        os.environ[name] = str(ca_bundle)
+    return environment
+
+
 def initialize_directories() -> None:
     LOG_DIR.mkdir(
         parents=True,
@@ -229,6 +260,7 @@ def run_script(
     task_name: str,
     script_name: str,
     required: bool,
+    args: list[str] | None = None,
 ) -> tuple[
     bool,
     float,
@@ -288,6 +320,7 @@ def run_script(
         "utf8",
         str(script_path),
     ]
+    command.extend(args or [])
 
     started_at = time.time()
 
@@ -420,7 +453,7 @@ def run_script(
 # 出力ファイル確認
 # =========================================================
 
-def verify_output_files() -> dict[str, bool]:
+def verify_output_files(*, refresh_only: bool = False) -> dict[str, bool]:
     today = datetime.now().strftime(
         "%Y%m%d"
     )
@@ -442,6 +475,10 @@ def verify_output_files() -> dict[str, bool]:
             REPORT_DIR
             / "ai_judgement.csv"
         ),
+        "取引候補CSV": (
+            REPORT_DIR
+            / "trade_signals.csv"
+        ),
         "ランキングCSV": (
             REPORT_DIR
             / "ranking_ai.csv"
@@ -455,6 +492,12 @@ def verify_output_files() -> dict[str, bool]:
             / "notification_log.txt"
         ),
     }
+    if refresh_only:
+        expected_files = {
+            name: path
+            for name, path in expected_files.items()
+            if name not in {"ランキングCSV", "ランキングTXT", "通知ログ"}
+        }
 
     results: dict[str, bool] = {}
 
@@ -644,6 +687,25 @@ def main() -> None:
     initialize_directories()
     reset_log_file()
 
+    parser = argparse.ArgumentParser(description="PHOENIX daily automation")
+    parser.add_argument(
+        "--refresh-only",
+        action="store_true",
+        help="Refresh verified market data and trade candidates without charts or notifications.",
+    )
+    args = parser.parse_args()
+
+    try:
+        quote_environment = configure_quote_transport()
+    except RuntimeError as error:
+        write_log("PHOENIX QUOTE TRANSPORT FAILED")
+        write_log(str(error))
+        raise SystemExit(1) from error
+    write_log(
+        "Quote transport: "
+        f"{quote_environment.get('status')} / {quote_environment.get('ca_bundle_mode')} / TLS=True"
+    )
+
     started_at = time.time()
 
     write_log("=" * 90)
@@ -668,7 +730,12 @@ def main() -> None:
 
     required_task_failed = False
 
-    for task in TASKS:
+    selected_tasks = [
+        task
+        for task in TASKS
+        if not args.refresh_only or task["script"] in REFRESH_ONLY_SCRIPTS
+    ]
+    for task in selected_tasks:
         enabled = bool(
             task.get(
                 "enabled",
@@ -730,6 +797,7 @@ def main() -> None:
                 task_name=task["name"],
                 script_name=task["script"],
                 required=task["required"],
+                args=task.get("args"),
             )
         )
 
@@ -761,9 +829,7 @@ def main() -> None:
         ):
             required_task_failed = True
 
-    output_results = (
-        verify_output_files()
-    )
+    output_results = verify_output_files(refresh_only=args.refresh_only)
 
     print_final_summary(
         task_results=task_results,

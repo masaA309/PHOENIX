@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "contract_id": "PHOENIX_VIRTUAL_RSS_PAPER_V1",
+  "evidence_kind": "VIRTUAL_MARKET_FEED_SIMULATION",
+  "reviewed_on": "2026-07-23",
+  "virtual_only": true,
+  "eligible_for_real_rss_gate": false,
+  "orders_allowed": false,
+  "external_notifications_allowed": false,
+  "quote_feed": {
+    "source": "YFINANCE_PUBLIC_5M_UNADJUSTED",
+    "currency": "JPY",
+    "period": "1d",
+    "interval": "5m",
+    "maximum_quote_age_seconds": 900,
+    "maximum_future_skew_seconds": 2,
+    "maximum_measured_bid_ask_spread_bps": 100,
+    "synthetic_quote_half_spread_bps": 10,
+    "synthetic_bid_ask_is_measured": false
+  },
+  "standard_unit": {
+    "route": "TSE_STANDARD_UNIT_SIM",
+    "lot_size": 100,
+    "commission_plan": "UNVERIFIED_CONSERVATIVE_RESERVE",
+    "commission_reserve_per_fill_yen": 1070,
+    "adverse_slippage_bps_per_side": 5
+  },
+  "kabumini": {
+    "route": "RAKUTEN_KABU_MINI_SIM",
+    "minimum_quantity": 1,
+    "maximum_quantity": 99,
+    "buy_commission_yen": 0,
+    "sell_commission_yen": 0,
+    "realtime_spread_bps_per_side": 22,
+    "adverse_slippage_bps_per_side": 5,
+    "buy_rounding": "CEILING_TO_WHOLE_YEN",
+    "sell_rounding": "FLOOR_TO_WHOLE_YEN",
+    "morning_session": "09:00-11:30",
+    "afternoon_session": "12:30-15:25",
+    "current_eligibility_evidence_required": true,
+    "maximum_eligibility_age_days": 7
+  },
+  "economics": {
+    "initial_risk_capital_yen": 300000,
+    "conditional_contribution_yen": 200000,
+    "automatic_contribution": false,
+    "fixed_monthly_operating_cost_yen": 7000,
+    "assumed_trading_days_per_month": 20,
+    "tax_reserve_rate": 0.20315,
+    "living_funds_rate": 0.20,
+    "maximum_living_funds_rate": 0.30,
+    "living_funds_manual_approval_required": true
+  },
+  "sources": [
+    "https://www.rakuten-sec.co.jp/web/domestic/ols/commission/",
+    "https://www.rakuten-sec.co.jp/web/domestic/ols/rule/",
+    "https://www.rakuten-sec.co.jp/web/domestic/ols/lineup/",
+    "https://www.rakuten-sec.co.jp/web/domestic/ols/"
+  ]
+}

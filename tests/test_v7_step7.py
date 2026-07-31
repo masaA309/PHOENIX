@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 from phoenix_core.run_guard import (
     RunPolicy,
@@ -42,11 +43,28 @@ class SchedulerStep7Test(unittest.TestCase):
             self.assertTrue(second.acquire())
             second.release()
 
+    def test_lock_file_is_removed_when_pid_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "runner.lock"
+            lock = SingleInstanceLock(path)
+            with mock.patch("phoenix_core.run_guard.os.write", side_effect=OSError("fail")):
+                with self.assertRaises(OSError):
+                    lock.acquire()
+            self.assertFalse(path.exists())
+            self.assertIsNone(lock._fd)
+
     def test_atomic_state_round_trip(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "state.json"
             save_state(path, {"last_success_date": "2026-07-20"})
             self.assertEqual(load_state(path)["last_success_date"], "2026-07-20")
+
+    def test_corrupt_scheduler_state_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "state.json"
+            path.write_text("broken", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_state(path)
 
 
 if __name__ == "__main__":

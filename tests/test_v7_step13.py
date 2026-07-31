@@ -71,6 +71,28 @@ class MarketDataGuardStep13Test(unittest.TestCase):
         self.assertTrue((self.root / "state/guard.json").is_file())
         self.assertTrue((self.root / "reports/guard.txt").is_file())
 
+    def test_dry_run_mode_does_not_persist_guard_state(self) -> None:
+        self.touch_at_now(self.root / "reports/signals.csv", "ticker,price\n1111.T,1000\n")
+        self.touch_at_now(self.root / "state/broker.json", json.dumps({"positions": {"1111.T": {"market_price": 1000}}}))
+        state = self.root / "state/guard.json"
+        state.write_text(json.dumps({"last_observed_date": "2026-07-19"}), encoding="utf-8")
+        before = state.read_bytes()
+        report = run_market_data_guard(
+            self.root,
+            self.config,
+            self.now,
+            persist_state=False,
+        )
+        self.assertFalse(report["state_persisted"])
+        self.assertEqual(before, state.read_bytes())
+
+    def test_corrupt_guard_state_fails_closed(self) -> None:
+        self.touch_at_now(self.root / "reports/signals.csv", "ticker,price\n1111.T,1000\n")
+        self.touch_at_now(self.root / "state/broker.json", json.dumps({"positions": {"1111.T": {"market_price": 1000}}}))
+        (self.root / "state/guard.json").write_text("broken", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            run_market_data_guard(self.root, self.config, self.now)
+
 
 if __name__ == "__main__":
     unittest.main()

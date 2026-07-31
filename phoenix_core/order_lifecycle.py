@@ -21,15 +21,33 @@ def broker_snapshot(state: Mapping[str, Any], observed_at: datetime) -> dict[str
         if symbol and quantity is not None and quantity > 0:
             positions[symbol] = quantity
     cash = None
-    for key in ("cash", "available_cash", "buying_power", "現金"):
+    for key in ("cash_yen", "cash", "available_cash", "buying_power", "現金"):
         cash = as_float(state.get(key))
         if cash is not None:
             break
+    fill_event_audit_available = "fill_events" in state
+    fill_events: list[dict[str, Any]] = []
+    raw_fill_events = state.get("fill_events", [])
+    if raw_fill_events is not None:
+        if not isinstance(raw_fill_events, list):
+            raise ValueError("Broker fill_events is not a list")
+        required = (
+            "event_id", "broker_order_id", "client_order_id", "ticker",
+            "side", "filled_quantity", "created_at", "event_sha256",
+        )
+        for index, event in enumerate(raw_fill_events):
+            if not isinstance(event, Mapping):
+                raise ValueError(f"Broker fill_events[{index}] is not an object")
+            if any(name not in event for name in required):
+                raise ValueError(f"Broker fill_events[{index}] lacks crosswalk fields")
+            fill_events.append({name: event[name] for name in required})
     return {
         "schema_version": 1,
         "observed_at": observed_at.isoformat(timespec="seconds"),
         "cash": cash,
         "positions": dict(sorted(positions.items())),
+        "fill_event_audit_available": fill_event_audit_available,
+        "fill_events": fill_events,
     }
 
 
@@ -46,6 +64,38 @@ def load_snapshot(path: Path) -> tuple[dict[str, Any], str | None]:
 
 
 def lifecycle_events(previous: Mapping[str, Any], current: Mapping[str, Any]) -> list[dict[str, Any]]:
+    if (
+        previous.get("fill_event_audit_available") is True
+        and current.get("fill_event_audit_available") is True
+        and isinstance(previous.get("fill_events"), list)
+        and isinstance(current.get("fill_events"), list)
+    ):
+        previous_ids = {
+            str(item.get("event_id", ""))
+            for item in previous.get("fill_events", [])
+            if isinstance(item, Mapping)
+        }
+        events: list[dict[str, Any]] = []
+        for fill in current.get("fill_events", []):
+            if not isinstance(fill, Mapping) or str(fill.get("event_id", "")) in previous_ids:
+                continue
+            raw_id = f"LIFECYCLE|{fill.get('event_id')}|{fill.get('event_sha256')}"
+            events.append({
+                "schema_version": 2,
+                "event_id": hashlib.sha256(raw_id.encode("utf-8")).hexdigest()[:24],
+                "observed_at": str(current.get("observed_at", "")),
+                "symbol": str(fill.get("ticker", "")),
+                "side": str(fill.get("side", "")),
+                "quantity": fill.get("filled_quantity"),
+                "source": "broker_fill_event_crosswalk",
+                "economics_event_id": str(fill.get("event_id", "")),
+                "broker_order_id": str(fill.get("broker_order_id", "")),
+                "client_order_id": str(fill.get("client_order_id", "")),
+                "fill_created_at": str(fill.get("created_at", "")),
+                "broker_fill_event_sha256": str(fill.get("event_sha256", "")),
+            })
+        return events
+
     old_positions = previous.get("positions", {}) if isinstance(previous.get("positions", {}), dict) else {}
     new_positions = current.get("positions", {}) if isinstance(current.get("positions", {}), dict) else {}
     observed_at = str(current.get("observed_at", ""))
@@ -101,6 +151,26 @@ def build_summary(
         "buy_event_count": buy_count,
         "sell_event_count": sell_count,
         "audited_fill_count": buy_count + sell_count,
+        "audited_fill_ids": [
+            str(item.get("event_id", ""))
+            for item in events
+            if str(item.get("event_id", ""))
+        ],
+        "audited_fill_crosswalk": [
+            {
+                "lifecycle_fill_id": str(item.get("event_id", "")),
+                "economics_fill_id": str(item.get("economics_event_id", "")),
+                "broker_order_id": str(item.get("broker_order_id", "")),
+                "client_order_id": str(item.get("client_order_id", "")),
+                "ticker": str(item.get("symbol", "")),
+                "side": str(item.get("side", "")),
+                "quantity": item.get("quantity"),
+                "created_at": str(item.get("fill_created_at", "")),
+                "broker_fill_event_sha256": str(item.get("broker_fill_event_sha256", "")),
+            }
+            for item in events
+            if item.get("source") == "broker_fill_event_crosswalk"
+        ],
         "new_events": list(new_events),
         "warnings": list(warnings or []),
     }
@@ -110,6 +180,7 @@ def text_report(report: Mapping[str, Any]) -> str:
     lines = [
         "PHOENIX v7 STEP15 ORDER LIFECYCLE AUDIT", "=" * 86,
         f"Status              : {report.get('status', '')}",
+        f"State persisted     : {report.get('state_persisted', False)}",
         f"Baseline created    : {report.get('baseline_created', False)}",
         f"New events          : {report.get('new_event_count', 0)}",
         f"Total events        : {report.get('total_event_count', 0)}",
@@ -127,7 +198,12 @@ def text_report(report: Mapping[str, Any]) -> str:
     return "\n".join(lines + ["=" * 86, ""])
 
 
-def run_order_lifecycle(root: Path, config: Mapping[str, Any], observed_at: datetime | None = None) -> dict[str, Any]:
+def run_order_lifecycle(
+    root: Path,
+    config: Mapping[str, Any],
+    observed_at: datetime | None = None,
+    persist_state: bool = True,
+) -> dict[str, Any]:
     observed_at = observed_at or datetime.now()
     settings = config.get("order_lifecycle", {})
     broker_path = resolve_path(root, str(settings.get("broker_state", "state/v7_paper_broker.json")))
@@ -142,15 +218,21 @@ def run_order_lifecycle(root: Path, config: Mapping[str, Any], observed_at: date
         warnings.append(snapshot_error)
     baseline_created = not bool(previous)
     new_events = [] if baseline_created else lifecycle_events(previous, current)
+    history_valid = True
     try:
         existing = load_history(journal_path)
     except ValueError as error:
         existing = []
         warnings.append(str(error))
+        history_valid = False
     events = merge_events(existing, new_events, int(settings.get("retention_events", 2000)))
-    atomic_write(snapshot_path, json.dumps(current, ensure_ascii=False, indent=2) + "\n")
-    atomic_write(journal_path, "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in events))
+    state_valid = not warnings and history_valid
+    state_persisted = bool(persist_state and state_valid)
+    if state_persisted:
+        atomic_write(snapshot_path, json.dumps(current, ensure_ascii=False, indent=2) + "\n")
+        atomic_write(journal_path, "".join(json.dumps(item, ensure_ascii=False) + "\n" for item in events))
     report = build_summary(events, new_events, baseline_created, warnings)
+    report["state_persisted"] = state_persisted
     atomic_write(report_json, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     atomic_write(report_text, text_report(report))
     report["report_json"] = str(report_json)
@@ -163,6 +245,7 @@ def print_lifecycle_summary(report: Mapping[str, Any]) -> None:
     print("PHOENIX v7 STEP15 ORDER LIFECYCLE AUDIT")
     print("=" * 80)
     print(f"Status        : {report.get('status', '')}")
+    print(f"State saved   : {report.get('state_persisted', False)}")
     print(f"Baseline      : {report.get('baseline_created', False)}")
     print(f"New events   : {report.get('new_event_count', 0)}")
     print(f"Audited fills : {report.get('audited_fill_count', 0)}")

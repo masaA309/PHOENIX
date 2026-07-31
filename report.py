@@ -1,13 +1,23 @@
 # report.py
 
 from datetime import datetime
+from hashlib import sha256
+import json
 from pathlib import Path
 import unicodedata
 
 import pandas as pd
 
+from phoenix_core.data_freshness import (
+    EXPECTED_NIKKEI225_COUNT,
+    JST,
+    ticker_universe_sha256,
+    verify_market_dates,
+)
+
 
 REPORT_DIR = Path("reports")
+NOTIFICATION_SOURCE_MANIFEST = REPORT_DIR / "notification_source_manifest.json"
 
 NUMERIC_COLUMNS = {
     "価格",
@@ -366,7 +376,8 @@ def save_reports(df):
         exist_ok=True,
     )
 
-    today = datetime.now().strftime(
+    generated_at = datetime.now(JST)
+    today = generated_at.strftime(
         "%Y%m%d"
     )
 
@@ -386,20 +397,47 @@ def save_reports(df):
         ],
     ).reset_index(drop=True)
 
+    required_evidence_columns = {"ticker", "基準日"}
+    missing_evidence_columns = required_evidence_columns - set(sorted_df.columns)
+    if missing_evidence_columns:
+        raise ValueError(
+            "通知元レポートの証跡列が不足しています: "
+            + ", ".join(sorted(missing_evidence_columns))
+        )
+    ticker_values = sorted_df["ticker"].astype(str).str.strip().tolist()
+    if len(ticker_values) != EXPECTED_NIKKEI225_COUNT:
+        raise ValueError(
+            "日経225ユニバースが不完全なためレポートを保存しません: "
+            f"{len(ticker_values)}/{EXPECTED_NIKKEI225_COUNT}"
+        )
+    universe_sha256 = ticker_universe_sha256(ticker_values)
+    freshness = verify_market_dates(
+        sorted_df["基準日"].dropna().tolist(),
+        as_of=generated_at,
+    )
+    if freshness["status"] != "READY":
+        raise ValueError(
+            "最新JPX取引日と一致しないため日次レポートを保存しません: "
+            + "; ".join(freshness["blocking_reasons"])
+        )
+
+    csv_temp = csv_file.with_suffix(csv_file.suffix + ".tmp")
     sorted_df.to_csv(
-        csv_file,
+        csv_temp,
         index=False,
         encoding="utf-8-sig",
     )
+    csv_temp.replace(csv_file)
 
+    txt_temp = txt_file.with_suffix(txt_file.suffix + ".tmp")
     with open(
-        txt_file,
+        txt_temp,
         "w",
         encoding="utf-8",
     ) as file:
         file.write("PHOENIX DAILY REPORT\n")
         file.write(
-            datetime.now().strftime(
+            generated_at.strftime(
                 "%Y-%m-%d %H:%M"
             )
         )
@@ -409,6 +447,28 @@ def save_reports(df):
                 index=False,
             )
         )
+    txt_temp.replace(txt_file)
+
+    report_sha256 = sha256(csv_file.read_bytes()).hexdigest()
+    manifest = {
+        "schema_version": 1,
+        "run_id": generated_at.strftime("%Y%m%dT%H%M%S%f%z"),
+        "generated_at": generated_at.isoformat(),
+        "report_file": csv_file.name,
+        "report_sha256": report_sha256,
+        "ticker_count": int(sorted_df["ticker"].nunique()),
+        "expected_ticker_count": EXPECTED_NIKKEI225_COUNT,
+        "ticker_universe_sha256": universe_sha256,
+        "market_data_evidence": freshness,
+    }
+    manifest_temp = NOTIFICATION_SOURCE_MANIFEST.with_suffix(
+        NOTIFICATION_SOURCE_MANIFEST.suffix + ".tmp"
+    )
+    manifest_temp.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    manifest_temp.replace(NOTIFICATION_SOURCE_MANIFEST)
 
     print()
     print("レポート保存完了")

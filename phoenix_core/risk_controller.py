@@ -8,6 +8,7 @@ from typing import Any, Iterable
 
 from phoenix_core.broker import BrokerAdapter
 from phoenix_core.models import OrderRequest, OrderSide
+from phoenix_core.performance_tracker import atomic_write
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,8 +98,8 @@ def load_risk_state(path: Path, equity_yen: float) -> RiskState:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         state = RiskState(**payload)
-    except (OSError, json.JSONDecodeError, TypeError):
-        return RiskState.new(equity_yen)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as error:
+        raise ValueError(f"Risk state could not be read: {path}: {error}") from error
 
     if state.trading_date != date.today().isoformat():
         return RiskState.new(equity_yen)
@@ -109,11 +110,10 @@ def load_risk_state(path: Path, equity_yen: float) -> RiskState:
 
 
 def save_risk_state(path: Path, state: RiskState) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     state.updated_at = datetime.now().isoformat(timespec="seconds")
-    path.write_text(
-        json.dumps(asdict(state), ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    atomic_write(
+        path,
+        json.dumps(asdict(state), ensure_ascii=False, indent=2) + "\n",
     )
 
 

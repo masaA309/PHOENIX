@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+import math
+from numbers import Real
 from typing import Any
 
 
@@ -38,14 +40,19 @@ class OrderRequest:
         if not ticker:
             raise ValueError("tickerが空です")
 
-        if self.quantity <= 0:
-            raise ValueError("quantityは1以上にしてください")
+        if type(self.quantity) is not int or self.quantity <= 0:
+            raise ValueError("quantityは1以上の整数にしてください")
 
         if self.order_type is not OrderType.LIMIT:
             raise ValueError("PHOENIX v7 Step1では指値注文のみ許可します")
 
-        if self.limit_price <= 0:
-            raise ValueError("limit_priceは0より大きい値にしてください")
+        if (
+            isinstance(self.limit_price, bool)
+            or not isinstance(self.limit_price, Real)
+            or not math.isfinite(float(self.limit_price))
+            or self.limit_price <= 0
+        ):
+            raise ValueError("limit_priceは0より大きい有限数にしてください")
 
         if not self.client_order_id.strip():
             raise ValueError("client_order_idが空です")
@@ -65,6 +72,14 @@ class OrderResult:
     status: OrderStatus
     message: str
     created_at: datetime
+    commission_yen: float = 0.0
+    cash_delta_yen: float = 0.0
+    cost_basis_released_yen: float = 0.0
+    realized_pnl_before_commission_yen: float = 0.0
+    economics_eligible_quantity: int = 0
+    economics_eligible_commission_yen: float = 0.0
+    economics_eligible_realized_pnl_before_commission_yen: float = 0.0
+    adverse_slippage_yen: float = 0.0
 
     @property
     def gross_amount(self) -> float:

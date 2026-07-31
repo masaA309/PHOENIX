@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from hashlib import sha256
+import json
 from pathlib import Path
 import os
 import sys
@@ -11,6 +13,13 @@ from typing import Any
 import pandas as pd
 import requests
 from dotenv import load_dotenv
+
+from phoenix_core.data_freshness import (
+    EXPECTED_NIKKEI225_COUNT,
+    JST,
+    ticker_universe_sha256,
+    verify_market_dates,
+)
 
 
 # =========================================================
@@ -23,6 +32,9 @@ AI_JUDGEMENT_FILE = (
     REPORT_DIR
     / "ai_judgement.csv"
 )
+AI_JUDGEMENT_MANIFEST_NAME = "ai_judgement_manifest.json"
+OPTIMIZED_SIGNALS_FILE = REPORT_DIR / "optimized_signals.csv"
+LEARNING_PROFILE_FILE = REPORT_DIR / "learning_profile.json"
 
 ADAPTIVE_PARAMETER_FILE = REPORT_DIR / "adaptive_parameter.json"
 
@@ -34,6 +46,8 @@ NOTIFICATION_LOG_FILE = (
 ENV_FILE = Path(".env")
 
 REQUEST_TIMEOUT = 30
+NOTIFICATION_SOURCE_MANIFEST_NAME = "notification_source_manifest.json"
+MAX_NOTIFICATION_SOURCE_AGE = timedelta(hours=4)
 
 DISCORD_MAX_LENGTH = 1900
 LINE_MAX_LENGTH = 4500
@@ -93,16 +107,181 @@ def get_environment_value(
 # AI判断CSV読込
 # =========================================================
 
-def load_ai_judgement() -> pd.DataFrame:
+def _load_notification_source_dates(
+    *,
+    as_of: datetime | None = None,
+) -> pd.DataFrame:
+    checked_at = as_of or datetime.now(JST)
+    if checked_at.tzinfo is None:
+        checked_at = checked_at.replace(tzinfo=JST)
+    else:
+        checked_at = checked_at.astimezone(JST)
+    report_file = REPORT_DIR / f"report_{checked_at:%Y%m%d}.csv"
+    if not report_file.is_file():
+        raise FileNotFoundError(
+            f"Today's source report is missing; stale notification is blocked: {report_file}"
+        )
+
+    manifest_file = REPORT_DIR / NOTIFICATION_SOURCE_MANIFEST_NAME
+    if not manifest_file.is_file():
+        raise FileNotFoundError(
+            f"Notification source manifest is missing; notification is blocked: {manifest_file}"
+        )
+    try:
+        manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("Notification source manifest is unreadable") from error
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        raise ValueError("Notification source manifest schema is invalid")
+    if manifest.get("report_file") != report_file.name:
+        raise ValueError("Notification source manifest points to a different report")
+    run_id = manifest.get("run_id")
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("Notification source manifest run_id is missing")
+    try:
+        generated_at = datetime.fromisoformat(str(manifest.get("generated_at", "")))
+    except ValueError as error:
+        raise ValueError("Notification source manifest generated_at is invalid") from error
+    if generated_at.tzinfo is None:
+        raise ValueError("Notification source manifest generated_at must include a timezone")
+    generated_at = generated_at.astimezone(JST)
+    age = checked_at - generated_at
+    if age < timedelta(0) or age > MAX_NOTIFICATION_SOURCE_AGE:
+        raise ValueError(
+            "Notification source manifest is not from the current pipeline run: "
+            f"age_seconds={age.total_seconds():.0f}"
+        )
+    actual_sha256 = sha256(report_file.read_bytes()).hexdigest()
+    if manifest.get("report_sha256") != actual_sha256:
+        raise ValueError("Notification source report hash does not match the manifest")
+
+    source = pd.read_csv(report_file)
+    required = {"ticker", "基準日"}
+    missing = required - set(source.columns)
+    if missing:
+        raise ValueError(f"Today's source report lacks freshness columns: {sorted(missing)}")
+    source = source[["ticker", "基準日"]]
+    if source.empty or source.isna().any().any():
+        raise ValueError("Today's source report has missing ticker or market date evidence")
+    if source["ticker"].duplicated().any():
+        raise ValueError("Today's source report has duplicate ticker evidence")
+    evidence = verify_market_dates(
+        source["基準日"].tolist(),
+        as_of=checked_at,
+    )
+    if evidence["status"] != "READY":
+        raise ValueError(
+            "Stale market data notification is blocked: "
+            + "; ".join(evidence["blocking_reasons"])
+        )
+    ticker_count = manifest.get("ticker_count")
+    if (
+        isinstance(ticker_count, bool)
+        or not isinstance(ticker_count, int)
+        or ticker_count != int(source["ticker"].nunique())
+    ):
+        raise ValueError("Notification source manifest ticker_count is inconsistent")
+    if (
+        manifest.get("expected_ticker_count") != EXPECTED_NIKKEI225_COUNT
+        or ticker_count != EXPECTED_NIKKEI225_COUNT
+    ):
+        raise ValueError(
+            "Notification source is not a complete Nikkei 225 universe: "
+            f"{ticker_count}/{EXPECTED_NIKKEI225_COUNT}"
+        )
+    universe_sha256 = ticker_universe_sha256(source["ticker"].tolist())
+    if manifest.get("ticker_universe_sha256") != universe_sha256:
+        raise ValueError("Notification source ticker universe hash is inconsistent")
+    recorded_evidence = manifest.get("market_data_evidence")
+    if not isinstance(recorded_evidence, dict):
+        raise ValueError("Notification source manifest market evidence is missing")
+    for field in (
+        "status",
+        "expected_date",
+        "latest_date",
+        "oldest_date",
+        "calendar_status",
+        "calendar_sha256",
+    ):
+        if recorded_evidence.get(field) != evidence.get(field):
+            raise ValueError(
+                f"Notification source manifest market evidence differs: {field}"
+            )
+    source.attrs["source_manifest"] = manifest
+    return source
+
+
+def load_ai_judgement(*, as_of: datetime | None = None) -> pd.DataFrame:
     if not AI_JUDGEMENT_FILE.exists():
         raise FileNotFoundError(
             "AI判断ファイルがありません: "
             f"{AI_JUDGEMENT_FILE}"
         )
 
-    df = pd.read_csv(
-        AI_JUDGEMENT_FILE,
-    )
+    checked_at = as_of or datetime.now(JST)
+    if checked_at.tzinfo is None:
+        checked_at = checked_at.replace(tzinfo=JST)
+    else:
+        checked_at = checked_at.astimezone(JST)
+    source_dates = _load_notification_source_dates(as_of=checked_at)
+    source_manifest = source_dates.attrs.get("source_manifest", {})
+    ai_manifest_file = REPORT_DIR / AI_JUDGEMENT_MANIFEST_NAME
+    if not ai_manifest_file.is_file():
+        raise FileNotFoundError(
+            f"AI judgement manifest is missing; notification is blocked: {ai_manifest_file}"
+        )
+    try:
+        ai_manifest = json.loads(ai_manifest_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("AI judgement manifest is unreadable") from error
+    if not isinstance(ai_manifest, dict) or ai_manifest.get("schema_version") != 1:
+        raise ValueError("AI judgement manifest schema is invalid")
+    if (
+        ai_manifest.get("run_id") != source_manifest.get("run_id")
+        or ai_manifest.get("input_report_file") != source_manifest.get("report_file")
+        or ai_manifest.get("input_report_sha256") != source_manifest.get("report_sha256")
+    ):
+        raise ValueError("AI judgement is not derived from the current source run")
+    if ai_manifest.get("ai_judgement_file") != AI_JUDGEMENT_FILE.name:
+        raise ValueError("AI judgement manifest points to a different output")
+    if ai_manifest.get("ai_judgement_sha256") != sha256(
+        AI_JUDGEMENT_FILE.read_bytes()
+    ).hexdigest():
+        raise ValueError("AI judgement file hash does not match its manifest")
+    try:
+        ai_generated_at = datetime.fromisoformat(str(ai_manifest.get("generated_at", "")))
+        source_generated_at = datetime.fromisoformat(
+            str(source_manifest.get("generated_at", ""))
+        )
+    except ValueError as error:
+        raise ValueError("AI judgement lineage timestamp is invalid") from error
+    if ai_generated_at.tzinfo is None or source_generated_at.tzinfo is None:
+        raise ValueError("AI judgement lineage timestamps must include timezones")
+    ai_generated_at = ai_generated_at.astimezone(JST)
+    source_generated_at = source_generated_at.astimezone(JST)
+    if not source_generated_at <= ai_generated_at <= checked_at:
+        raise ValueError("AI judgement lineage timestamps are out of order")
+    if checked_at - ai_generated_at > MAX_NOTIFICATION_SOURCE_AGE:
+        raise ValueError("AI judgement is not from the current pipeline run")
+    for path, field in (
+        (OPTIMIZED_SIGNALS_FILE, "optimized_signals_sha256"),
+        (LEARNING_PROFILE_FILE, "learning_profile_sha256"),
+    ):
+        actual = sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+        if ai_manifest.get(field) != actual:
+            raise ValueError(f"AI judgement input hash differs: {field}")
+
+    df = pd.read_csv(AI_JUDGEMENT_FILE)
+    ticker_count = ai_manifest.get("ticker_count")
+    if isinstance(ticker_count, bool) or not isinstance(ticker_count, int):
+        raise ValueError("AI judgement manifest ticker_count is invalid")
+    if ticker_count != len(df):
+        raise ValueError("AI judgement manifest ticker_count is inconsistent")
+
+    df = df.merge(source_dates, on="ticker", how="left", validate="many_to_one")
+    if df["基準日"].isna().any():
+        missing_tickers = sorted(df.loc[df["基準日"].isna(), "ticker"].astype(str).unique())
+        raise ValueError(f"Market data date is missing for notification tickers: {missing_tickers}")
 
     required_columns = {
         "銘柄",

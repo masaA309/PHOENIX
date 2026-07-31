@@ -43,6 +43,19 @@ class PerformanceTrackerStep10Test(unittest.TestCase):
         items = [record_from_operations(report("2026-07-20T09:00:00")), record_from_operations(report("2026-07-20T15:00:00")), record_from_operations(report("2026-07-21T09:00:00"))]
         self.assertEqual(2, summarize(items, 30)["distinct_run_days"])
 
+    def test_dry_runs_are_excluded_from_paper_evidence(self) -> None:
+        dry = report("2026-07-20T09:00:00")
+        dry["dry_run"] = True
+        live = report("2026-07-21T09:00:00")
+        summary = summarize(
+            [record_from_operations(dry), record_from_operations(live)],
+            30,
+        )
+        self.assertEqual(2, summary["run_count"])
+        self.assertEqual(1, summary["paper_evidence"]["eligible_run_count"])
+        self.assertEqual(1, summary["paper_evidence"]["excluded_dry_run_count"])
+        self.assertEqual(1, summary["paper_evidence"]["distinct_run_days"])
+
     def test_update_creates_all_reports(self) -> None:
         summary = update_performance(self.root, self.config, report("2026-07-20T09:00:00"))
         self.assertEqual(1, summary["run_count"])

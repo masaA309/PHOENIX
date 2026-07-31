@@ -92,10 +92,21 @@ def build_diagnostics(
         if reason != "READY" and len(examples) < 10:
             examples.append({"symbol": first_value(row, SYMBOL_KEYS), "reason": reason})
     candidates = int(pipeline.get("candidate_count", 0) or 0)
+    eligible = int(pipeline.get("eligible_candidate_count", candidates) or 0)
+    candidate_input_status = str(
+        pipeline.get("candidate_input_status", "MISSING") or "MISSING"
+    )
+    upstream_rejections = dict(pipeline.get("candidate_rejection_counts", {}) or {})
     ready = int(pipeline.get("ready_count", 0) or 0)
-    if candidates > 0 and ready == 0:
+    if candidate_input_status != "READY":
         status = "REVIEW"
-        headline = "Candidates were found, but none passed position sizing."
+        headline = "Candidate execution input contract is not ready."
+    elif candidates > 0 and eligible == 0:
+        status = "REVIEW"
+        headline = "Candidates were found, but none had an executable BUY decision."
+    elif eligible > 0 and ready == 0:
+        status = "REVIEW"
+        headline = "BUY candidates were found, but none passed position sizing."
     elif ready > 0:
         status = "HEALTHY"
         headline = "At least one candidate passed position sizing."
@@ -103,8 +114,16 @@ def build_diagnostics(
         status = "NO_DATA"
         headline = "No candidates were available for sizing."
     recommendations: list[str] = []
-    if candidates > 0 and ready == 0:
+    if candidate_input_status != "READY":
+        recommendations.append(
+            "Restore the Step18 candidate input audit before interpreting sizing results."
+        )
+    if eligible > 0 and ready == 0:
         recommendations.append("Review the most frequent exclusion reason before changing any risk limit.")
+    if candidates > eligible:
+        recommendations.append(
+            "WATCH and SKIP rows were excluded upstream and must not be promoted by relaxing risk limits."
+        )
     if reason_counts.get("UNSPECIFIED", 0):
         recommendations.append("Add an explicit reason column to the position sizing log for complete attribution.")
     if not position_rows:
@@ -117,11 +136,14 @@ def build_diagnostics(
         "headline": headline,
         "pipeline": {
             "candidates": candidates,
+            "eligible_buy": eligible,
+            "candidate_input_status": candidate_input_status,
             "ready": ready,
             "approved": int(pipeline.get("approved_count", 0) or 0),
             "filled": int(pipeline.get("filled_count", 0) or 0),
         },
         "position_log_rows": len(position_rows),
+        "upstream_rejection_counts": upstream_rejections,
         "reason_counts": dict(sorted(reason_counts.items(), key=lambda item: (-item[1], item[0]))),
         "examples": examples,
         "warnings": list(warnings or []),
@@ -136,6 +158,8 @@ def text_report(report: Mapping[str, Any]) -> str:
         f"Status       : {report.get('status', '')}",
         f"Summary      : {report.get('headline', '')}",
         f"Candidates   : {pipeline.get('candidates', 0)}",
+        f"Eligible BUY : {pipeline.get('eligible_buy', 0)}",
+        f"Input guard  : {pipeline.get('candidate_input_status', '')}",
         f"Ready        : {pipeline.get('ready', 0)}",
         f"Approved     : {pipeline.get('approved', 0)}",
         f"Filled       : {pipeline.get('filled', 0)}",
@@ -144,6 +168,12 @@ def text_report(report: Mapping[str, Any]) -> str:
     ]
     reasons = report.get("reason_counts", {})
     lines.extend([f"  {reason}: {count}" for reason, count in reasons.items()] or ["  No row-level reasons available"])
+    upstream = report.get("upstream_rejection_counts", {})
+    if upstream:
+        lines.extend(
+            ["-" * 76, "Upstream decision exclusions:"]
+            + [f"  {reason}: {count}" for reason, count in upstream.items()]
+        )
     warnings = report.get("warnings", [])
     if warnings:
         lines.extend(["-" * 76, "Warnings:"] + [f"  - {item}" for item in warnings])

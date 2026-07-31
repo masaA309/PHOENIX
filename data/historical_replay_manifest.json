@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "dataset_name": "PHOENIX current local historical cache",
+  "timezone": "Asia/Tokyo",
+  "datasets": {
+    "price_history": {
+      "required": true,
+      "available": true,
+      "used_by_replay": true,
+      "source": "Yahoo Finance cache produced by yfinance",
+      "path": "data/market_cache/*_T.csv",
+      "available_at_field": null,
+      "point_in_time_verified": false,
+      "notes": "Currently adjusted history (auto_adjust=true, actions=false); historical availability and adjustment lineage are not proven."
+    },
+    "historical_universe": {
+      "required": true,
+      "available": false,
+      "used_by_replay": false,
+      "source": null,
+      "path": null,
+      "available_at_field": "available_at",
+      "point_in_time_verified": false,
+      "notes": "Current symbol cache only; IPO, delisting and historical membership are not available."
+    },
+    "corporate_actions": {
+      "required": true,
+      "available": false,
+      "used_by_replay": false,
+      "source": null,
+      "path": null,
+      "available_at_field": "available_at",
+      "point_in_time_verified": false,
+      "notes": "Announcement and effective-date action ledger is not available."
+    },
+    "fundamentals": {
+      "required": true,
+      "available": false,
+      "used_by_replay": false,
+      "source": null,
+      "path": null,
+      "available_at_field": "published_at",
+      "point_in_time_verified": false,
+      "notes": "As-reported, publication-timestamped fundamentals and revisions are not available."
+    },
+    "shikiho": {
+      "required": true,
+      "available": false,
+      "used_by_replay": false,
+      "source": null,
+      "path": null,
+      "available_at_field": "published_at",
+      "point_in_time_verified": false,
+      "license_confirmed": false,
+      "notes": "Licensed historical issues and release timestamps are not available."
+    }
+  }
+}
