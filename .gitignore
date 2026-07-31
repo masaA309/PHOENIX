@@ -8,6 +8,9 @@ __pycache__/
 # Virtual Environment
 .venv/
 
+# Archives
+*.zip
+
 # Cache
 data/market_data_cache.pkl
 
