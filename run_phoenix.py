@@ -682,6 +682,98 @@ def print_final_summary(
 # メイン
 # =========================================================
 
+def print_morning_run_summary(
+    task_results: list[dict[str, Any]],
+    output_results: dict[str, bool],
+    started_at: float,
+) -> None:
+    def phase_status(
+        scripts: set[str],
+        success_status: str,
+    ) -> str:
+        phase_results = [
+            result
+            for result in task_results
+            if (
+                result["script"] in scripts
+                and not result.get("disabled", False)
+            )
+        ]
+        executed = [
+            result
+            for result in phase_results
+            if not result.get("skipped", False)
+        ]
+        if not executed:
+            return "NOT_RUN"
+        if any(not result["success"] for result in executed):
+            return "FAILED"
+        if any(
+            result.get("skipped", False)
+            and not result["success"]
+            for result in phase_results
+        ):
+            return "FAILED"
+        return success_status
+
+    required_failures = [
+        result
+        for result in task_results
+        if (
+            result["required"]
+            and not result["success"]
+            and not result.get("disabled", False)
+        )
+    ]
+    missing_outputs = [
+        name
+        for name, exists in output_results.items()
+        if not exists
+    ]
+    elapsed_total = time.time() - started_at
+    exit_code = 1 if required_failures or missing_outputs else 0
+
+    write_log("=" * 90)
+    write_log("PHOENIX MORNING RUN SUMMARY")
+    write_log("=" * 90)
+    write_log(
+        "Refresh      : "
+        + phase_status(
+            {"get_nikkei225.py", "daily_report.py"},
+            "OK",
+        )
+    )
+    write_log(
+        "Market Guard : "
+        + phase_status(
+            {"market_risk_ai.py"},
+            "READY",
+        )
+    )
+    write_log(
+        "AI           : "
+        + phase_status(
+            {
+                "learning_engine.py",
+                "ai_judgement.py",
+                "trade_engine.py",
+                "ranking_ai.py",
+            },
+            "OK",
+        )
+    )
+    write_log(
+        "Notify       : "
+        + phase_status(
+            {"notify.py"},
+            "SUCCESS",
+        )
+    )
+    write_log(f"Elapsed      : {elapsed_total:.1f} s")
+    write_log(f"Exit Code    : {exit_code}")
+    write_log("=" * 90)
+
+
 def main() -> None:
     configure_console()
     initialize_directories()
@@ -856,6 +948,12 @@ def main() -> None:
         in output_results.items()
         if not exists
     ]
+
+    print_morning_run_summary(
+        task_results=task_results,
+        output_results=output_results,
+        started_at=started_at,
+    )
 
     if (
         required_failures
