@@ -33,6 +33,32 @@ from phoenix_core.run_guard import RunPolicy, SingleInstanceLock, failure_state,
 ROOT_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG = ROOT_DIR / "config" / "v7_scheduler_config.json"
 
+_run_summary: dict[str, str] = {}
+
+
+def reset_run_summary() -> None:
+    _run_summary.clear()
+    _run_summary.update(
+        {
+            "refresh": "NOT_RUN",
+            "market_data": "NOT_CHECKED",
+            "notify": "NOT_RUN",
+        }
+    )
+
+
+def set_run_summary(name: str, value: str) -> None:
+    _run_summary[name] = value
+
+
+def print_run_summary(result: str, duration_ms: int) -> None:
+    print("PHOENIX Step28 SCHEDULED RUN SUMMARY")
+    print(f"Result: {result}")
+    print(f"Refresh: {_run_summary['refresh']}")
+    print(f"Market data: {_run_summary['market_data']}")
+    print(f"Notify: {_run_summary['notify']}")
+    print(f"Total execution time: {duration_ms} ms")
+
 
 def configure_console() -> None:
     try:
@@ -108,13 +134,17 @@ def monitor_and_track(
                 persist_state=not dry_run,
             )
             print_market_data_summary(market_report)
-            market_safe = market_report.get("status") != "FAILED"
+            market_status = str(market_report.get("status", "UNKNOWN"))
+            set_run_summary("market_data", market_status)
+            market_safe = market_status != "FAILED"
         except Exception as error:
             print("PHOENIX Step13 MARKET DATA GUARD ERROR")
             print(f"{type(error).__name__}: {error}")
+            set_run_summary("market_data", "ERROR")
             market_safe = False
     else:
         print("PHOENIX Step13 MARKET DATA GUARD: disabled")
+        set_run_summary("market_data", "DISABLED")
 
     guard = config.get("portfolio_guard", {})
     if not bool(guard.get("enabled", True)):
@@ -203,6 +233,9 @@ def verify_dry_run_integrity(
 
 
 def _run_scheduled_refresh() -> int:
+    set_run_summary("refresh", "RUNNING")
+    set_run_summary("market_data", "NOT_CHECKED")
+    set_run_summary("notify", "NOT_RUN")
     configure_console()
     parser = argparse.ArgumentParser(description="PHOENIX v7 scheduled one-shot runner")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
@@ -230,6 +263,7 @@ def _run_scheduled_refresh() -> int:
     if dry_run:
         if not bool(integrity_settings.get("enabled", True)):
             print("PHOENIX Step16 ERROR: Dry Run integrity guard must remain enabled")
+            set_run_summary("refresh", "FAILED")
             return 12
         try:
             integrity_before = capture_protected_files(
@@ -239,16 +273,19 @@ def _run_scheduled_refresh() -> int:
         except Exception as error:
             print("PHOENIX Step16 DRY RUN INTEGRITY ERROR")
             print(f"{type(error).__name__}: {error}")
+            set_run_summary("refresh", "FAILED")
             return 12
     try:
         state = load_state(state_path)
     except ValueError as error:
         print("PHOENIX Step7 STATE ERROR")
         print(f"{type(error).__name__}: {error}")
+        set_run_summary("refresh", "FAILED")
         return 8
     allowed, reason = should_run(policy, state, now)
     if not args.force and not allowed:
         print(f"PHOENIX Step7 SKIP: {reason}")
+        set_run_summary("refresh", f"SKIPPED ({reason})")
         return 0
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"v7_scheduler_{now:%Y%m%d_%H%M%S}.log"
@@ -267,6 +304,7 @@ def _run_scheduled_refresh() -> int:
             log_path.write_text(output, encoding="utf-8")
             print(output, end="" if output.endswith("\n") else "\n")
             if completed.returncode == 0:
+                set_run_summary("refresh", "SUCCESS")
                 if not dry_run:
                     save_state(state_path, {**state, **success_state(now, 0, log_path)})
                 monitor_ok = monitor_and_track(config, 0, log_path, dry_run)
@@ -278,6 +316,7 @@ def _run_scheduled_refresh() -> int:
                 if not integrity_ok:
                     return 11
                 return 0 if monitor_ok else 10
+            set_run_summary("refresh", f"FAILED (exit code {completed.returncode})")
             if not dry_run:
                 save_state(state_path, {**state, **failure_state(now, completed.returncode, log_path)})
             monitor_and_track(config, completed.returncode, log_path, dry_run)
@@ -291,28 +330,41 @@ def _run_scheduled_refresh() -> int:
             return completed.returncode
     except RuntimeError as error:
         print(f"PHOENIX Step7 SKIP: {error}")
+        set_run_summary("refresh", f"SKIPPED ({error})")
         return 0
 
 
 def main() -> int:
+    reset_run_summary()
     started_at = perf_counter()
     print(f"[{datetime.now():%H:%M:%S}] Scheduled refresh started")
     try:
         return_code = _run_scheduled_refresh()
     except Exception as error:
         duration_ms = int((perf_counter() - started_at) * 1000)
+        if _run_summary["refresh"] == "RUNNING":
+            set_run_summary("refresh", f"FAILED ({type(error).__name__})")
         print(f"[{datetime.now():%H:%M:%S}] Scheduled refresh failed")
         print(f"Reason: {type(error).__name__}: {error}")
         print(f"Execution time: {duration_ms} ms")
+        print_run_summary(f"FAILED ({type(error).__name__})", duration_ms)
         raise
 
     duration_ms = int((perf_counter() - started_at) * 1000)
+    if _run_summary["refresh"] == "RUNNING":
+        set_run_summary(
+            "refresh",
+            "SUCCESS" if return_code == 0 else f"FAILED (exit code {return_code})",
+        )
     if return_code == 0:
         print(f"[{datetime.now():%H:%M:%S}] Scheduled refresh completed")
+        result = "SUCCESS"
     else:
         print(f"[{datetime.now():%H:%M:%S}] Scheduled refresh failed")
         print(f"Reason: exit code {return_code}")
+        result = f"FAILED (exit code {return_code})"
     print(f"Execution time: {duration_ms} ms")
+    print_run_summary(result, duration_ms)
     return return_code
 
 
