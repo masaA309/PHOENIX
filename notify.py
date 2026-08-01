@@ -8,8 +8,8 @@ import json
 from pathlib import Path
 import os
 import sys
-from time import perf_counter
-from typing import Any
+from time import perf_counter, sleep
+from typing import Any, Callable
 
 import pandas as pd
 import requests
@@ -47,6 +47,8 @@ NOTIFICATION_LOG_FILE = (
 ENV_FILE = Path(".env")
 
 REQUEST_TIMEOUT = 30
+MAX_NOTIFICATION_RETRIES = 3
+NOTIFICATION_RETRY_DELAYS = (1, 2, 4)
 NOTIFICATION_SOURCE_MANIFEST_NAME = "notification_source_manifest.json"
 MAX_NOTIFICATION_SOURCE_AGE = timedelta(hours=4)
 
@@ -672,6 +674,87 @@ def split_message(
 # Discord
 # =========================================================
 
+def _is_temporary_notification_failure(
+    result: str,
+) -> bool:
+    if "通信エラー:" in result:
+        return True
+
+    marker = "HTTP "
+
+    if marker not in result:
+        return False
+
+    try:
+        status_code = int(
+            result.split(marker, 1)[1]
+            .split(":", 1)[0]
+        )
+    except (IndexError, ValueError):
+        return False
+
+    return (
+        status_code in {408, 425, 429}
+        or 500 <= status_code <= 599
+    )
+
+
+def _send_with_retry(
+    send_once: Callable[[], tuple[bool, str]],
+    channel: str,
+) -> tuple[bool, str]:
+    total_attempts = 1 + MAX_NOTIFICATION_RETRIES
+    last_result = f"{channel}通知失敗"
+
+    for attempt in range(1, total_attempts + 1):
+        print(
+            f"[Notify] SEND {channel} "
+            f"(attempt {attempt}/{total_attempts})"
+        )
+
+        success, result = send_once()
+
+        if success:
+            print(
+                f"[Notify] SUCCESS {channel} "
+                f"(attempt {attempt}/{total_attempts})"
+            )
+            return True, result
+
+        last_result = result
+        print(
+            f"[Notify] FAILED {channel} "
+            f"(attempt {attempt}/{total_attempts}): "
+            f"{result}"
+        )
+
+        if not _is_temporary_notification_failure(
+            result
+        ):
+            print(
+                f"[Notify] FINAL FAILED {channel}: "
+                f"{result}"
+            )
+            return False, result
+
+        if attempt == total_attempts:
+            print(
+                f"[Notify] FINAL FAILED {channel}: "
+                f"{result}"
+            )
+            return False, result
+
+        delay = NOTIFICATION_RETRY_DELAYS[
+            attempt - 1
+        ]
+        print(
+            f"[Notify] RETRY {channel} "
+            f"in {delay} sec"
+        )
+        sleep(delay)
+
+    return False, last_result
+
 def send_discord(
     message: str,
 ) -> tuple[bool, str]:
@@ -920,8 +1003,12 @@ def send_all_discord(
             message=message,
             maximum_length=DISCORD_MAX_LENGTH,
         ):
-            success, result = send_discord(
-                chunk
+            success, result = _send_with_retry(
+                send_once=(
+                    lambda current_chunk=chunk:
+                    send_discord(current_chunk)
+                ),
+                channel="Discord",
             )
 
             if not success:
@@ -945,8 +1032,12 @@ def send_all_line(
             message=message,
             maximum_length=LINE_MAX_LENGTH,
         ):
-            success, result = send_line(
-                chunk
+            success, result = _send_with_retry(
+                send_once=(
+                    lambda current_chunk=chunk:
+                    send_line(current_chunk)
+                ),
+                channel="LINE",
             )
 
             if not success:
