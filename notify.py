@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import os
 import sys
+from time import perf_counter
 from typing import Any
 
 import pandas as pd
@@ -1022,7 +1023,7 @@ def save_notification_log(
 # メイン
 # =========================================================
 
-def main() -> None:
+def _run_notification() -> None:
     configure_console()
     load_environment()
 
@@ -1059,6 +1060,7 @@ def main() -> None:
         print(message)
 
     print()
+    print("[Notify] SEND")
 
     discord_success, discord_result = (
         send_all_discord(
@@ -1117,6 +1119,34 @@ def main() -> None:
             "片方の通知に失敗しました。"
             "成功した通知先への送信は完了しています。"
         )
+
+
+def main() -> None:
+    started_at = perf_counter()
+    print("[Notify] START")
+
+    try:
+        _run_notification()
+    except SystemExit as error:
+        duration_ms = int((perf_counter() - started_at) * 1000)
+        exit_code = error.code if error.code is not None else 0
+
+        if exit_code == 0:
+            print("[Notify] SUCCESS")
+        else:
+            print(f"[Notify] FAILED: exit code {exit_code}")
+
+        print(f"Elapsed: {duration_ms} ms")
+        raise
+    except Exception as error:
+        duration_ms = int((perf_counter() - started_at) * 1000)
+        print(f"[Notify] FAILED: {type(error).__name__}: {error}")
+        print(f"Elapsed: {duration_ms} ms")
+        raise
+
+    duration_ms = int((perf_counter() - started_at) * 1000)
+    print("[Notify] SUCCESS")
+    print(f"Elapsed: {duration_ms} ms")
 
 
 if __name__ == "__main__":
