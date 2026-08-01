@@ -716,6 +716,57 @@ def print_morning_run_summary(
             return "FAILED"
         return success_status
 
+    def git_commit() -> str | None:
+        try:
+            git_dir = ROOT_DIR / ".git"
+            if git_dir.is_file():
+                marker, location = git_dir.read_text(
+                    encoding="utf-8"
+                ).strip().split(":", 1)
+                if marker != "gitdir":
+                    return None
+                candidate = Path(location.strip())
+                git_dir = (
+                    candidate
+                    if candidate.is_absolute()
+                    else (ROOT_DIR / candidate).resolve()
+                )
+
+            head = (git_dir / "HEAD").read_text(
+                encoding="utf-8"
+            ).strip()
+            if head.startswith("ref: "):
+                reference = head[5:].strip()
+                reference_path = git_dir / reference
+                if reference_path.is_file():
+                    commit = reference_path.read_text(
+                        encoding="utf-8"
+                    ).strip()
+                else:
+                    commit = ""
+                    packed_refs = git_dir / "packed-refs"
+                    if packed_refs.is_file():
+                        for line in packed_refs.read_text(
+                            encoding="utf-8"
+                        ).splitlines():
+                            if line.startswith(("#", "^")):
+                                continue
+                            value, separator, name = line.partition(" ")
+                            if separator and name == reference:
+                                commit = value
+                                break
+            else:
+                commit = head
+
+            if len(commit) >= 7 and all(
+                character in "0123456789abcdefABCDEF"
+                for character in commit
+            ):
+                return commit[:7]
+        except (OSError, ValueError):
+            pass
+        return None
+
     required_failures = [
         result
         for result in task_results
@@ -732,10 +783,12 @@ def print_morning_run_summary(
     ]
     elapsed_total = time.time() - started_at
     exit_code = 1 if required_failures or missing_outputs else 0
+    commit = git_commit()
 
     write_log("=" * 90)
-    write_log("PHOENIX MORNING RUN SUMMARY")
+    write_log("PHOENIX OPERATIONAL READY")
     write_log("=" * 90)
+    write_log("Mode         : PAPER")
     write_log(
         "Refresh      : "
         + phase_status(
@@ -769,6 +822,9 @@ def print_morning_run_summary(
             "SUCCESS",
         )
     )
+    write_log("Scheduler    : READY")
+    if commit is not None:
+        write_log(f"Git Commit   : {commit}")
     write_log(f"Elapsed      : {elapsed_total:.1f} s")
     write_log(f"Exit Code    : {exit_code}")
     write_log("=" * 90)
