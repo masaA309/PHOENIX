@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from time import perf_counter
 from typing import Any
 
 from phoenix_core.operations_monitor import print_operations_summary, run_operations_monitor
@@ -201,7 +202,7 @@ def verify_dry_run_integrity(
         return False
 
 
-def main() -> int:
+def _run_scheduled_refresh() -> int:
     configure_console()
     parser = argparse.ArgumentParser(description="PHOENIX v7 scheduled one-shot runner")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
@@ -291,6 +292,28 @@ def main() -> int:
     except RuntimeError as error:
         print(f"PHOENIX Step7 SKIP: {error}")
         return 0
+
+
+def main() -> int:
+    started_at = perf_counter()
+    print(f"[{datetime.now():%H:%M:%S}] Scheduled refresh started")
+    try:
+        return_code = _run_scheduled_refresh()
+    except Exception as error:
+        duration_ms = int((perf_counter() - started_at) * 1000)
+        print(f"[{datetime.now():%H:%M:%S}] Scheduled refresh failed")
+        print(f"Reason: {type(error).__name__}: {error}")
+        print(f"Execution time: {duration_ms} ms")
+        raise
+
+    duration_ms = int((perf_counter() - started_at) * 1000)
+    if return_code == 0:
+        print(f"[{datetime.now():%H:%M:%S}] Scheduled refresh completed")
+    else:
+        print(f"[{datetime.now():%H:%M:%S}] Scheduled refresh failed")
+        print(f"Reason: exit code {return_code}")
+    print(f"Execution time: {duration_ms} ms")
+    return return_code
 
 
 if __name__ == "__main__":
