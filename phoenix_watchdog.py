@@ -15,11 +15,19 @@ from types import FrameType
 from typing import Any
 from uuid import uuid4
 
+from phoenix_heartbeat import (
+    HEARTBEAT_TIMEOUT_SECONDS,
+    HeartbeatEventLogger,
+    HeartbeatValidation,
+    inspect_heartbeat,
+)
+
 
 ROOT_DIR = Path(__file__).resolve().parent
 LOG_DIR = ROOT_DIR / "logs"
 TARGET_SCRIPT = ROOT_DIR / "run_phoenix.py"
 LOCK_FILE = LOG_DIR / "phoenix_watchdog.lock"
+HEARTBEAT_PATH = ROOT_DIR / "runtime" / "guardian" / "heartbeat.json"
 
 MODE = "PAPER"
 ORDERS_SUBMITTED = 0
@@ -29,6 +37,7 @@ EXIT_OK = 0
 EXIT_RESTART_LIMIT = 1
 EXIT_CONFIGURATION_ERROR = 2
 EXIT_ALREADY_RUNNING = 3
+EXIT_HEARTBEAT_FAILURE = 70
 
 
 class WatchdogError(RuntimeError):
@@ -52,6 +61,7 @@ class MonitorConfig:
     poll_seconds: float = 1.0
     termination_grace_seconds: float = 10.0
     stale_lock_seconds: float = 6 * 60 * 60
+    heartbeat_timeout_seconds: float = HEARTBEAT_TIMEOUT_SECONDS
 
     def __post_init__(self) -> None:
         if not 0 <= self.max_restarts <= MAX_RESTARTS_HARD_LIMIT:
@@ -74,6 +84,8 @@ class MonitorConfig:
             raise ValueError("termination_grace_seconds must be positive")
         if self.stale_lock_seconds <= 0:
             raise ValueError("stale_lock_seconds must be positive")
+        if self.heartbeat_timeout_seconds <= 0:
+            raise ValueError("heartbeat_timeout_seconds must be positive")
 
     def backoff_seconds(self, restart_number: int) -> float:
         if restart_number < 1:
@@ -293,11 +305,17 @@ class PhoenixWatchdog:
         log_dir: Path,
         lock_file: Path,
         config: MonitorConfig | None = None,
+        heartbeat_path: Path | None = None,
     ) -> None:
         self.target_script = Path(target_script).resolve()
         self.root_dir = Path(root_dir).resolve()
         self.config = config or MonitorConfig()
         self.logger = EventLogger(Path(log_dir))
+        self.heartbeat_logger = HeartbeatEventLogger(Path(log_dir))
+        self.heartbeat_path = Path(
+            heartbeat_path
+            or (self.root_dir / "runtime" / "guardian" / "heartbeat.json")
+        )
         self.lock = ProcessLock(
             Path(lock_file),
             self.logger,
@@ -307,6 +325,7 @@ class PhoenixWatchdog:
         self.stop_reason = "requested"
         self._process: subprocess.Popen[Any] | None = None
         self._process_lock = threading.Lock()
+        self._last_heartbeat_failure: HeartbeatValidation | None = None
 
     @property
     def child_pid(self) -> int | None:
@@ -360,10 +379,23 @@ class PhoenixWatchdog:
     def _monitor(self) -> int:
         restart_count = 0
         while not self.stop_event.is_set():
-            exit_code = self._launch_and_monitor()
+            exit_code = self._launch_and_monitor(
+                restart_attempt=restart_count,
+            )
             if self.stop_event.is_set():
                 self.logger.emit("SAFE_STOP", reason=self.stop_reason)
                 return EXIT_OK
+            heartbeat_failure = self._last_heartbeat_failure
+            if (
+                heartbeat_failure is not None
+                and heartbeat_failure.restart_suppressed
+            ):
+                self.logger.emit(
+                    "HEARTBEAT_SAFETY_STOP",
+                    reason=heartbeat_failure.reason,
+                    restart_suppressed=True,
+                )
+                return EXIT_CONFIGURATION_ERROR
             if exit_code == 0:
                 self.logger.emit("PROCESS_EXITED", exit_code=0)
                 return EXIT_OK
@@ -371,7 +403,19 @@ class PhoenixWatchdog:
                 self.logger.emit(
                     "REPOSITORY_GUARDIAN_BLOCKED",
                     exit_code=exit_code,
+                    reason="guardian_or_position_reconciliation_exit_2",
                     restart_suppressed=True,
+                )
+                self.heartbeat_logger.emit(
+                    "STARTUP_GATE_BLOCKED",
+                    status="BLOCKED",
+                    reason="GUARDIAN_OR_POSITION_RECONCILIATION_EXIT_2",
+                    pid=None,
+                    sequence=None,
+                    heartbeat_age_seconds=None,
+                    repository_root=str(self.root_dir),
+                    action="SAFE_STOP",
+                    restart_attempt=restart_count,
                 )
                 return EXIT_CONFIGURATION_ERROR
 
@@ -385,6 +429,22 @@ class PhoenixWatchdog:
                     "RESTART_LIMIT_REACHED",
                     max_restarts=self.config.max_restarts,
                 )
+                if heartbeat_failure is not None:
+                    self.heartbeat_logger.emit(
+                        "HEARTBEAT_RESTART_LIMIT_REACHED",
+                        status="FAILED",
+                        reason=heartbeat_failure.reason,
+                        pid=heartbeat_failure.pid,
+                        sequence=heartbeat_failure.sequence,
+                        heartbeat_age_seconds=(
+                            heartbeat_failure.heartbeat_age_seconds
+                        ),
+                        mode=heartbeat_failure.mode,
+                        orders_submitted=heartbeat_failure.orders_submitted,
+                        repository_root=heartbeat_failure.repository_root,
+                        action="SAFE_STOP",
+                        restart_attempt=restart_count,
+                    )
                 return EXIT_RESTART_LIMIT
 
             restart_number = restart_count + 1
@@ -394,6 +454,22 @@ class PhoenixWatchdog:
                 backoff_seconds=delay,
                 restart_number=restart_number,
             )
+            if heartbeat_failure is not None:
+                self.heartbeat_logger.emit(
+                    "HEARTBEAT_RESTART_SCHEDULED",
+                    status="RESTARTING",
+                    reason=heartbeat_failure.reason,
+                    pid=heartbeat_failure.pid,
+                    sequence=heartbeat_failure.sequence,
+                    heartbeat_age_seconds=(
+                        heartbeat_failure.heartbeat_age_seconds
+                    ),
+                    mode=heartbeat_failure.mode,
+                    orders_submitted=heartbeat_failure.orders_submitted,
+                    repository_root=heartbeat_failure.repository_root,
+                    action="RESTART",
+                    restart_attempt=restart_number,
+                )
             if self.stop_event.wait(delay):
                 self.logger.emit("SAFE_STOP", reason=self.stop_reason)
                 return EXIT_OK
@@ -402,7 +478,8 @@ class PhoenixWatchdog:
         self.logger.emit("SAFE_STOP", reason=self.stop_reason)
         return EXIT_OK
 
-    def _launch_and_monitor(self) -> int:
+    def _launch_and_monitor(self, restart_attempt: int = 0) -> int:
+        self._last_heartbeat_failure = None
         command = [
             sys.executable,
             "-X",
@@ -464,11 +541,79 @@ class PhoenixWatchdog:
             pid=process.pid,
             startup_grace_seconds=self.config.startup_grace_seconds,
         )
+        heartbeat_deadline = (
+            time.monotonic() + self.config.heartbeat_timeout_seconds
+        )
+        heartbeat_seen = False
+        previous_sequence: int | None = None
+        previous_timestamp: datetime | None = None
         while not self.stop_event.wait(self.config.poll_seconds):
             exit_code = process.poll()
             if exit_code is not None:
                 self._clear_process(process)
                 return int(exit_code)
+
+            heartbeat = inspect_heartbeat(
+                self.heartbeat_path,
+                expected_pid=process.pid,
+                expected_repository_root=self.root_dir,
+                timeout_seconds=self.config.heartbeat_timeout_seconds,
+                previous_sequence=previous_sequence,
+                previous_timestamp=previous_timestamp,
+            )
+            if heartbeat.healthy:
+                heartbeat_seen = True
+                if heartbeat.sequence != previous_sequence:
+                    self.heartbeat_logger.emit(
+                        "HEARTBEAT_HEALTHY",
+                        status="HEALTHY",
+                        reason=heartbeat.reason,
+                        pid=heartbeat.pid,
+                        sequence=heartbeat.sequence,
+                        heartbeat_age_seconds=(
+                            heartbeat.heartbeat_age_seconds
+                        ),
+                        mode=heartbeat.mode,
+                        orders_submitted=heartbeat.orders_submitted,
+                        repository_root=heartbeat.repository_root,
+                        action="MONITOR",
+                        restart_attempt=restart_attempt,
+                    )
+                previous_sequence = heartbeat.sequence
+                previous_timestamp = heartbeat.timestamp
+                continue
+
+            before_deadline = time.monotonic() < heartbeat_deadline
+            belongs_to_child = heartbeat.pid == process.pid
+            if not heartbeat_seen and not belongs_to_child and before_deadline:
+                continue
+
+            self._last_heartbeat_failure = heartbeat
+            safety_stop = heartbeat.restart_suppressed
+            event = (
+                "HEARTBEAT_LOST"
+                if heartbeat.reason in {"HEARTBEAT_MISSING", "HEARTBEAT_STALE"}
+                else "HEARTBEAT_INVALID"
+            )
+            self.heartbeat_logger.emit(
+                event,
+                status="BLOCKED" if safety_stop else "ABNORMAL",
+                reason=heartbeat.reason,
+                pid=heartbeat.pid,
+                sequence=heartbeat.sequence,
+                heartbeat_age_seconds=heartbeat.heartbeat_age_seconds,
+                mode=heartbeat.mode,
+                orders_submitted=heartbeat.orders_submitted,
+                repository_root=heartbeat.repository_root,
+                action="SAFE_STOP" if safety_stop else "RESTART_PENDING",
+                restart_attempt=restart_attempt,
+            )
+            self._terminate_process(process, heartbeat.reason)
+            return (
+                EXIT_CONFIGURATION_ERROR
+                if safety_stop
+                else EXIT_HEARTBEAT_FAILURE
+            )
 
         self._safe_stop_child()
         return 0
@@ -483,6 +628,13 @@ class PhoenixWatchdog:
             process = self._process
         if process is None:
             return
+        self._terminate_process(process, self.stop_reason)
+
+    def _terminate_process(
+        self,
+        process: subprocess.Popen[Any],
+        reason: str,
+    ) -> None:
         if process.poll() is not None:
             self._clear_process(process)
             return
@@ -490,7 +642,7 @@ class PhoenixWatchdog:
         self.logger.emit(
             "PROCESS_TERMINATING",
             pid=process.pid,
-            reason=self.stop_reason,
+            reason=reason,
         )
         process.terminate()
         try:
@@ -593,6 +745,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=_positive_float,
         default=6 * 60 * 60,
     )
+    parser.add_argument(
+        "--heartbeat-timeout-seconds",
+        type=_positive_float,
+        default=HEARTBEAT_TIMEOUT_SECONDS,
+    )
     return parser.parse_args(argv)
 
 
@@ -607,6 +764,7 @@ def main(argv: list[str] | None = None) -> int:
             poll_seconds=args.poll_seconds,
             termination_grace_seconds=args.termination_grace_seconds,
             stale_lock_seconds=args.stale_lock_seconds,
+            heartbeat_timeout_seconds=args.heartbeat_timeout_seconds,
         )
     except ValueError as error:
         print(f"WatchDog configuration error: {error}", file=sys.stderr)

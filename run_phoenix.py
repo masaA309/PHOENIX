@@ -11,6 +11,7 @@ import sys
 import time
 from typing import Any
 
+from phoenix_heartbeat import PhoenixHeartbeat
 from phoenix_core.virtual_rss_paper import prepare_quote_environment
 from position_reconciliation import run_position_reconciliation
 from repository_guardian import run_repository_guardian
@@ -34,6 +35,8 @@ LOG_FILE = LOG_DIR / (
 PROCESS_TIMEOUT_SECONDS = 1800
 
 STOP_ON_REQUIRED_FAILURE = True
+
+_ACTIVE_HEARTBEAT: PhoenixHeartbeat | None = None
 
 
 # =========================================================
@@ -832,7 +835,8 @@ def print_morning_run_summary(
     write_log("=" * 90)
 
 
-def main() -> None:
+def _run_main() -> None:
+    global _ACTIVE_HEARTBEAT
     configure_console()
     guardian_result = run_repository_guardian(report_dir=LOG_DIR)
     if not guardian_result.ready:
@@ -854,7 +858,7 @@ def main() -> None:
         guardian_status=guardian_result.status,
         report_dir=LOG_DIR,
     )
-    if reconciliation_result.blocked:
+    if reconciliation_result.status != "READY":
         reasons = ", ".join(reconciliation_result.reasons) or "unknown"
         print(
             "PHOENIX START BLOCKED BY POSITION RECONCILIATION: " + reasons,
@@ -869,11 +873,19 @@ def main() -> None:
                 flush=True,
             )
         raise SystemExit(2)
+    heartbeat = PhoenixHeartbeat(
+        repository_root=ROOT_DIR,
+        guardian_status=guardian_result.status,
+        position_reconciliation_status=reconciliation_result.status,
+    )
+    heartbeat.start(current_stage="OPERATIONAL_READY")
+    _ACTIVE_HEARTBEAT = heartbeat
     print(
         "POSITION RECONCILIATION: " + reconciliation_result.status,
         flush=True,
     )
     print("PHOENIX OPERATIONAL READY", flush=True)
+    heartbeat.set_stage("INITIALIZE_DIRECTORIES")
     initialize_directories()
     reset_log_file()
 
@@ -885,6 +897,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    heartbeat.set_stage("QUOTE_TRANSPORT")
     try:
         quote_environment = configure_quote_transport()
     except RuntimeError as error:
@@ -926,6 +939,7 @@ def main() -> None:
         if not args.refresh_only or task["script"] in REFRESH_ONLY_SCRIPTS
     ]
     for task in selected_tasks:
+        heartbeat.set_stage(str(task["name"]))
         enabled = bool(
             task.get(
                 "enabled",
@@ -1019,8 +1033,10 @@ def main() -> None:
         ):
             required_task_failed = True
 
+    heartbeat.set_stage("VERIFY_OUTPUTS")
     output_results = verify_output_files(refresh_only=args.refresh_only)
 
+    heartbeat.set_stage("FINAL_SUMMARY")
     print_final_summary(
         task_results=task_results,
         output_results=output_results,
@@ -1060,6 +1076,57 @@ def main() -> None:
         raise SystemExit(
             1
         )
+
+
+def _stop_active_heartbeat(
+    status: str,
+    current_stage: str,
+    *,
+    preserve_active_exception: bool,
+) -> None:
+    heartbeat = _ACTIVE_HEARTBEAT
+    if heartbeat is None:
+        return
+    try:
+        heartbeat.stop(status=status, current_stage=current_stage)
+    except Exception as error:
+        if not preserve_active_exception:
+            raise
+        print(
+            "Heartbeat shutdown failed while preserving the active exception: "
+            f"{type(error).__name__}: {error}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
+def main() -> None:
+    global _ACTIVE_HEARTBEAT
+    _ACTIVE_HEARTBEAT = None
+    try:
+        _run_main()
+    except KeyboardInterrupt:
+        _stop_active_heartbeat(
+            "STOPPED",
+            "INTERRUPTED",
+            preserve_active_exception=True,
+        )
+        raise
+    except BaseException:
+        _stop_active_heartbeat(
+            "FAILED",
+            "FAILED",
+            preserve_active_exception=True,
+        )
+        raise
+    else:
+        _stop_active_heartbeat(
+            "COMPLETED",
+            "COMPLETED",
+            preserve_active_exception=False,
+        )
+    finally:
+        _ACTIVE_HEARTBEAT = None
 
 
 if __name__ == "__main__":
