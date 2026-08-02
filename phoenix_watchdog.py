@@ -367,6 +367,13 @@ class PhoenixWatchdog:
             if exit_code == 0:
                 self.logger.emit("PROCESS_EXITED", exit_code=0)
                 return EXIT_OK
+            if exit_code == EXIT_CONFIGURATION_ERROR:
+                self.logger.emit(
+                    "REPOSITORY_GUARDIAN_BLOCKED",
+                    exit_code=exit_code,
+                    restart_suppressed=True,
+                )
+                return EXIT_CONFIGURATION_ERROR
 
             self.logger.emit(
                 "ABNORMAL_EXIT",

@@ -37,7 +37,7 @@ Decisions are append-only. A newer entry may supersede an older one, but the old
 ## D-005 — Develop locally and synchronize source safely
 
 - Date: 2026-07-24
-- Status: ACTIVE
+- Status: SUPERSEDED by D-007
 - Decision: Git development occurs in the local Codex workspace. A hash-checked allow-list script copies committed source files to the OneDrive runtime workspace without Git metadata or runtime artifacts.
 - Rationale: OneDrive reparse behavior intermittently denied normal Git lock and commit-message files.
 - Evidence: `sync_step21_to_onedrive.ps1` and its preflight verification.
@@ -49,3 +49,11 @@ Decisions are append-only. A newer entry may supersede an older one, but the old
 - Decision: Before the JPX cash close, an in-progress same-day daily bar is excluded and indicators end at the exact latest completed JPX session. Missing, stale, or future data still fails closed.
 - Rationale: A public provider may expose a partial daily row during trading hours; it must neither enter signals nor make the previous completed session appear stale.
 - Evidence: commit `fa3cf24b7c65f6c1651b85c56ba4d164cd85399c`; 225/225 live refresh and 290 passing tests.
+
+## D-007 — Use the OneDrive PHOENIX repository as the sole canonical workspace
+
+- Date: 2026-08-02
+- Status: ACTIVE
+- Decision: `C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX` is the only canonical PHOENIX development and runtime repository. Copies under `Documents\Codex`, worktrees, and other duplicate folders must not be used as the development source of truth.
+- Rationale: A single guarded repository prevents source divergence and accidental execution or editing of stale copies.
+- Evidence: Phase3 Step36.5 Repository Guardian and its focused tests.

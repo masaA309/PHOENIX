@@ -11,6 +11,7 @@ import unittest
 from phoenix_watchdog import (
     AlreadyRunningError,
     EventLogger,
+    EXIT_CONFIGURATION_ERROR,
     EXIT_OK,
     EXIT_RESTART_LIMIT,
     MonitorConfig,
@@ -134,6 +135,41 @@ sys.exit(7)
         self.assertEqual([1, 2], [event["restart_number"] for event in restarts])
         self.assertEqual([0.01, 0.02], [event["backoff_seconds"] for event in restarts])
         self.assertEqual("RESTART_LIMIT_REACHED", events[-3]["event"])
+
+    def test_repository_guardian_block_does_not_restart(self) -> None:
+        counter_file = self.root / "launch_count.txt"
+        target = self.write_script(
+            "guardian_blocked_child.py",
+            f"""
+from pathlib import Path
+import sys
+
+counter = Path({str(counter_file)!r})
+count = int(counter.read_text(encoding="utf-8")) if counter.exists() else 0
+counter.write_text(str(count + 1), encoding="utf-8")
+sys.exit(2)
+""".strip()
+            + "\n",
+        )
+        watchdog = self.make_watchdog(
+            target,
+            max_restarts=3,
+            startup_grace_seconds=0.0,
+        )
+
+        self.assertEqual(EXIT_CONFIGURATION_ERROR, watchdog.run())
+        self.assertEqual("1", counter_file.read_text(encoding="utf-8"))
+
+        events = self.read_events()
+        names = [event["event"] for event in events]
+        self.assertIn("REPOSITORY_GUARDIAN_BLOCKED", names)
+        self.assertNotIn("RESTART_SCHEDULED", names)
+        blocked = next(
+            event
+            for event in events
+            if event["event"] == "REPOSITORY_GUARDIAN_BLOCKED"
+        )
+        self.assertTrue(blocked["restart_suppressed"])
 
     def test_lock_blocks_duplicate_and_recovers_dead_pid(self) -> None:
         logger = EventLogger(self.log_dir)

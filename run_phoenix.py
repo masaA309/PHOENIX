@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 from phoenix_core.virtual_rss_paper import prepare_quote_environment
+from repository_guardian import run_repository_guardian
 
 
 # =========================================================
@@ -832,6 +833,22 @@ def print_morning_run_summary(
 
 def main() -> None:
     configure_console()
+    guardian_result = run_repository_guardian(report_dir=LOG_DIR)
+    if not guardian_result.ready:
+        reasons = ", ".join(guardian_result.reasons) or "unknown"
+        print(
+            "PHOENIX START BLOCKED BY REPOSITORY GUARDIAN: " + reasons,
+            file=sys.stderr,
+            flush=True,
+        )
+        if guardian_result.report_error:
+            print(
+                "Repository Guardian report error: "
+                + guardian_result.report_error,
+                file=sys.stderr,
+                flush=True,
+            )
+        raise SystemExit(2)
     initialize_directories()
     reset_log_file()
 
