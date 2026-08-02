@@ -11,6 +11,7 @@ import sys
 import time
 from typing import Any
 
+from phoenix_fail_safe import FailSafeController, FailSafeExit
 from phoenix_heartbeat import PhoenixHeartbeat
 from phoenix_core.virtual_rss_paper import prepare_quote_environment
 from position_reconciliation import run_position_reconciliation
@@ -37,6 +38,7 @@ PROCESS_TIMEOUT_SECONDS = 1800
 STOP_ON_REQUIRED_FAILURE = True
 
 _ACTIVE_HEARTBEAT: PhoenixHeartbeat | None = None
+_ACTIVE_FAIL_SAFE: FailSafeController | None = None
 
 
 # =========================================================
@@ -836,9 +838,20 @@ def print_morning_run_summary(
 
 
 def _run_main() -> None:
-    global _ACTIVE_HEARTBEAT
+    global _ACTIVE_FAIL_SAFE, _ACTIVE_HEARTBEAT
+    fail_safe = FailSafeController(
+        repository_root=ROOT_DIR,
+        log_dir=LOG_DIR,
+    )
+    _ACTIVE_FAIL_SAFE = fail_safe
     configure_console()
     guardian_result = run_repository_guardian(report_dir=LOG_DIR)
+    guardian_status = getattr(
+        guardian_result,
+        "status",
+        "READY" if guardian_result.ready else "BLOCKED",
+    )
+    fail_safe.update_statuses(guardian_status=guardian_status)
     if not guardian_result.ready:
         reasons = ", ".join(guardian_result.reasons) or "unknown"
         print(
@@ -853,11 +866,15 @@ def _run_main() -> None:
                 file=sys.stderr,
                 flush=True,
             )
-        raise SystemExit(2)
+        fail_safe.fail_and_exit(
+            "GUARDIAN_BLOCKED",
+            guardian_status=guardian_status,
+        )
     reconciliation_result = run_position_reconciliation(
-        guardian_status=guardian_result.status,
+        guardian_status=guardian_status,
         report_dir=LOG_DIR,
     )
+    fail_safe.update_statuses(position_status=reconciliation_result.status)
     if reconciliation_result.status != "READY":
         reasons = ", ".join(reconciliation_result.reasons) or "unknown"
         print(
@@ -872,21 +889,34 @@ def _run_main() -> None:
                 file=sys.stderr,
                 flush=True,
             )
-        raise SystemExit(2)
+        fail_safe.fail_and_exit(
+            "POSITION_BLOCKED",
+            position_status=reconciliation_result.status,
+        )
     heartbeat = PhoenixHeartbeat(
         repository_root=ROOT_DIR,
-        guardian_status=guardian_result.status,
+        guardian_status=guardian_status,
         position_reconciliation_status=reconciliation_result.status,
     )
-    heartbeat.start(current_stage="OPERATIONAL_READY")
     _ACTIVE_HEARTBEAT = heartbeat
+    fail_safe.register_background_stopper(
+        "heartbeat",
+        lambda: heartbeat.stop(status="FAILED", current_stage="FAIL_SAFE"),
+    )
+    heartbeat.start(current_stage="OPERATIONAL_READY")
+    fail_safe.start_monitoring(
+        heartbeat_path=heartbeat.heartbeat_path,
+        expected_pid=heartbeat.pid,
+    )
     print(
         "POSITION RECONCILIATION: " + reconciliation_result.status,
         flush=True,
     )
     print("PHOENIX OPERATIONAL READY", flush=True)
     heartbeat.set_stage("INITIALIZE_DIRECTORIES")
+    fail_safe.raise_if_triggered()
     initialize_directories()
+    fail_safe.raise_if_triggered()
     reset_log_file()
 
     parser = argparse.ArgumentParser(description="PHOENIX daily automation")
@@ -939,6 +969,7 @@ def _run_main() -> None:
         if not args.refresh_only or task["script"] in REFRESH_ONLY_SCRIPTS
     ]
     for task in selected_tasks:
+        fail_safe.raise_if_triggered()
         heartbeat.set_stage(str(task["name"]))
         enabled = bool(
             task.get(
@@ -1004,6 +1035,7 @@ def _run_main() -> None:
                 args=task.get("args"),
             )
         )
+        fail_safe.raise_if_triggered()
 
         script_exists = (
             ROOT_DIR
@@ -1033,9 +1065,11 @@ def _run_main() -> None:
         ):
             required_task_failed = True
 
+    fail_safe.raise_if_triggered()
     heartbeat.set_stage("VERIFY_OUTPUTS")
     output_results = verify_output_files(refresh_only=args.refresh_only)
 
+    fail_safe.raise_if_triggered()
     heartbeat.set_stage("FINAL_SUMMARY")
     print_final_summary(
         task_results=task_results,
@@ -1101,31 +1135,51 @@ def _stop_active_heartbeat(
 
 
 def main() -> None:
-    global _ACTIVE_HEARTBEAT
+    global _ACTIVE_FAIL_SAFE, _ACTIVE_HEARTBEAT
+    _ACTIVE_FAIL_SAFE = None
     _ACTIVE_HEARTBEAT = None
     try:
         _run_main()
     except KeyboardInterrupt:
+        if _ACTIVE_FAIL_SAFE is not None:
+            _ACTIVE_FAIL_SAFE.stop_monitoring()
         _stop_active_heartbeat(
             "STOPPED",
             "INTERRUPTED",
             preserve_active_exception=True,
         )
         raise
-    except BaseException:
-        _stop_active_heartbeat(
-            "FAILED",
-            "FAILED",
-            preserve_active_exception=True,
+    except BaseException as error:
+        fail_safe = _ACTIVE_FAIL_SAFE
+        if fail_safe is None:
+            _stop_active_heartbeat(
+                "FAILED",
+                "FAILED",
+                preserve_active_exception=True,
+            )
+            raise
+        if isinstance(error, FailSafeExit):
+            fail_safe.stop_monitoring()
+            raise
+        fail_safe.transition(
+            "UNCAUGHT_EXCEPTION",
+            heartbeat_status="FAILED",
         )
-        raise
+        fail_safe.stop_monitoring()
+        raise FailSafeExit("UNCAUGHT_EXCEPTION") from error
     else:
+        if _ACTIVE_FAIL_SAFE is not None:
+            _ACTIVE_FAIL_SAFE.raise_if_triggered()
+            _ACTIVE_FAIL_SAFE.stop_monitoring()
         _stop_active_heartbeat(
             "COMPLETED",
             "COMPLETED",
             preserve_active_exception=False,
         )
     finally:
+        if _ACTIVE_FAIL_SAFE is not None:
+            _ACTIVE_FAIL_SAFE.stop_monitoring()
+        _ACTIVE_FAIL_SAFE = None
         _ACTIVE_HEARTBEAT = None
 
 
