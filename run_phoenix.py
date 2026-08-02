@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 from phoenix_core.virtual_rss_paper import prepare_quote_environment
+from position_reconciliation import run_position_reconciliation
 from repository_guardian import run_repository_guardian
 
 
@@ -787,7 +788,7 @@ def print_morning_run_summary(
     commit = git_commit()
 
     write_log("=" * 90)
-    write_log("PHOENIX OPERATIONAL READY")
+    write_log("PHOENIX OPERATIONAL SUMMARY")
     write_log("=" * 90)
     write_log("Mode         : PAPER")
     write_log(
@@ -849,6 +850,30 @@ def main() -> None:
                 flush=True,
             )
         raise SystemExit(2)
+    reconciliation_result = run_position_reconciliation(
+        guardian_status=guardian_result.status,
+        report_dir=LOG_DIR,
+    )
+    if reconciliation_result.blocked:
+        reasons = ", ".join(reconciliation_result.reasons) or "unknown"
+        print(
+            "PHOENIX START BLOCKED BY POSITION RECONCILIATION: " + reasons,
+            file=sys.stderr,
+            flush=True,
+        )
+        if reconciliation_result.report_error:
+            print(
+                "Position Reconciliation report error: "
+                + reconciliation_result.report_error,
+                file=sys.stderr,
+                flush=True,
+            )
+        raise SystemExit(2)
+    print(
+        "POSITION RECONCILIATION: " + reconciliation_result.status,
+        flush=True,
+    )
+    print("PHOENIX OPERATIONAL READY", flush=True)
     initialize_directories()
     reset_log_file()
 
