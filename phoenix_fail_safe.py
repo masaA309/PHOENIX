@@ -14,6 +14,10 @@ from uuid import uuid4
 from phoenix_heartbeat import (
     HEARTBEAT_TIMEOUT_SECONDS,
     HeartbeatValidation,
+    MONITOR_ONLY_SCOPE,
+    OPERATIONAL_SCOPE,
+    TRADING_ACTIONS_DISABLED,
+    TRADING_ACTIONS_PAPER_ONLY,
     inspect_heartbeat,
 )
 
@@ -53,6 +57,8 @@ class FailSafeResult:
     position_status: str
     heartbeat_status: str
     watchdog_status: str
+    operating_scope: str
+    trading_actions: str
     exit_code: int
 
     def as_dict(self) -> dict[str, object]:
@@ -106,6 +112,8 @@ def _text_report(result: FailSafeResult) -> str:
         f"Position status: {result.position_status}\n"
         f"Heartbeat status: {result.heartbeat_status}\n"
         f"WatchDog status: {result.watchdog_status}\n"
+        f"Operating scope: {result.operating_scope}\n"
+        f"Trading actions: {result.trading_actions}\n"
         f"Exit code: {result.exit_code}\n"
     )
 
@@ -125,6 +133,10 @@ def _normalized_heartbeat_reason(validation: HeartbeatValidation) -> str:
         return "GUARDIAN_BLOCKED"
     if validation.reason == "HEARTBEAT_POSITION_RECONCILIATION_STATUS_MISMATCH":
         return "POSITION_BLOCKED"
+    if validation.reason == "HEARTBEAT_OPERATING_SCOPE_MISMATCH":
+        return "OPERATING_SCOPE_MISMATCH"
+    if validation.reason == "HEARTBEAT_TRADING_ACTIONS_MISMATCH":
+        return "TRADING_ACTIONS_NOT_DISABLED"
     if validation.reason in {
         "HEARTBEAT_MISSING",
         "HEARTBEAT_STALE",
@@ -170,6 +182,7 @@ class FailSafeController:
         self.position_status = "NOT_CHECKED"
         self.heartbeat_status = "NOT_STARTED"
         self.watchdog_status = "MONITORING"
+        self.monitor_only = False
 
         self._heartbeat_path: Path | None = None
         self._expected_pid: int | None = None
@@ -234,6 +247,24 @@ class FailSafeController:
                 raise RuntimeError("Fail Safe has already been triggered")
             self._background_stoppers.append((name.strip(), stopper))
 
+    @property
+    def operating_scope(self) -> str:
+        return MONITOR_ONLY_SCOPE if self.monitor_only else OPERATIONAL_SCOPE
+
+    @property
+    def trading_actions(self) -> str:
+        return (
+            TRADING_ACTIONS_DISABLED
+            if self.monitor_only
+            else TRADING_ACTIONS_PAPER_ONLY
+        )
+
+    def enable_monitor_only(self) -> None:
+        with self._lock:
+            if self._result is not None or self._monitor_thread is not None:
+                raise RuntimeError("Fail Safe operating scope is already active")
+            self.monitor_only = True
+
     def _write_reports(self, result: FailSafeResult) -> None:
         json_path = self.log_dir / "fail_safe.json"
         text_path = self.log_dir / "fail_safe.txt"
@@ -289,6 +320,8 @@ class FailSafeController:
                 position_status=self.position_status,
                 heartbeat_status=self.heartbeat_status,
                 watchdog_status=self.watchdog_status,
+                operating_scope=self.operating_scope,
+                trading_actions=self.trading_actions,
                 exit_code=EXIT_FAIL_SAFE,
             )
             self._result = result
@@ -332,7 +365,8 @@ class FailSafeController:
             return "REPOSITORY_MISMATCH"
         if self.guardian_status != "READY":
             return "GUARDIAN_BLOCKED"
-        if self.position_status != "READY":
+        expected_position_status = "WARNING" if self.monitor_only else "READY"
+        if self.position_status != expected_position_status:
             return "POSITION_BLOCKED"
         if self.watchdog_status not in WATCHDOG_HEALTHY_STATUSES:
             return "WATCHDOG_ABNORMAL"
@@ -366,6 +400,7 @@ class FailSafeController:
             timeout_seconds=self.heartbeat_timeout_seconds,
             previous_sequence=self._previous_sequence,
             previous_timestamp=self._previous_timestamp,
+            expected_operating_scope=self.operating_scope,
         )
         if not validation.healthy:
             reason = _normalized_heartbeat_reason(validation)
@@ -423,4 +458,3 @@ class FailSafeController:
         result = self.result
         if result is not None:
             raise FailSafeExit(result.reason)
-

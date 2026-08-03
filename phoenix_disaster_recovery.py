@@ -18,6 +18,11 @@ DEFAULT_REPORT_DIR = ROOT_DIR / "logs"
 SCHEMA_VERSION = 1
 MODE = "PAPER"
 ORDERS_SUBMITTED = 0
+OPERATIONAL_SCOPE = "OPERATIONAL"
+MONITOR_ONLY_SCOPE = "MONITOR_ONLY"
+POSITIONS_PRESENT_REASON = "POSITIONS_PRESENT"
+TRADING_ACTIONS_PAPER_ONLY = "PAPER_ONLY"
+TRADING_ACTIONS_DISABLED = "DISABLED"
 STATUS_READY = "READY"
 STATUS_RECOVERY_REQUIRED = "RECOVERY_REQUIRED"
 STATUS_BLOCKED = "BLOCKED"
@@ -89,6 +94,9 @@ class DisasterRecoveryResult:
     previous_repository_root: object
     previous_guardian_status: object
     previous_position_status: object
+    previous_position_reasons: object
+    previous_operating_scope: object
+    previous_trading_actions: object
     previous_heartbeat_status: object
     previous_fail_safe_status: object
     previous_orders_submitted: object
@@ -292,6 +300,9 @@ def _text_report(result: DisasterRecoveryResult) -> str:
         f"Previous repository root: {result.previous_repository_root}\n"
         f"Previous Guardian status: {result.previous_guardian_status}\n"
         f"Previous Position status: {result.previous_position_status}\n"
+        f"Previous Position reasons: {result.previous_position_reasons}\n"
+        f"Previous operating scope: {result.previous_operating_scope}\n"
+        f"Previous trading actions: {result.previous_trading_actions}\n"
         f"Previous Heartbeat status: {result.previous_heartbeat_status}\n"
         f"Previous Fail Safe status: {result.previous_fail_safe_status}\n"
         f"Mode: {result.previous_mode}\n"
@@ -364,6 +375,9 @@ def _blank_result(
         previous_repository_root=None,
         previous_guardian_status=None,
         previous_position_status=None,
+        previous_position_reasons=None,
+        previous_operating_scope=None,
+        previous_trading_actions=None,
         previous_heartbeat_status=None,
         previous_fail_safe_status=None,
         previous_orders_submitted=None,
@@ -402,6 +416,13 @@ def _result_from_payload(
         previous_repository_root=payload.get("previous_repository_root"),
         previous_guardian_status=payload.get("previous_guardian_status"),
         previous_position_status=payload.get("previous_position_status"),
+        previous_position_reasons=payload.get("previous_position_reasons", []),
+        previous_operating_scope=payload.get(
+            "previous_operating_scope", OPERATIONAL_SCOPE
+        ),
+        previous_trading_actions=payload.get(
+            "previous_trading_actions", TRADING_ACTIONS_PAPER_ONLY
+        ),
         previous_heartbeat_status=payload.get("previous_heartbeat_status"),
         previous_fail_safe_status=payload.get("previous_fail_safe_status"),
         previous_orders_submitted=payload.get("previous_orders_submitted"),
@@ -441,6 +462,8 @@ def run_disaster_recovery(
     watchdog_restart_attempt: int = 0,
     max_recovery_attempts: int = DEFAULT_MAX_RECOVERY_ATTEMPTS,
     stale_lock_path: str | os.PathLike[str] | None = None,
+    monitor_only: bool = False,
+    position_reasons: tuple[str, ...] = (),
 ) -> DisasterRecoveryResult:
     checked = _checked_now(now)
     root = Path(repository_root).resolve(strict=False)
@@ -566,8 +589,45 @@ def run_disaster_recovery(
         block("REPOSITORY_ROOT_MISMATCH")
     if guardian_status != STATUS_READY or payload["previous_guardian_status"] != STATUS_READY:
         block("GUARDIAN_NOT_READY")
-    if position_status != STATUS_READY or payload["previous_position_status"] != STATUS_READY:
+    if not isinstance(monitor_only, bool):
+        block("MONITOR_ONLY_INVALID")
+    if not isinstance(position_reasons, tuple) or any(
+        not isinstance(reason, str) for reason in position_reasons
+    ):
+        block("POSITION_REASONS_INVALID")
+    elif monitor_only:
+        if (
+            position_status != "WARNING"
+            or position_reasons != (POSITIONS_PRESENT_REASON,)
+        ):
+            block("POSITION_NOT_MONITOR_ONLY")
+    elif position_status != STATUS_READY:
         block("POSITION_NOT_READY")
+    previous_position_status = payload["previous_position_status"]
+    previous_position_reasons = payload.get("previous_position_reasons", [])
+    previous_operating_scope = payload.get(
+        "previous_operating_scope", OPERATIONAL_SCOPE
+    )
+    previous_trading_actions = payload.get(
+        "previous_trading_actions", TRADING_ACTIONS_PAPER_ONLY
+    )
+    if previous_operating_scope not in {OPERATIONAL_SCOPE, MONITOR_ONLY_SCOPE}:
+        block("PREVIOUS_OPERATING_SCOPE_INVALID")
+    if previous_position_status == "WARNING":
+        if (
+            previous_operating_scope != MONITOR_ONLY_SCOPE
+            or previous_position_reasons != [POSITIONS_PRESENT_REASON]
+            or previous_trading_actions != TRADING_ACTIONS_DISABLED
+        ):
+            block("PREVIOUS_POSITION_NOT_MONITOR_ONLY")
+    elif previous_position_status != STATUS_READY:
+        block("POSITION_NOT_READY")
+    elif (
+        previous_operating_scope != OPERATIONAL_SCOPE
+        or previous_position_reasons != []
+        or previous_trading_actions != TRADING_ACTIONS_PAPER_ONLY
+    ):
+        block("PREVIOUS_POSITION_STATE_INCONSISTENT")
     heartbeat_status = payload["previous_heartbeat_status"]
     if (
         not isinstance(heartbeat_status, str)
@@ -698,6 +758,8 @@ class RecoverySession:
         git_commit: str,
         guardian_status: str,
         position_status: str,
+        position_reasons: tuple[str, ...] = (),
+        monitor_only: bool = False,
         recovery_attempt: int = 0,
         recovered_at: str | None = None,
         now_provider: Callable[[], datetime] = _now_jst,
@@ -709,6 +771,8 @@ class RecoverySession:
         self.git_commit = git_commit
         self.guardian_status = guardian_status
         self.position_status = position_status
+        self.position_reasons = position_reasons
+        self.monitor_only = monitor_only
         self.recovery_attempt = recovery_attempt
         self.recovered_at = recovered_at
         self._now_provider = now_provider
@@ -730,6 +794,23 @@ class RecoverySession:
     def start(self) -> None:
         if self._payload is not None:
             raise RuntimeError("Recovery session is already started")
+        if not isinstance(self.monitor_only, bool):
+            raise TypeError("monitor_only must be a boolean")
+        if not isinstance(self.position_reasons, tuple) or any(
+            not isinstance(reason, str) for reason in self.position_reasons
+        ):
+            raise TypeError("position_reasons must be a tuple of strings")
+        if self.monitor_only:
+            if (
+                self.position_status != "WARNING"
+                or self.position_reasons != (POSITIONS_PRESENT_REASON,)
+            ):
+                raise ValueError(
+                    "MONITOR_ONLY requires Position Reconciliation "
+                    "WARNING / POSITIONS_PRESENT"
+                )
+        elif self.position_status != STATUS_READY:
+            raise ValueError("Position Reconciliation must be READY")
         now = self._now()
         self.started_at = now
         payload = {
@@ -744,6 +825,15 @@ class RecoverySession:
             "previous_repository_root": str(self.repository_root),
             "previous_guardian_status": self.guardian_status,
             "previous_position_status": self.position_status,
+            "previous_position_reasons": list(self.position_reasons),
+            "previous_operating_scope": (
+                MONITOR_ONLY_SCOPE if self.monitor_only else OPERATIONAL_SCOPE
+            ),
+            "previous_trading_actions": (
+                TRADING_ACTIONS_DISABLED
+                if self.monitor_only
+                else TRADING_ACTIONS_PAPER_ONLY
+            ),
             "previous_heartbeat_status": "RUNNING",
             "previous_fail_safe_status": "NOT_TRIGGERED",
             "previous_orders_submitted": ORDERS_SUBMITTED,
@@ -832,8 +922,37 @@ def inspect_recovery_state_for_watchdog(
         )
     if payload.get("previous_guardian_status") != STATUS_READY:
         return WatchdogRecoveryGate(STATUS_BLOCKED, "GUARDIAN_NOT_READY", attempt)
-    if payload.get("previous_position_status") != STATUS_READY:
+    previous_position_status = payload.get("previous_position_status")
+    previous_operating_scope = payload.get(
+        "previous_operating_scope", OPERATIONAL_SCOPE
+    )
+    previous_position_reasons = payload.get("previous_position_reasons", [])
+    previous_trading_actions = payload.get(
+        "previous_trading_actions", TRADING_ACTIONS_PAPER_ONLY
+    )
+    if previous_operating_scope not in {OPERATIONAL_SCOPE, MONITOR_ONLY_SCOPE}:
+        return WatchdogRecoveryGate(
+            STATUS_BLOCKED, "OPERATING_SCOPE_INVALID", attempt
+        )
+    if previous_position_status == "WARNING":
+        if (
+            previous_operating_scope != MONITOR_ONLY_SCOPE
+            or previous_position_reasons != [POSITIONS_PRESENT_REASON]
+            or previous_trading_actions != TRADING_ACTIONS_DISABLED
+        ):
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "POSITION_NOT_MONITOR_ONLY", attempt
+            )
+    elif previous_position_status != STATUS_READY:
         return WatchdogRecoveryGate(STATUS_BLOCKED, "POSITION_NOT_READY", attempt)
+    elif (
+        previous_operating_scope != OPERATIONAL_SCOPE
+        or previous_position_reasons != []
+        or previous_trading_actions != TRADING_ACTIONS_PAPER_ONLY
+    ):
+        return WatchdogRecoveryGate(
+            STATUS_BLOCKED, "POSITION_STATE_INCONSISTENT", attempt
+        )
     if payload.get("previous_fail_safe_status") != "NOT_TRIGGERED":
         return WatchdogRecoveryGate(STATUS_BLOCKED, "FAIL_SAFE_TRIGGERED", attempt)
     recovery_status = payload.get("recovery_status")
@@ -850,4 +969,3 @@ def inspect_recovery_state_for_watchdog(
     if recovery_status != STATUS_READY or previous_status != "COMPLETED":
         return WatchdogRecoveryGate(STATUS_BLOCKED, "RECOVERY_STATE_UNDETERMINED", attempt)
     return WatchdogRecoveryGate(STATUS_READY, "RECOVERY_STATE_READY", attempt)
-

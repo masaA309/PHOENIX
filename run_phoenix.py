@@ -40,6 +40,7 @@ LOG_FILE = LOG_DIR / (
 )
 
 PROCESS_TIMEOUT_SECONDS = 1800
+MAX_POSITION_STATE_AGE_SECONDS = 24 * 60 * 60
 
 STOP_ON_REQUIRED_FAILURE = True
 
@@ -148,6 +149,21 @@ REFRESH_ONLY_SCRIPTS = {
     "trade_engine.py",
 }
 
+MONITOR_ONLY_ALLOWED_SCRIPTS = frozenset(
+    {
+        "market_risk_ai.py",
+        "price_monitor.py",
+        "get_nikkei225.py",
+        "daily_report.py",
+        "learning_engine.py",
+        "ai_judgement.py",
+        "trade_engine.py",
+        "ranking_ai.py",
+        "chart_generator.py",
+        "notify.py",
+    }
+)
+
 
 # =========================================================
 # コンソール設定
@@ -211,11 +227,17 @@ def write_log(
         )
 
 
-def build_environment() -> dict[str, str]:
+def build_environment(*, monitor_only: bool = False) -> dict[str, str]:
     environment = os.environ.copy()
 
     environment["PYTHONIOENCODING"] = "utf-8"
     environment["PYTHONUTF8"] = "1"
+    environment["PHOENIX_OPERATING_SCOPE"] = (
+        "MONITOR_ONLY" if monitor_only else "OPERATIONAL"
+    )
+    environment["PHOENIX_TRADING_ACTIONS"] = (
+        "DISABLED" if monitor_only else "PAPER_ONLY"
+    )
 
     return environment
 
@@ -275,6 +297,7 @@ def run_script(
     script_name: str,
     required: bool,
     args: list[str] | None = None,
+    monitor_only: bool = False,
 ) -> tuple[
     bool,
     float,
@@ -298,6 +321,16 @@ def run_script(
             else "任意"
         )
     )
+
+    if monitor_only and script_name not in MONITOR_ONLY_ALLOWED_SCRIPTS:
+        message = f"MONITOR_ONLYで許可されていない処理です: {script_name}"
+        write_log(f"BLOCKED: {message}")
+        return (
+            False,
+            0.0,
+            -20,
+            message,
+        )
 
     if not script_path.exists():
         message = (
@@ -347,7 +380,7 @@ def run_script(
             encoding="utf-8",
             errors="replace",
             timeout=PROCESS_TIMEOUT_SECONDS,
-            env=build_environment(),
+            env=build_environment(monitor_only=monitor_only),
             check=False,
         )
 
@@ -700,6 +733,8 @@ def print_morning_run_summary(
     task_results: list[dict[str, Any]],
     output_results: dict[str, bool],
     started_at: float,
+    *,
+    monitor_only: bool = False,
 ) -> None:
     def phase_status(
         scripts: set[str],
@@ -800,7 +835,11 @@ def print_morning_run_summary(
     commit = git_commit()
 
     write_log("=" * 90)
-    write_log("PHOENIX OPERATIONAL SUMMARY")
+    write_log(
+        "PHOENIX MONITOR ONLY SUMMARY"
+        if monitor_only
+        else "PHOENIX OPERATIONAL SUMMARY"
+    )
     write_log("=" * 90)
     write_log("Mode         : PAPER")
     write_log(
@@ -836,12 +875,79 @@ def print_morning_run_summary(
             "SUCCESS",
         )
     )
-    write_log("Scheduler    : READY")
+    write_log(
+        "Scheduler    : MONITORING"
+        if monitor_only
+        else "Scheduler    : READY"
+    )
     if commit is not None:
         write_log(f"Git Commit   : {commit}")
     write_log(f"Elapsed      : {elapsed_total:.1f} s")
     write_log(f"Exit Code    : {exit_code}")
     write_log("=" * 90)
+
+
+def _parse_reconciliation_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
+
+
+def _is_monitor_only_reconciliation(
+    reconciliation_result: object,
+    *,
+    guardian_status: object,
+) -> bool:
+    if guardian_status != "READY":
+        return False
+    if getattr(reconciliation_result, "status", None) != "WARNING":
+        return False
+    if getattr(reconciliation_result, "reasons", None) != (
+        "POSITIONS_PRESENT",
+    ):
+        return False
+    if getattr(reconciliation_result, "mode", None) != "PAPER":
+        return False
+    orders_submitted = getattr(
+        reconciliation_result,
+        "orders_submitted",
+        None,
+    )
+    if (
+        isinstance(orders_submitted, bool)
+        or not isinstance(orders_submitted, int)
+        or orders_submitted != 0
+    ):
+        return False
+    positions_count = getattr(reconciliation_result, "positions_count", None)
+    if (
+        isinstance(positions_count, bool)
+        or not isinstance(positions_count, int)
+        or positions_count <= 0
+    ):
+        return False
+    if getattr(reconciliation_result, "guardian_status", None) != "READY":
+        return False
+    if getattr(reconciliation_result, "report_error", None) is not None:
+        return False
+    if getattr(reconciliation_result, "exit_code", None) != 0:
+        return False
+    checked_at = _parse_reconciliation_timestamp(
+        getattr(reconciliation_result, "checked_at", None)
+    )
+    source_timestamp = _parse_reconciliation_timestamp(
+        getattr(reconciliation_result, "source_timestamp", None)
+    )
+    if checked_at is None or source_timestamp is None:
+        return False
+    age_seconds = (checked_at - source_timestamp).total_seconds()
+    return 0 <= age_seconds <= MAX_POSITION_STATE_AGE_SECONDS
 
 
 def _run_main() -> None:
@@ -882,7 +988,11 @@ def _run_main() -> None:
         report_dir=LOG_DIR,
     )
     fail_safe.update_statuses(position_status=reconciliation_result.status)
-    if reconciliation_result.status != "READY":
+    monitor_only = _is_monitor_only_reconciliation(
+        reconciliation_result,
+        guardian_status=guardian_status,
+    )
+    if reconciliation_result.status != "READY" and not monitor_only:
         reasons = ", ".join(reconciliation_result.reasons) or "unknown"
         print(
             "PHOENIX START BLOCKED BY POSITION RECONCILIATION: " + reasons,
@@ -900,6 +1010,8 @@ def _run_main() -> None:
             "POSITION_BLOCKED",
             position_status=reconciliation_result.status,
         )
+    if monitor_only:
+        fail_safe.enable_monitor_only()
     raw_restart_attempt = os.environ.get("PHOENIX_WATCHDOG_RESTART_ATTEMPT", "0")
     try:
         watchdog_restart_attempt = int(raw_restart_attempt)
@@ -914,6 +1026,8 @@ def _run_main() -> None:
         state_path=ROOT_DIR / "runtime" / "guardian" / "recovery_state.json",
         report_dir=LOG_DIR,
         watchdog_restart_attempt=watchdog_restart_attempt,
+        monitor_only=monitor_only,
+        position_reasons=tuple(reconciliation_result.reasons),
     )
     if recovery_result.blocked:
         reasons = ", ".join(recovery_result.recovery_reasons) or "unknown"
@@ -937,6 +1051,8 @@ def _run_main() -> None:
         git_commit=str(recovery_result.previous_git_commit),
         guardian_status=guardian_status,
         position_status=reconciliation_result.status,
+        position_reasons=tuple(reconciliation_result.reasons),
+        monitor_only=monitor_only,
         recovery_attempt=recovery_result.recovery_attempt,
         recovered_at=recovery_result.recovered_at,
     )
@@ -946,13 +1062,17 @@ def _run_main() -> None:
         repository_root=ROOT_DIR,
         guardian_status=guardian_status,
         position_reconciliation_status=reconciliation_result.status,
+        position_reconciliation_reasons=tuple(reconciliation_result.reasons),
+        monitor_only=monitor_only,
     )
     _ACTIVE_HEARTBEAT = heartbeat
     fail_safe.register_background_stopper(
         "heartbeat",
         lambda: heartbeat.stop(status="FAILED", current_stage="FAIL_SAFE"),
     )
-    heartbeat.start(current_stage="OPERATIONAL_READY")
+    heartbeat.start(
+        current_stage="MONITOR_ONLY" if monitor_only else "OPERATIONAL_READY"
+    )
     fail_safe.start_monitoring(
         heartbeat_path=heartbeat.heartbeat_path,
         expected_pid=heartbeat.pid,
@@ -962,7 +1082,13 @@ def _run_main() -> None:
         flush=True,
     )
     print("DISASTER RECOVERY: " + recovery_result.recovery_status, flush=True)
-    print("PHOENIX OPERATIONAL READY", flush=True)
+    if monitor_only:
+        print("PHOENIX MONITOR ONLY", flush=True)
+        print("Mode: PAPER", flush=True)
+        print("Orders submitted: 0", flush=True)
+        print("Trading actions: DISABLED", flush=True)
+    else:
+        print("PHOENIX OPERATIONAL READY", flush=True)
     heartbeat.set_stage("INITIALIZE_DIRECTORIES")
     fail_safe.raise_if_triggered()
     initialize_directories()
@@ -1017,6 +1143,7 @@ def _run_main() -> None:
         task
         for task in TASKS
         if not args.refresh_only or task["script"] in REFRESH_ONLY_SCRIPTS
+        if not monitor_only or task["script"] in MONITOR_ONLY_ALLOWED_SCRIPTS
     ]
     for task in selected_tasks:
         fail_safe.raise_if_triggered()
@@ -1083,6 +1210,7 @@ def _run_main() -> None:
                 script_name=task["script"],
                 required=task["required"],
                 args=task.get("args"),
+                monitor_only=monitor_only,
             )
         )
         fail_safe.raise_if_triggered()
@@ -1151,6 +1279,7 @@ def _run_main() -> None:
         task_results=task_results,
         output_results=output_results,
         started_at=started_at,
+        monitor_only=monitor_only,
     )
 
     if (

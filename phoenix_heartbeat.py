@@ -24,6 +24,11 @@ ATOMIC_REPLACE_ATTEMPTS = 5
 ATOMIC_REPLACE_RETRY_SECONDS = 0.01
 MODE = "PAPER"
 ORDERS_SUBMITTED = 0
+OPERATIONAL_SCOPE = "OPERATIONAL"
+MONITOR_ONLY_SCOPE = "MONITOR_ONLY"
+TRADING_ACTIONS_PAPER_ONLY = "PAPER_ONLY"
+TRADING_ACTIONS_DISABLED = "DISABLED"
+POSITIONS_PRESENT_REASON = "POSITIONS_PRESENT"
 JST = timezone(timedelta(hours=9), name="JST")
 
 RUNNING_STATUS = "RUNNING"
@@ -183,6 +188,8 @@ class HeartbeatEventLogger:
         restart_attempt: int | None,
         mode: object = MODE,
         orders_submitted: object = ORDERS_SUBMITTED,
+        operating_scope: object = OPERATIONAL_SCOPE,
+        trading_actions: object = TRADING_ACTIONS_PAPER_ONLY,
         checked_at: datetime | None = None,
     ) -> bool:
         checked = _normalize_now(checked_at)
@@ -196,6 +203,8 @@ class HeartbeatEventLogger:
             "heartbeat_age_seconds": heartbeat_age_seconds,
             "mode": mode,
             "orders_submitted": orders_submitted,
+            "operating_scope": operating_scope,
+            "trading_actions": trading_actions,
             "repository_root": repository_root,
             "action": action,
             "restart_attempt": restart_attempt,
@@ -212,6 +221,8 @@ class HeartbeatEventLogger:
             f"age={heartbeat_age_seconds} action={action} "
             f"restart_attempt={restart_attempt} | Mode: {mode} "
             f"| Orders submitted: {orders_submitted} "
+            f"| Operating scope: {operating_scope} "
+            f"| Trading actions: {trading_actions} "
             f"| Repository: {repository_root}"
         )
         try:
@@ -250,13 +261,31 @@ class PhoenixHeartbeat:
         pid: int | None = None,
         process_name: str | None = None,
         git_commit: str | None = None,
+        monitor_only: bool = False,
+        position_reconciliation_reasons: tuple[str, ...] = (),
         now_provider: Callable[[], datetime] = _now_jst,
     ) -> None:
         if interval_seconds <= 0:
             raise ValueError("interval_seconds must be positive")
+        if not isinstance(monitor_only, bool):
+            raise TypeError("monitor_only must be a boolean")
+        if not isinstance(position_reconciliation_reasons, tuple) or any(
+            not isinstance(reason, str) for reason in position_reconciliation_reasons
+        ):
+            raise TypeError("position_reconciliation_reasons must be a tuple of strings")
         self.repository_root = Path(repository_root).resolve(strict=False)
         self.guardian_status = guardian_status
         self.position_reconciliation_status = position_reconciliation_status
+        self.position_reconciliation_reasons = position_reconciliation_reasons
+        self.monitor_only = monitor_only
+        self.operating_scope = (
+            MONITOR_ONLY_SCOPE if monitor_only else OPERATIONAL_SCOPE
+        )
+        self.trading_actions = (
+            TRADING_ACTIONS_DISABLED
+            if monitor_only
+            else TRADING_ACTIONS_PAPER_ONLY
+        )
         self.heartbeat_path = Path(
             heartbeat_path
             or (self.repository_root / "runtime" / "guardian" / "heartbeat.json")
@@ -322,6 +351,11 @@ class PhoenixHeartbeat:
                 "position_reconciliation_status": (
                     self.position_reconciliation_status
                 ),
+                "position_reconciliation_reasons": list(
+                    self.position_reconciliation_reasons
+                ),
+                "operating_scope": self.operating_scope,
+                "trading_actions": self.trading_actions,
                 "current_stage": self._current_stage,
                 "sequence": self._sequence,
                 "orders_submitted": ORDERS_SUBMITTED,
@@ -351,12 +385,24 @@ class PhoenixHeartbeat:
             repository_root=str(self.repository_root),
             action="NONE",
             restart_attempt=0,
+            operating_scope=self.operating_scope,
+            trading_actions=self.trading_actions,
         )
 
     def start(self, current_stage: str = "OPERATIONAL_READY") -> None:
         if self.guardian_status != "READY":
             raise HeartbeatError("Repository Guardian must be READY")
-        if self.position_reconciliation_status != "READY":
+        if self.monitor_only:
+            if (
+                self.position_reconciliation_status != "WARNING"
+                or self.position_reconciliation_reasons
+                != (POSITIONS_PRESENT_REASON,)
+            ):
+                raise HeartbeatError(
+                    "MONITOR_ONLY requires Position Reconciliation "
+                    "WARNING / POSITIONS_PRESENT"
+                )
+        elif self.position_reconciliation_status != "READY":
             raise HeartbeatError("Position Reconciliation must be READY")
         if not isinstance(self.pid, int) or isinstance(self.pid, bool) or self.pid <= 0:
             raise HeartbeatError("pid must be a positive integer")
@@ -405,6 +451,8 @@ class PhoenixHeartbeat:
                     repository_root=str(self.repository_root),
                     action="WAIT_FOR_WATCHDOG",
                     restart_attempt=0,
+                    operating_scope=self.operating_scope,
+                    trading_actions=self.trading_actions,
                 )
                 return
 
@@ -490,6 +538,7 @@ def inspect_heartbeat(
     timeout_seconds: float = HEARTBEAT_TIMEOUT_SECONDS,
     previous_sequence: int | None = None,
     previous_timestamp: datetime | None = None,
+    expected_operating_scope: str | None = None,
 ) -> HeartbeatValidation:
     checked = _normalize_now(now)
     path = Path(heartbeat_path)
@@ -534,12 +583,49 @@ def inspect_heartbeat(
         return _validation(
             "SAFETY_STOP", "HEARTBEAT_GUARDIAN_STATUS_MISMATCH", payload
         )
-    if payload["position_reconciliation_status"] != "READY":
+    operating_scope = payload.get("operating_scope", OPERATIONAL_SCOPE)
+    if operating_scope not in {OPERATIONAL_SCOPE, MONITOR_ONLY_SCOPE}:
         return _validation(
-            "SAFETY_STOP",
-            "HEARTBEAT_POSITION_RECONCILIATION_STATUS_MISMATCH",
-            payload,
+            "SAFETY_STOP", "HEARTBEAT_OPERATING_SCOPE_MISMATCH", payload
         )
+    if (
+        expected_operating_scope is not None
+        and operating_scope != expected_operating_scope
+    ):
+        return _validation(
+            "SAFETY_STOP", "HEARTBEAT_OPERATING_SCOPE_MISMATCH", payload
+        )
+    position_status = payload["position_reconciliation_status"]
+    position_reasons = payload.get("position_reconciliation_reasons", [])
+    trading_actions = payload.get(
+        "trading_actions",
+        TRADING_ACTIONS_PAPER_ONLY,
+    )
+    if operating_scope == MONITOR_ONLY_SCOPE:
+        if trading_actions != TRADING_ACTIONS_DISABLED:
+            return _validation(
+                "SAFETY_STOP", "HEARTBEAT_TRADING_ACTIONS_MISMATCH", payload
+            )
+        if (
+            position_status != "WARNING"
+            or position_reasons != [POSITIONS_PRESENT_REASON]
+        ):
+            return _validation(
+                "SAFETY_STOP",
+                "HEARTBEAT_POSITION_RECONCILIATION_STATUS_MISMATCH",
+                payload,
+            )
+    else:
+        if trading_actions != TRADING_ACTIONS_PAPER_ONLY:
+            return _validation(
+                "SAFETY_STOP", "HEARTBEAT_TRADING_ACTIONS_MISMATCH", payload
+            )
+        if position_status != "READY" or position_reasons != []:
+            return _validation(
+                "SAFETY_STOP",
+                "HEARTBEAT_POSITION_RECONCILIATION_STATUS_MISMATCH",
+                payload,
+            )
 
     if (
         isinstance(payload["schema_version"], bool)
