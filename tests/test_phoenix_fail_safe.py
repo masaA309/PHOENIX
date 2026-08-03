@@ -252,6 +252,7 @@ class RunPhoenixFailSafeIntegrationTest(unittest.TestCase):
         self.events: list[str] = []
 
     def tearDown(self) -> None:
+        self.run_phoenix._ACTIVE_RECOVERY_SESSION = None
         self.run_phoenix._ACTIVE_FAIL_SAFE = None
         self.run_phoenix._ACTIVE_HEARTBEAT = None
         self.temporary_directory.cleanup()
@@ -308,6 +309,16 @@ class RunPhoenixFailSafeIntegrationTest(unittest.TestCase):
 
         guardian = mock.Mock(ready=True, status="READY", reasons=(), report_error=None)
         position = mock.Mock(status="READY", reasons=(), report_error=None)
+        recovery = mock.Mock(
+            blocked=False,
+            recovery_required=False,
+            recovery_status="READY",
+            recovery_reasons=(),
+            state_path=root / "runtime" / "guardian" / "recovery_state.json",
+            previous_git_commit="a" * 40,
+            recovery_attempt=0,
+            recovered_at=None,
+        )
 
         def initialize() -> None:
             events.append("existing_processing")
@@ -327,6 +338,12 @@ class RunPhoenixFailSafeIntegrationTest(unittest.TestCase):
                 "run_position_reconciliation",
                 side_effect=lambda **kwargs: events.append("position") or position,
             ),
+            mock.patch.object(
+                self.run_phoenix,
+                "run_disaster_recovery",
+                side_effect=lambda **kwargs: events.append("disaster_recovery") or recovery,
+            ),
+            mock.patch.object(self.run_phoenix, "RecoverySession"),
             mock.patch.object(self.run_phoenix, "PhoenixHeartbeat", side_effect=heartbeat_factory),
             mock.patch.object(self.run_phoenix, "FailSafeController", RecordingController),
             mock.patch.object(self.run_phoenix, "initialize_directories", side_effect=initialize),
@@ -341,6 +358,7 @@ class RunPhoenixFailSafeIntegrationTest(unittest.TestCase):
             [
                 "guardian",
                 "position",
+                "disaster_recovery",
                 "heartbeat",
                 "fail_safe_monitor",
                 "existing_processing",

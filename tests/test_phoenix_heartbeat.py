@@ -357,6 +357,8 @@ class RunPhoenixHeartbeatIntegrationTest(unittest.TestCase):
         cls.run_phoenix = importlib.import_module("run_phoenix")
 
     def tearDown(self) -> None:
+        self.run_phoenix._ACTIVE_RECOVERY_SESSION = None
+        self.run_phoenix._ACTIVE_FAIL_SAFE = None
         self.run_phoenix._ACTIVE_HEARTBEAT = None
 
     def test_guardian_blocked_does_not_start_heartbeat(self) -> None:
@@ -426,14 +428,51 @@ class RunPhoenixHeartbeatIntegrationTest(unittest.TestCase):
             reasons=(),
             report_error=None,
         )
+        recovery = SimpleNamespace(
+            blocked=False,
+            recovery_required=False,
+            recovery_status="READY",
+            recovery_reasons=(),
+            state_path="recovery.json",
+            previous_git_commit="a" * 40,
+            recovery_attempt=0,
+            recovered_at=None,
+        )
         heartbeat = mock.Mock()
+        heartbeat.heartbeat_path = "heartbeat.json"
+        heartbeat.pid = 1234
         heartbeat.start.side_effect = lambda **kwargs: events.append("heartbeat")
+
+        class RecordingFailSafe:
+            def __init__(self, **kwargs: object) -> None:
+                self.stoppers = []
+
+            def update_statuses(self, **kwargs: object) -> None:
+                pass
+
+            def register_background_stopper(self, name: str, stopper) -> None:
+                self.stoppers.append(stopper)
+
+            def start_monitoring(self, **kwargs: object) -> None:
+                events.append("fail_safe")
+
+            def raise_if_triggered(self) -> None:
+                pass
+
+            def transition(self, reason: str, **kwargs: object) -> None:
+                for stopper in self.stoppers:
+                    stopper()
+
+            def stop_monitoring(self) -> None:
+                pass
 
         def stop_after_gate() -> None:
             events.append("existing_processing")
             raise RuntimeError("stop after heartbeat")
 
         with (
+            mock.patch.object(self.run_phoenix, "FailSafeController", RecordingFailSafe),
+            mock.patch.object(self.run_phoenix, "RecoverySession"),
             mock.patch.object(self.run_phoenix, "configure_console"),
             mock.patch.object(
                 self.run_phoenix,
@@ -447,6 +486,11 @@ class RunPhoenixHeartbeatIntegrationTest(unittest.TestCase):
             ),
             mock.patch.object(
                 self.run_phoenix,
+                "run_disaster_recovery",
+                side_effect=lambda **kwargs: events.append("disaster_recovery") or recovery,
+            ),
+            mock.patch.object(
+                self.run_phoenix,
                 "PhoenixHeartbeat",
                 return_value=heartbeat,
             ),
@@ -456,17 +500,28 @@ class RunPhoenixHeartbeatIntegrationTest(unittest.TestCase):
                 side_effect=stop_after_gate,
             ),
             mock.patch("builtins.print"),
+            mock.patch.dict(os.environ, {"PHOENIX_WATCHDOG_RESTART_ATTEMPT": "0"}),
         ):
-            with self.assertRaisesRegex(RuntimeError, "stop after heartbeat"):
+            with self.assertRaises(self.run_phoenix.FailSafeExit) as stopped:
                 self.run_phoenix.main()
 
+        self.assertEqual(2, stopped.exception.code)
+        self.assertIsInstance(stopped.exception.__cause__, RuntimeError)
+        self.assertEqual("stop after heartbeat", str(stopped.exception.__cause__))
         self.assertEqual(
-            ["guardian", "reconciliation", "heartbeat", "existing_processing"],
+            [
+                "guardian",
+                "reconciliation",
+                "disaster_recovery",
+                "heartbeat",
+                "fail_safe",
+                "existing_processing",
+            ],
             events,
         )
         heartbeat.stop.assert_called_once_with(
             status="FAILED",
-            current_stage="FAILED",
+            current_stage="FAIL_SAFE",
         )
 
     def test_main_records_completed_failed_and_interrupted_lifecycle(self) -> None:

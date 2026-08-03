@@ -233,6 +233,11 @@ class RunPhoenixPositionReconciliationIntegrationTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.run_phoenix = importlib.import_module("run_phoenix")
 
+    def tearDown(self) -> None:
+        self.run_phoenix._ACTIVE_RECOVERY_SESSION = None
+        self.run_phoenix._ACTIVE_FAIL_SAFE = None
+        self.run_phoenix._ACTIVE_HEARTBEAT = None
+
     def test_guardian_blocked_does_not_run_reconciliation(self) -> None:
         blocked = SimpleNamespace(
             ready=False,
@@ -313,6 +318,55 @@ class RunPhoenixPositionReconciliationIntegrationTest(unittest.TestCase):
             reasons=(),
             report_error=None,
         )
+        recovery = SimpleNamespace(
+            blocked=False,
+            recovery_required=False,
+            recovery_status="READY",
+            recovery_reasons=(),
+            state_path="recovery.json",
+            previous_git_commit="a" * 40,
+            recovery_attempt=0,
+            recovered_at=None,
+        )
+
+        class FakeFailSafe:
+            def __init__(self, **kwargs: object) -> None:
+                pass
+
+            def update_statuses(self, **kwargs: object) -> None:
+                pass
+
+            def register_background_stopper(self, *args: object) -> None:
+                pass
+
+            def start_monitoring(self, **kwargs: object) -> None:
+                events.append("fail_safe")
+
+            def raise_if_triggered(self) -> None:
+                pass
+
+        class FakeRecoverySession:
+            def __init__(self, **kwargs: object) -> None:
+                pass
+
+            def start(self) -> None:
+                pass
+
+        class FakeHeartbeat:
+            heartbeat_path = "heartbeat.json"
+            pid = 1234
+
+            def __init__(self, **kwargs: object) -> None:
+                pass
+
+            def start(self, **kwargs: object) -> None:
+                events.append("heartbeat")
+
+            def set_stage(self, value: str) -> None:
+                pass
+
+            def stop(self, **kwargs: object) -> None:
+                pass
 
         def guard(**kwargs):
             events.append("guardian")
@@ -331,20 +385,32 @@ class RunPhoenixPositionReconciliationIntegrationTest(unittest.TestCase):
                 events.append("operational_ready")
 
         with (
+            mock.patch.object(self.run_phoenix, "FailSafeController", FakeFailSafe),
+            mock.patch.object(self.run_phoenix, "RecoverySession", FakeRecoverySession),
+            mock.patch.object(self.run_phoenix, "PhoenixHeartbeat", FakeHeartbeat),
             mock.patch.object(self.run_phoenix, "configure_console"),
             mock.patch.object(self.run_phoenix, "run_repository_guardian", side_effect=guard),
             mock.patch.object(self.run_phoenix, "run_position_reconciliation", side_effect=reconcile),
+            mock.patch.object(
+                self.run_phoenix,
+                "run_disaster_recovery",
+                side_effect=lambda **kwargs: events.append("disaster_recovery") or recovery,
+            ),
             mock.patch.object(self.run_phoenix, "initialize_directories", side_effect=stop_after_gates),
             mock.patch("builtins.print", side_effect=capture_print),
+            mock.patch.dict(os.environ, {"PHOENIX_WATCHDOG_RESTART_ATTEMPT": "0"}),
             mock.patch.object(sys, "argv", ["run_phoenix.py"]),
         ):
             with self.assertRaisesRegex(RuntimeError, "stop after startup gates"):
-                self.run_phoenix.main()
+                self.run_phoenix._run_main()
 
         self.assertEqual(
             [
                 "guardian",
                 "reconciliation",
+                "disaster_recovery",
+                "heartbeat",
+                "fail_safe",
                 "operational_ready",
                 "initialization",
             ],
@@ -352,13 +418,29 @@ class RunPhoenixPositionReconciliationIntegrationTest(unittest.TestCase):
         )
 
     def test_unexpected_reconciliation_exception_propagates(self) -> None:
+        transitions: list[str] = []
         guardian = SimpleNamespace(
             ready=True,
             status="READY",
             reasons=(),
             report_error=None,
         )
+
+        class RecordingFailSafe:
+            def __init__(self, **kwargs: object) -> None:
+                pass
+
+            def update_statuses(self, **kwargs: object) -> None:
+                pass
+
+            def transition(self, reason: str, **kwargs: object) -> None:
+                transitions.append(reason)
+
+            def stop_monitoring(self) -> None:
+                pass
+
         with (
+            mock.patch.object(self.run_phoenix, "FailSafeController", RecordingFailSafe),
             mock.patch.object(self.run_phoenix, "configure_console"),
             mock.patch.object(
                 self.run_phoenix,
@@ -373,9 +455,13 @@ class RunPhoenixPositionReconciliationIntegrationTest(unittest.TestCase):
             mock.patch.object(self.run_phoenix, "initialize_directories") as initialize,
             mock.patch.object(sys, "argv", ["run_phoenix.py"]),
         ):
-            with self.assertRaisesRegex(RuntimeError, "unexpected"):
+            with self.assertRaises(self.run_phoenix.FailSafeExit) as stopped:
                 self.run_phoenix.main()
 
+        self.assertEqual(2, stopped.exception.code)
+        self.assertEqual(["UNCAUGHT_EXCEPTION"], transitions)
+        self.assertIsInstance(stopped.exception.__cause__, RuntimeError)
+        self.assertEqual("unexpected", str(stopped.exception.__cause__))
         initialize.assert_not_called()
 
 
