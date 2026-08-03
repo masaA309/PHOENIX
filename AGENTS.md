@@ -1,76 +1,120 @@
-# PHOENIX Repository Instructions
+# PHOENIX 運用標準
 
-## Start here
+このファイルをPHOENIX運用ルールの唯一の標準書（Single Source of Truth）とする。`knowledge` は事実・判断履歴・失敗記録・テンプレートを保持する補助記憶であり、このファイルと競合する別標準を作らない。
 
-1. Read `knowledge/00_INDEX.md` first.
-2. Follow only the links needed for the current task; do not load every report or log.
-3. Confirm the current Git status before editing.
+## 1. 最優先目標
 
-## Safety
+- PHOENIXを最短・最小コストで完成させる。
+- クレジット、時間、ユーザー操作を無駄にしない。
+- 安全性、再現性、費用控除後の証拠を損なってまで完了を急がない。
 
-- PAPER and read-only RSS work are allowed. Real orders and automatic live enablement are prohibited.
-- Never weaken risk limits, freshness checks, readiness gates, or cost assumptions to create favorable results.
-- Dry Run must not change broker, order, fill, risk, readiness, or evidence state.
-- Never record credentials, account identifiers, cookies, webhooks, or other secrets in repository files.
-- Runtime state, logs, generated reports, workbooks, and imported broker data must not be added to Git.
+## 2. 基本原則
 
-## Memory workflow
-
-- Stable goals and constraints belong in `knowledge/NARRATIVE.md`.
-- Approved or superseded architectural decisions belong in `knowledge/DECISIONS.md`; never silently rewrite their history.
-- Reusable failure analysis belongs in `knowledge/LESSONS.md`.
-- Current priorities and blockers belong in `knowledge/BACKLOG.md`.
-- Link to code, commits, and evidence instead of copying large logs into knowledge files.
-- The AI may prepare evidence and proposals. Capital deployment and live-trading approval remain human decisions.
-
-## Efficiency
-
-- Run focused tests while editing and one full suite only at a meaningful release boundary.
-- Do not repeat successful network downloads or full test runs without a new reason.
-- Prefer the existing local cache and repository tools before adding a paid service or dependency.
-
-<!-- PHOENIX_MEMORY_RULES_START -->
-# PHOENIX Codex Rules
-
-## 作業開始前
-1. `knowledge/CURRENT_STATE.md` を読む。
-2. `knowledge/NEXT_STEP.md` を読む。
-3. 設計判断が関係する場合は `knowledge/DECISIONS.md` を読む。
-4. `knowledge/FAILURES.md` で同種の失敗を確認する。
-5. 現在のユーザー依頼を、過去の記憶・保存済み指示・既定手順より常に優先する。
-6. 実行前に「この操作で何が新しく分かるか」を確認し、新情報がない操作は行わない。
-7. 使用可能なツール、権限、正本ワークスペースを実際に確認し、未確認の状態で断定しない。
-
-## 作業領域
-- 正本は `CURRENT_STATE.md` に記載されたGitリポジトリだけ。
-- ブラウザWork、自動handoff、別作業セッションへPHOENIXタスクを送らない。
-- `Documents\Codex`、別worktree、別コピーを正本にしない。
-- 正本パスやアーキテクチャを無断変更しない。
+- 現在のユーザー指示を、過去の記憶・保存済み指示・既定手順より最優先する。
+- 推測しない。ツール、権限、正本、実行結果を実際に確認する。
+- 未確認事項を断定しない。不明点は不明、未実施は未実施と明記する。
 - 現在の事実と将来案を混同しない。
+- リスク制限、鮮度確認、Readiness Gate、費用前提を、都合のよい結果を作るために弱めない。
 
-## 実装
-- 1タスクにつき目的は1つに限定する。
-- 合意済み仕様を無断変更しない。
-- アーキテクチャ変更が必要なら実装せず報告する。
-- 無関係な調査、全体テスト、リファクタリングをしない。
-- 同じ失敗条件のまま再試行しない。条件が変わるまで停止する。
-- 指定された保護対象へ触れない。
-- 保存済みの共通前提を長い外部プロンプトへ重複記載せず、`knowledge/PROMPT_LIBRARY.md` の承認済み短縮テンプレートを使う。
+## 3. 作業開始
 
-## Python
-- 通常実行・通知・運用検証は正本の `.venv\Scripts\python.exe` を最優先する。
-- `Documents\Codex` 内のテストvenvを通常運用へ使わない。
-- 代替Pythonを使う場合は理由、絶対パス、依存関係差を報告する。
-- PATH変更やパッケージ導入を無断で行わない。
+1. 最初にこの `AGENTS.md` を読む。
+2. `knowledge/00_INDEX.md` の導線を使い、今回必要な `knowledge` だけを読む。
+3. 前回の目的と今回の目的を確認し、今回の目的を1文で固定する。
+4. 目的が変わる場合は、既存タスクへ混在させず新しいCodexチャットを開始する。
+5. 正本、使用可能なツール、権限、変更対象、保護対象を確認してから作業する。
 
-## 通知
-- 通知前に当日レポートとデータ基準日時を確認する。
-- 古い結果を現在結果として送信しない。
-- Guardian、Position Reconciliation、Fail Safeを迂回しない。
-- `PAPER` と `Orders submitted: 0` を維持する。
+## 4. タスク管理
 
-## 作業終了後
-変更ファイル、テスト結果、保護対象、Git操作、外部接続を報告する。
-完了報告、許可された保存コマンド、次の指示書は同じ返答にまとめる。
-新しい記憶は、ユーザー承認前に `approved` または確定ルールへ昇格させない。
-<!-- PHOENIX_MEMORY_RULES_END -->
+- 1タスク1目的とする。
+- 目的に無関係な調査をしない。
+- 全体テストをしない。検証は変更箇所に直接関係する最小範囲に限定する。
+- 無関係なリファクタリングをしない。
+- 指定された変更対象だけを扱い、保護対象へ触れない。
+- 保存済みの共通前提を長文で繰り返さず、`knowledge/PROMPT_LIBRARY.md` の該当テンプレートを使う。
+
+## 5. 実行判断
+
+- 初回実行前に「この操作で新しい情報が得られるか」を確認し、YESの場合だけ実行する。
+- 再実行前には上記に加えて「前回から失敗条件が変わったか」を確認し、両方がYESの場合だけ実行する。
+- 同じ失敗条件では再実行しない。
+- 同じ目的の実行が2回失敗したら停止し、失敗条件、得られた事実、再開に必要な条件を報告する。
+- 成功済みの取得、検証、通知を、新しい理由なしに繰り返さない。
+
+## 6. 実行環境
+
+- `knowledge/CURRENT_STATE.md` に記載された正本だけを使用する。
+- ブラウザWorkを使用しない。
+- 自動handoffを使用しない。
+- 別worktree、`Documents\Codex`、別コピーを正本または実装先にしない。
+- 通常のPython実行・通知・運用検証は、正本の `.venv\Scripts\python.exe` を最優先する。
+- 代替Pythonが必要な場合は、実行前に理由、絶対パス、依存関係差を報告し、承認を得る。
+- PATH変更、パッケージ導入、外部接続、Git操作は、現在のユーザー指示で許可された範囲だけ行う。
+
+## 7. 実装
+
+- 合意済み仕様を変更しない。
+- 設計・アーキテクチャ・正本方針の変更は、理由、利点、欠点、影響を提示し、ユーザー承認後に行う。
+- PAPERを維持し、実注文やライブ運用を自動で有効化しない。資本投入とライブ移行は人間の判断とする。
+- Dry Runでbroker、order、fill、risk、readiness、evidenceの状態を変更しない。
+- 通知前に当日レポートとデータ基準日時を確認し、古い結果を現在結果として送らない。
+- Guardian、Position Reconciliation、Fail Safeを迂回せず、`PAPER` と `Orders submitted: 0` を維持する。
+- 認証情報、口座識別子、Cookie、Webhookその他の秘密情報をリポジトリへ記録しない。
+- runtime、ログ、生成レポート、workbook、broker取込データをGit対象にしない。
+
+## 8. 回答形式
+
+毎回、次の3項目を同じ返答へ含める。
+
+1. ①完了確認
+   - 変更ファイル、検証結果、保護対象、Git操作、外部接続を簡潔に示す。
+2. ②保存コマンド
+   - ユーザーが許可した範囲のコマンドだけを示す。Git操作禁止時は「保存コマンドなし」と明記する。
+3. ③次のCodex指示書
+   - 次の1目的だけを扱う短い指示書を示す。自動handoffはしない。
+
+## 9. 標準化（PDCA/SDCA）
+
+ミスが起きた場合は、次の順序をすべて完了して改善終了とする。
+
+原因分析
+
+↓
+
+最小修正
+
+↓
+
+検証
+
+↓
+
+標準化
+
+↓
+
+AGENTS統合
+
+↓
+
+PROMPT_LIBRARY更新
+
+↓
+
+FAILURES更新
+
+↓
+
+次回確認
+
+ルールの追記で済ませず、必ず既存ルール、既存テンプレート、既存Failureへ統合する。
+
+## 10. AGENTS管理
+
+- 1テーマ1ルールとする。
+- 重複を作らない。
+- 矛盾を残さない。
+- この `AGENTS.md` をPHOENIX運用ルールのSingle Source of Truthとする。
+- ルール追加ではなく、該当する既存章を統合更新する。
+- `knowledge` へ同じルールを複製せず、事実、判断履歴、Failure、テンプレートだけを役割別に保存する。
+- 新しい記憶はユーザー承認前に `approved` または確定ルールへ昇格させない。
