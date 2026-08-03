@@ -11,6 +11,12 @@ import sys
 import time
 from typing import Any
 
+from phoenix_disaster_recovery import (
+    MAX_RECOVERY_ATTEMPTS_HARD_LIMIT,
+    RecoveryRequiredExit,
+    RecoverySession,
+    run_disaster_recovery,
+)
 from phoenix_fail_safe import FailSafeController, FailSafeExit
 from phoenix_heartbeat import PhoenixHeartbeat
 from phoenix_core.virtual_rss_paper import prepare_quote_environment
@@ -39,6 +45,7 @@ STOP_ON_REQUIRED_FAILURE = True
 
 _ACTIVE_HEARTBEAT: PhoenixHeartbeat | None = None
 _ACTIVE_FAIL_SAFE: FailSafeController | None = None
+_ACTIVE_RECOVERY_SESSION: RecoverySession | None = None
 
 
 # =========================================================
@@ -838,7 +845,7 @@ def print_morning_run_summary(
 
 
 def _run_main() -> None:
-    global _ACTIVE_FAIL_SAFE, _ACTIVE_HEARTBEAT
+    global _ACTIVE_FAIL_SAFE, _ACTIVE_HEARTBEAT, _ACTIVE_RECOVERY_SESSION
     fail_safe = FailSafeController(
         repository_root=ROOT_DIR,
         log_dir=LOG_DIR,
@@ -893,6 +900,48 @@ def _run_main() -> None:
             "POSITION_BLOCKED",
             position_status=reconciliation_result.status,
         )
+    raw_restart_attempt = os.environ.get("PHOENIX_WATCHDOG_RESTART_ATTEMPT", "0")
+    try:
+        watchdog_restart_attempt = int(raw_restart_attempt)
+    except ValueError as error:
+        raise RuntimeError("WatchDog restart attempt is invalid") from error
+    if not 0 <= watchdog_restart_attempt <= MAX_RECOVERY_ATTEMPTS_HARD_LIMIT:
+        raise RuntimeError("WatchDog restart attempt is outside the safety limit")
+    recovery_result = run_disaster_recovery(
+        guardian_status=guardian_status,
+        position_status=reconciliation_result.status,
+        repository_root=ROOT_DIR,
+        state_path=ROOT_DIR / "runtime" / "guardian" / "recovery_state.json",
+        report_dir=LOG_DIR,
+        watchdog_restart_attempt=watchdog_restart_attempt,
+    )
+    if recovery_result.blocked:
+        reasons = ", ".join(recovery_result.recovery_reasons) or "unknown"
+        print(
+            "PHOENIX START BLOCKED BY DISASTER RECOVERY: " + reasons,
+            file=sys.stderr,
+            flush=True,
+        )
+        fail_safe.fail_and_exit("DISASTER_RECOVERY_BLOCKED")
+    if recovery_result.recovery_required:
+        reasons = ", ".join(recovery_result.recovery_reasons) or "unknown"
+        print(
+            "PHOENIX RECOVERY CONFIRMATION REQUIRED: " + reasons,
+            file=sys.stderr,
+            flush=True,
+        )
+        raise RecoveryRequiredExit(tuple(recovery_result.recovery_reasons))
+    recovery_session = RecoverySession(
+        state_path=recovery_result.state_path,
+        repository_root=ROOT_DIR,
+        git_commit=str(recovery_result.previous_git_commit),
+        guardian_status=guardian_status,
+        position_status=reconciliation_result.status,
+        recovery_attempt=recovery_result.recovery_attempt,
+        recovered_at=recovery_result.recovered_at,
+    )
+    recovery_session.start()
+    _ACTIVE_RECOVERY_SESSION = recovery_session
     heartbeat = PhoenixHeartbeat(
         repository_root=ROOT_DIR,
         guardian_status=guardian_status,
@@ -912,6 +961,7 @@ def _run_main() -> None:
         "POSITION RECONCILIATION: " + reconciliation_result.status,
         flush=True,
     )
+    print("DISASTER RECOVERY: " + recovery_result.recovery_status, flush=True)
     print("PHOENIX OPERATIONAL READY", flush=True)
     heartbeat.set_stage("INITIALIZE_DIRECTORIES")
     fail_safe.raise_if_triggered()
@@ -1134,10 +1184,38 @@ def _stop_active_heartbeat(
         )
 
 
+def _finish_active_recovery(
+    status: str,
+    heartbeat_status: str,
+    fail_safe_status: str,
+    *,
+    preserve_active_exception: bool,
+) -> None:
+    session = _ACTIVE_RECOVERY_SESSION
+    if session is None:
+        return
+    try:
+        session.finish(
+            status=status,
+            heartbeat_status=heartbeat_status,
+            fail_safe_status=fail_safe_status,
+        )
+    except Exception as error:
+        if not preserve_active_exception:
+            raise
+        print(
+            "Disaster Recovery finalization failed while preserving the active "
+            f"exception: {type(error).__name__}: {error}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
 def main() -> None:
-    global _ACTIVE_FAIL_SAFE, _ACTIVE_HEARTBEAT
+    global _ACTIVE_FAIL_SAFE, _ACTIVE_HEARTBEAT, _ACTIVE_RECOVERY_SESSION
     _ACTIVE_FAIL_SAFE = None
     _ACTIVE_HEARTBEAT = None
+    _ACTIVE_RECOVERY_SESSION = None
     try:
         _run_main()
     except KeyboardInterrupt:
@@ -1148,37 +1226,79 @@ def main() -> None:
             "INTERRUPTED",
             preserve_active_exception=True,
         )
+        _finish_active_recovery(
+            "INTERRUPTED",
+            "STOPPED",
+            "NOT_TRIGGERED",
+            preserve_active_exception=True,
+        )
         raise
     except BaseException as error:
         fail_safe = _ACTIVE_FAIL_SAFE
+        if isinstance(error, RecoveryRequiredExit):
+            if fail_safe is not None:
+                fail_safe.stop_monitoring()
+            raise
         if fail_safe is None:
             _stop_active_heartbeat(
                 "FAILED",
                 "FAILED",
                 preserve_active_exception=True,
             )
+            _finish_active_recovery(
+                "FAILED",
+                "FAILED",
+                "NOT_TRIGGERED",
+                preserve_active_exception=True,
+            )
             raise
         if isinstance(error, FailSafeExit):
             fail_safe.stop_monitoring()
+            _finish_active_recovery(
+                "FAILED",
+                "FAILED",
+                "BLOCKED",
+                preserve_active_exception=True,
+            )
             raise
         fail_safe.transition(
             "UNCAUGHT_EXCEPTION",
             heartbeat_status="FAILED",
         )
         fail_safe.stop_monitoring()
+        _finish_active_recovery(
+            "FAILED",
+            "FAILED",
+            "BLOCKED",
+            preserve_active_exception=True,
+        )
         raise FailSafeExit("UNCAUGHT_EXCEPTION") from error
     else:
         if _ACTIVE_FAIL_SAFE is not None:
-            _ACTIVE_FAIL_SAFE.raise_if_triggered()
+            if _ACTIVE_FAIL_SAFE.triggered:
+                _finish_active_recovery(
+                    "FAILED",
+                    "FAILED",
+                    "BLOCKED",
+                    preserve_active_exception=True,
+                )
+                _ACTIVE_FAIL_SAFE.raise_if_triggered()
             _ACTIVE_FAIL_SAFE.stop_monitoring()
         _stop_active_heartbeat(
             "COMPLETED",
             "COMPLETED",
             preserve_active_exception=False,
         )
+        _finish_active_recovery(
+            "COMPLETED",
+            "COMPLETED",
+            "NOT_TRIGGERED",
+            preserve_active_exception=False,
+        )
     finally:
         if _ACTIVE_FAIL_SAFE is not None:
             _ACTIVE_FAIL_SAFE.stop_monitoring()
+        _ACTIVE_RECOVERY_SESSION = None
         _ACTIVE_FAIL_SAFE = None
         _ACTIVE_HEARTBEAT = None
 

@@ -15,6 +15,10 @@ from types import FrameType
 from typing import Any
 from uuid import uuid4
 
+from phoenix_disaster_recovery import (
+    DEFAULT_MAX_RECOVERY_ATTEMPTS,
+    inspect_recovery_state_for_watchdog,
+)
 from phoenix_heartbeat import (
     HEARTBEAT_TIMEOUT_SECONDS,
     HeartbeatEventLogger,
@@ -28,6 +32,7 @@ LOG_DIR = ROOT_DIR / "logs"
 TARGET_SCRIPT = ROOT_DIR / "run_phoenix.py"
 LOCK_FILE = LOG_DIR / "phoenix_watchdog.lock"
 HEARTBEAT_PATH = ROOT_DIR / "runtime" / "guardian" / "heartbeat.json"
+RECOVERY_STATE_PATH = ROOT_DIR / "runtime" / "guardian" / "recovery_state.json"
 
 MODE = "PAPER"
 ORDERS_SUBMITTED = 0
@@ -306,6 +311,7 @@ class PhoenixWatchdog:
         lock_file: Path,
         config: MonitorConfig | None = None,
         heartbeat_path: Path | None = None,
+        recovery_state_path: Path | None = None,
     ) -> None:
         self.target_script = Path(target_script).resolve()
         self.root_dir = Path(root_dir).resolve()
@@ -315,6 +321,10 @@ class PhoenixWatchdog:
         self.heartbeat_path = Path(
             heartbeat_path
             or (self.root_dir / "runtime" / "guardian" / "heartbeat.json")
+        )
+        self.recovery_state_path = Path(
+            recovery_state_path
+            or (self.root_dir / "runtime" / "guardian" / "recovery_state.json")
         )
         self.lock = ProcessLock(
             Path(lock_file),
@@ -403,13 +413,13 @@ class PhoenixWatchdog:
                 self.logger.emit(
                     "REPOSITORY_GUARDIAN_BLOCKED",
                     exit_code=exit_code,
-                    reason="guardian_or_position_reconciliation_exit_2",
+                    reason="startup_safety_gate_exit_2",
                     restart_suppressed=True,
                 )
                 self.heartbeat_logger.emit(
                     "STARTUP_GATE_BLOCKED",
                     status="BLOCKED",
-                    reason="GUARDIAN_OR_POSITION_RECONCILIATION_EXIT_2",
+                    reason="STARTUP_SAFETY_GATE_EXIT_2",
                     pid=None,
                     sequence=None,
                     heartbeat_age_seconds=None,
@@ -418,6 +428,30 @@ class PhoenixWatchdog:
                     restart_attempt=restart_count,
                 )
                 return EXIT_CONFIGURATION_ERROR
+
+            if self.target_script.name.casefold() == "run_phoenix.py":
+                recovery_gate = inspect_recovery_state_for_watchdog(
+                    self.recovery_state_path,
+                    expected_repository_root=self.root_dir,
+                    max_recovery_attempts=min(
+                        DEFAULT_MAX_RECOVERY_ATTEMPTS,
+                        max(1, self.config.max_restarts),
+                    ),
+                )
+                self.logger.emit(
+                    "DISASTER_RECOVERY_STATE_CHECKED",
+                    recovery_status=recovery_gate.status,
+                    reason=recovery_gate.reason,
+                    recovery_attempt=recovery_gate.recovery_attempt,
+                    restart_allowed=recovery_gate.restart_allowed,
+                )
+                if not recovery_gate.restart_allowed:
+                    self.logger.emit(
+                        "DISASTER_RECOVERY_RESTART_BLOCKED",
+                        reason=recovery_gate.reason,
+                        restart_suppressed=True,
+                    )
+                    return EXIT_CONFIGURATION_ERROR
 
             self.logger.emit(
                 "ABNORMAL_EXIT",
@@ -495,6 +529,7 @@ class PhoenixWatchdog:
                 "PHOENIX_EXECUTION_MODE": MODE,
                 "PHOENIX_LIVE_TRADING": "0",
                 "PHOENIX_ALLOW_LIVE_TRADING": "0",
+                "PHOENIX_WATCHDOG_RESTART_ATTEMPT": str(restart_attempt),
             }
         )
         popen_options: dict[str, Any] = {
