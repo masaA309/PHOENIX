@@ -122,6 +122,12 @@ TASKS: list[dict[str, Any]] = [
         "enabled": True,
     },
     {
+        "name": "Step42 Pre-Order Gate",
+        "script": "order_manager.py",
+        "required": True,
+        "enabled": True,
+    },
+    {
         "name": "監視優先ランキングAI",
         "script": "ranking_ai.py",
         "required": True,
@@ -148,6 +154,7 @@ REFRESH_ONLY_SCRIPTS = {
     "learning_engine.py",
     "ai_judgement.py",
     "trade_engine.py",
+    "order_manager.py",
 }
 
 MONITOR_ONLY_ALLOWED_SCRIPTS = frozenset(
@@ -159,6 +166,7 @@ MONITOR_ONLY_ALLOWED_SCRIPTS = frozenset(
         "learning_engine.py",
         "ai_judgement.py",
         "trade_engine.py",
+        "order_manager.py",
         "ranking_ai.py",
         "chart_generator.py",
         "notify.py",

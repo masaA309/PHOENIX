@@ -116,6 +116,7 @@ class MonitorOnlyGateTest(unittest.TestCase):
                 "learning_engine.py",
                 "ai_judgement.py",
                 "trade_engine.py",
+                "order_manager.py",
                 "ranking_ai.py",
                 "chart_generator.py",
                 "notify.py",
@@ -133,7 +134,7 @@ class MonitorOnlyGateTest(unittest.TestCase):
             ):
                 result = run_phoenix.run_script(
                     "Order submission",
-                    "order_manager.py",
+                    "phoenix.py",
                     True,
                     monitor_only=True,
                 )
