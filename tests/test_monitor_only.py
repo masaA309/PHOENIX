@@ -12,6 +12,7 @@ from unittest import mock
 import run_phoenix
 from phoenix_disaster_recovery import (
     MONITOR_ONLY_SCOPE,
+    RECOVERY_PHASE_BOOTSTRAP,
     RecoverySession,
     STATUS_BLOCKED,
     STATUS_READY,
@@ -202,6 +203,7 @@ class RunPhoenixMonitorOnlyIntegrationTest(unittest.TestCase):
             recovery_reasons=[],
             state_path="recovery.json",
             previous_git_commit="a" * 40,
+            current_git_commit="a" * 40,
             recovery_attempt=0,
             recovered_at=None,
         )
@@ -480,6 +482,16 @@ class MonitorOnlyDisasterRecoveryTest(unittest.TestCase):
         return run_disaster_recovery(**arguments)
 
     def test_monitor_only_previous_state_is_ready_for_recovery_and_watchdog(self) -> None:
+        bootstrap = self.run_recovery()
+
+        self.assertEqual(STATUS_READY, bootstrap.recovery_status)
+        self.assertEqual(RECOVERY_PHASE_BOOTSTRAP, bootstrap.recovery_phase)
+        self.assertEqual("MONITOR_ONLY", bootstrap.current_operating_scope)
+        self.assertEqual("DISABLED", bootstrap.current_trading_actions)
+        self.assertEqual(["POSITIONS_PRESENT"], bootstrap.current_position_reasons)
+        self.assertEqual("PAPER", bootstrap.current_mode)
+        self.assertEqual(0, bootstrap.current_orders_submitted)
+
         self.write_state()
 
         result = self.run_recovery()

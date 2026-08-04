@@ -1023,8 +1023,13 @@ def _run_main() -> None:
         guardian_status=guardian_status,
         position_status=reconciliation_result.status,
         repository_root=ROOT_DIR,
+        expected_repository_root=getattr(
+            guardian_result, "expected_root", ROOT_DIR
+        ),
         state_path=ROOT_DIR / "runtime" / "guardian" / "recovery_state.json",
         report_dir=LOG_DIR,
+        current_mode=reconciliation_result.mode,
+        current_orders_submitted=reconciliation_result.orders_submitted,
         watchdog_restart_attempt=watchdog_restart_attempt,
         monitor_only=monitor_only,
         position_reasons=tuple(reconciliation_result.reasons),
@@ -1048,7 +1053,7 @@ def _run_main() -> None:
     recovery_session = RecoverySession(
         state_path=recovery_result.state_path,
         repository_root=ROOT_DIR,
-        git_commit=str(recovery_result.previous_git_commit),
+        git_commit=str(recovery_result.current_git_commit),
         guardian_status=guardian_status,
         position_status=reconciliation_result.status,
         position_reasons=tuple(reconciliation_result.reasons),

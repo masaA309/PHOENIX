@@ -26,6 +26,10 @@ TRADING_ACTIONS_DISABLED = "DISABLED"
 STATUS_READY = "READY"
 STATUS_RECOVERY_REQUIRED = "RECOVERY_REQUIRED"
 STATUS_BLOCKED = "BLOCKED"
+STATE_KIND_RECOVERY_DECISION = "DISASTER_RECOVERY_DECISION"
+STATE_KIND_PHOENIX_RUN = "PHOENIX_RUN"
+RECOVERY_PHASE_EVALUATION = "EVALUATION"
+RECOVERY_PHASE_BOOTSTRAP = "BOOTSTRAP"
 EXIT_READY = 0
 EXIT_RECOVERY_REQUIRED = 1
 EXIT_BLOCKED = 2
@@ -67,6 +71,42 @@ REQUIRED_FIELDS = (
     "recovered_at",
     "exit_code",
 )
+PREVIOUS_RECORD_FIELDS = (
+    "previous_run_id",
+    "previous_status",
+    "previous_started_at",
+    "previous_finished_at",
+    "previous_pid",
+    "previous_git_commit",
+    "previous_repository_root",
+    "previous_guardian_status",
+    "previous_position_status",
+    "previous_position_reasons",
+    "previous_operating_scope",
+    "previous_trading_actions",
+    "previous_heartbeat_status",
+    "previous_fail_safe_status",
+    "previous_orders_submitted",
+    "previous_mode",
+)
+LEGACY_MISSING_STATE_REASONS = frozenset(
+    {
+        "PREVIOUS_STARTED_AT_TIMESTAMP_TYPE_INVALID",
+        "PREVIOUS_RUN_ID_INVALID",
+        "PREVIOUS_STATUS_INVALID",
+        "PREVIOUS_PID_INVALID",
+        "PREVIOUS_GIT_COMMIT_INVALID",
+        "REPOSITORY_ROOT_MISMATCH",
+        "GUARDIAN_NOT_READY",
+        "PREVIOUS_OPERATING_SCOPE_INVALID",
+        "POSITION_NOT_READY",
+        "HEARTBEAT_STATUS_INVALID",
+        "FAIL_SAFE_STATUS_INVALID",
+        "MODE_NOT_PAPER",
+        "ORDERS_SUBMITTED_NOT_ZERO",
+        "PREVIOUS_RECOVERY_BLOCKED",
+    }
+)
 
 
 class RecoveryStateError(ValueError):
@@ -85,6 +125,17 @@ class RecoveryRequiredExit(SystemExit):
 class DisasterRecoveryResult:
     schema_version: int
     checked_at: str
+    state_kind: str
+    recovery_phase: str
+    current_git_commit: str | None
+    current_repository_root: object
+    current_guardian_status: object
+    current_position_status: object
+    current_position_reasons: object
+    current_operating_scope: object
+    current_trading_actions: object
+    current_mode: object
+    current_orders_submitted: object
     previous_run_id: object
     previous_status: object
     previous_started_at: object
@@ -290,9 +341,20 @@ def _text_report(result: DisasterRecoveryResult) -> str:
     reasons = ", ".join(result.recovery_reasons) or "NONE"
     return (
         f"Checked at: {result.checked_at}\n"
+        f"State kind: {result.state_kind}\n"
+        f"Recovery phase: {result.recovery_phase}\n"
         f"Recovery status: {result.recovery_status}\n"
         f"Recovery reasons: {reasons}\n"
         f"Recovery attempt: {result.recovery_attempt}\n"
+        f"Current Git commit: {result.current_git_commit}\n"
+        f"Current repository root: {result.current_repository_root}\n"
+        f"Current Guardian status: {result.current_guardian_status}\n"
+        f"Current Position status: {result.current_position_status}\n"
+        f"Current Position reasons: {result.current_position_reasons}\n"
+        f"Current operating scope: {result.current_operating_scope}\n"
+        f"Current trading actions: {result.current_trading_actions}\n"
+        f"Current mode: {result.current_mode}\n"
+        f"Current orders submitted: {result.current_orders_submitted}\n"
         f"Previous run ID: {result.previous_run_id}\n"
         f"Previous status: {result.previous_status}\n"
         f"Previous PID: {result.previous_pid}\n"
@@ -366,6 +428,17 @@ def _blank_result(
     return DisasterRecoveryResult(
         schema_version=SCHEMA_VERSION,
         checked_at=checked.isoformat(timespec="seconds"),
+        state_kind=STATE_KIND_RECOVERY_DECISION,
+        recovery_phase=RECOVERY_PHASE_EVALUATION,
+        current_git_commit=None,
+        current_repository_root=None,
+        current_guardian_status=None,
+        current_position_status=None,
+        current_position_reasons=None,
+        current_operating_scope=None,
+        current_trading_actions=None,
+        current_mode=None,
+        current_orders_submitted=None,
         previous_run_id=None,
         previous_status=None,
         previous_started_at=None,
@@ -403,10 +476,22 @@ def _result_from_payload(
     reasons: list[str],
     attempt: int,
     recovered_at: str | None,
+    current: Mapping[str, object],
 ) -> DisasterRecoveryResult:
     return DisasterRecoveryResult(
         schema_version=SCHEMA_VERSION,
         checked_at=checked.isoformat(timespec="seconds"),
+        state_kind=STATE_KIND_RECOVERY_DECISION,
+        recovery_phase=RECOVERY_PHASE_EVALUATION,
+        current_git_commit=current.get("git_commit"),
+        current_repository_root=current.get("repository_root"),
+        current_guardian_status=current.get("guardian_status"),
+        current_position_status=current.get("position_status"),
+        current_position_reasons=current.get("position_reasons"),
+        current_operating_scope=current.get("operating_scope"),
+        current_trading_actions=current.get("trading_actions"),
+        current_mode=current.get("mode"),
+        current_orders_submitted=current.get("orders_submitted"),
         previous_run_id=payload.get("previous_run_id"),
         previous_status=payload.get("previous_status"),
         previous_started_at=payload.get("previous_started_at"),
@@ -449,14 +534,228 @@ def _append_unique(reasons: list[str], reason: str) -> None:
         reasons.append(reason)
 
 
+def _is_uninitialized_recovery_decision(
+    payload: Mapping[str, object],
+    *,
+    checked: datetime,
+) -> bool:
+    if not all(
+        field in payload and payload[field] is None
+        for field in PREVIOUS_RECORD_FIELDS
+    ):
+        return False
+    schema_version = payload.get("schema_version")
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != SCHEMA_VERSION
+    ):
+        return False
+    try:
+        recorded_checked = _parse_jst(payload.get("checked_at"))
+    except RecoveryStateError:
+        return False
+    if recorded_checked is None or recorded_checked > checked:
+        return False
+    recovery_attempt = payload.get("recovery_attempt")
+    if (
+        isinstance(recovery_attempt, bool)
+        or not isinstance(recovery_attempt, int)
+        or recovery_attempt != 0
+        or payload.get("recovered_at") is not None
+    ):
+        return False
+    reasons = payload.get("recovery_reasons")
+    if not isinstance(reasons, list) or any(
+        not isinstance(reason, str) for reason in reasons
+    ):
+        return False
+
+    state_kind = payload.get("state_kind")
+    recovery_phase = payload.get("recovery_phase")
+    if (
+        state_kind == STATE_KIND_RECOVERY_DECISION
+        and recovery_phase == RECOVERY_PHASE_BOOTSTRAP
+    ):
+        status = payload.get("recovery_status")
+        exit_code = payload.get("exit_code")
+        if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+            return False
+        return (status, exit_code) in {
+            (STATUS_READY, EXIT_READY),
+            (STATUS_BLOCKED, EXIT_BLOCKED),
+        }
+
+    if state_kind is not None or recovery_phase is not None:
+        return False
+    if (
+        payload.get("recovery_status") != STATUS_BLOCKED
+        or isinstance(payload.get("exit_code"), bool)
+        or payload.get("exit_code") != EXIT_BLOCKED
+    ):
+        return False
+    reason_set = frozenset(reasons)
+    return reasons == ["RECOVERY_STATE_JSON_MISSING"] or (
+        len(reasons) == len(LEGACY_MISSING_STATE_REASONS)
+        and reason_set == LEGACY_MISSING_STATE_REASONS
+    )
+
+
+def _current_safety_context(
+    *,
+    root: Path,
+    expected_repository_root: str | os.PathLike[str],
+    guardian_status: object,
+    position_status: object,
+    monitor_only: object,
+    position_reasons: object,
+    current_mode: object,
+    current_orders_submitted: object,
+    current_git_commit: str | None,
+) -> tuple[dict[str, object], list[str]]:
+    blocked: list[str] = []
+
+    def block(reason: str) -> None:
+        _append_unique(blocked, reason)
+
+    if not _paths_equal(str(root), expected_repository_root):
+        block("REPOSITORY_ROOT_MISMATCH")
+    if guardian_status != STATUS_READY:
+        block("GUARDIAN_NOT_READY")
+    if not isinstance(monitor_only, bool):
+        block("MONITOR_ONLY_INVALID")
+    if not isinstance(position_reasons, tuple) or any(
+        not isinstance(reason, str) for reason in position_reasons
+    ):
+        block("POSITION_REASONS_INVALID")
+        normalized_position_reasons: object = None
+    else:
+        normalized_position_reasons = list(position_reasons)
+        if monitor_only:
+            if (
+                position_status != "WARNING"
+                or position_reasons != (POSITIONS_PRESENT_REASON,)
+            ):
+                block("POSITION_NOT_MONITOR_ONLY")
+        elif position_status != STATUS_READY or position_reasons:
+            block("POSITION_NOT_READY")
+    if current_mode != MODE:
+        block("MODE_NOT_PAPER")
+    if (
+        isinstance(current_orders_submitted, bool)
+        or not isinstance(current_orders_submitted, int)
+        or current_orders_submitted != ORDERS_SUBMITTED
+    ):
+        block("ORDERS_SUBMITTED_NOT_ZERO")
+
+    validated_commit: str | None = None
+    try:
+        commit_value = (
+            _read_git_commit(root)
+            if current_git_commit is None
+            else current_git_commit
+        )
+        validated_commit = commit_value.lower()
+        if re.fullmatch(r"[0-9a-fA-F]{7,40}", validated_commit) is None:
+            raise RecoveryStateError("GIT_COMMIT_INVALID")
+    except (AttributeError, RecoveryStateError) as error:
+        block(
+            error.reason
+            if isinstance(error, RecoveryStateError)
+            else "GIT_COMMIT_INVALID"
+        )
+        validated_commit = None
+
+    valid_monitor_only = isinstance(monitor_only, bool) and monitor_only
+    current = {
+        "git_commit": validated_commit,
+        "repository_root": str(root),
+        "guardian_status": guardian_status,
+        "position_status": position_status,
+        "position_reasons": normalized_position_reasons,
+        "operating_scope": (
+            MONITOR_ONLY_SCOPE if valid_monitor_only else OPERATIONAL_SCOPE
+        ),
+        "trading_actions": (
+            TRADING_ACTIONS_DISABLED
+            if valid_monitor_only
+            else TRADING_ACTIONS_PAPER_ONLY
+        ),
+        "mode": current_mode,
+        "orders_submitted": current_orders_submitted,
+    }
+    return current, blocked
+
+
+def _bootstrap_result(
+    *,
+    checked: datetime,
+    state_path: Path,
+    report_dir: Path,
+    current: Mapping[str, object],
+    reasons: list[str],
+) -> DisasterRecoveryResult:
+    status = STATUS_BLOCKED if reasons else STATUS_READY
+    result = DisasterRecoveryResult(
+        schema_version=SCHEMA_VERSION,
+        checked_at=checked.isoformat(timespec="seconds"),
+        state_kind=STATE_KIND_RECOVERY_DECISION,
+        recovery_phase=RECOVERY_PHASE_BOOTSTRAP,
+        current_git_commit=current.get("git_commit"),
+        current_repository_root=current.get("repository_root"),
+        current_guardian_status=current.get("guardian_status"),
+        current_position_status=current.get("position_status"),
+        current_position_reasons=current.get("position_reasons"),
+        current_operating_scope=current.get("operating_scope"),
+        current_trading_actions=current.get("trading_actions"),
+        current_mode=current.get("mode"),
+        current_orders_submitted=current.get("orders_submitted"),
+        previous_run_id=None,
+        previous_status=None,
+        previous_started_at=None,
+        previous_finished_at=None,
+        previous_pid=None,
+        previous_git_commit=None,
+        previous_repository_root=None,
+        previous_guardian_status=None,
+        previous_position_status=None,
+        previous_position_reasons=None,
+        previous_operating_scope=None,
+        previous_trading_actions=None,
+        previous_heartbeat_status=None,
+        previous_fail_safe_status=None,
+        previous_orders_submitted=None,
+        previous_mode=None,
+        recovery_status=status,
+        recovery_reasons=list(reasons),
+        recovery_attempt=0,
+        recovered_at=None,
+        exit_code=EXIT_BLOCKED if reasons else EXIT_READY,
+        state_path=str(state_path),
+        json_report_path=str(report_dir / "disaster_recovery.json"),
+        text_report_path=str(report_dir / "disaster_recovery.txt"),
+    )
+    try:
+        write_recovery_artifacts(result)
+    except OSError as error:
+        result.recovery_status = STATUS_BLOCKED
+        _append_unique(result.recovery_reasons, "REPORT_WRITE_FAILED")
+        result.exit_code = EXIT_BLOCKED
+        result.report_error = f"{type(error).__name__}: {error}"
+    return result
+
+
 def run_disaster_recovery(
     *,
     guardian_status: object,
     position_status: object,
     repository_root: str | os.PathLike[str] = ROOT_DIR,
+    expected_repository_root: str | os.PathLike[str] | None = None,
     state_path: str | os.PathLike[str] | None = None,
     report_dir: str | os.PathLike[str] | None = None,
     current_git_commit: str | None = None,
+    current_mode: object = MODE,
+    current_orders_submitted: object = ORDERS_SUBMITTED,
     now: datetime | None = None,
     pid_checker: Callable[[int], bool] = _pid_is_alive,
     watchdog_restart_attempt: int = 0,
@@ -471,6 +770,9 @@ def run_disaster_recovery(
         state_path or (root / "runtime" / "guardian" / "recovery_state.json")
     )
     logs = Path(report_dir or (root / "logs"))
+    expected_root = (
+        root if expected_repository_root is None else expected_repository_root
+    )
     if (
         isinstance(max_recovery_attempts, bool)
         or not isinstance(max_recovery_attempts, int)
@@ -490,7 +792,6 @@ def run_disaster_recovery(
         )
         if restart_attempt > MAX_RECOVERY_ATTEMPTS_HARD_LIMIT:
             raise RecoveryStateError("WATCHDOG_RESTART_LIMIT_EXCEEDED")
-        payload = _load_json_object(recovery_path)
     except RecoveryStateError as error:
         result = _blank_result(
             checked=checked,
@@ -501,7 +802,45 @@ def run_disaster_recovery(
         write_recovery_artifacts(result)
         return result
 
-    blocked: list[str] = []
+    payload: dict[str, object] | None
+    try:
+        payload = _load_json_object(recovery_path)
+    except RecoveryStateError as error:
+        if error.reason == "RECOVERY_STATE_JSON_MISSING":
+            payload = None
+        else:
+            result = _blank_result(
+                checked=checked,
+                state_path=recovery_path,
+                report_dir=logs,
+                reason=error.reason,
+            )
+            write_recovery_artifacts(result)
+            return result
+
+    current, current_blocks = _current_safety_context(
+        root=root,
+        expected_repository_root=expected_root,
+        guardian_status=guardian_status,
+        position_status=position_status,
+        monitor_only=monitor_only,
+        position_reasons=position_reasons,
+        current_mode=current_mode,
+        current_orders_submitted=current_orders_submitted,
+        current_git_commit=current_git_commit,
+    )
+    if payload is None or _is_uninitialized_recovery_decision(
+        payload, checked=checked
+    ):
+        return _bootstrap_result(
+            checked=checked,
+            state_path=recovery_path,
+            report_dir=logs,
+            current=current,
+            reasons=current_blocks,
+        )
+
+    blocked: list[str] = list(current_blocks)
     recovery: list[str] = []
     parsed_times: list[datetime] = []
     previous_pid: int | None = None
@@ -516,6 +855,23 @@ def run_disaster_recovery(
         or payload["schema_version"] != SCHEMA_VERSION
     ):
         block("SCHEMA_VERSION_INVALID")
+    state_kind = payload.get("state_kind")
+    recovery_phase = payload.get("recovery_phase")
+    if state_kind is not None and state_kind not in {
+        STATE_KIND_RECOVERY_DECISION,
+        STATE_KIND_PHOENIX_RUN,
+    }:
+        block("STATE_KIND_INVALID")
+    if recovery_phase is not None and recovery_phase not in {
+        RECOVERY_PHASE_EVALUATION,
+        RECOVERY_PHASE_BOOTSTRAP,
+    }:
+        block("RECOVERY_PHASE_INVALID")
+    if (
+        state_kind == STATE_KIND_PHOENIX_RUN
+        and recovery_phase == RECOVERY_PHASE_BOOTSTRAP
+    ):
+        block("RECOVERY_STATE_KIND_INCONSISTENT")
     for field in ("checked_at", "previous_started_at"):
         try:
             parsed = _parse_jst(payload[field])
@@ -576,33 +932,18 @@ def run_disaster_recovery(
         or re.fullmatch(r"[0-9a-fA-F]{7,40}", previous_commit) is None
     ):
         block("PREVIOUS_GIT_COMMIT_INVALID")
-    try:
-        expected_commit = (current_git_commit or _read_git_commit(root)).lower()
-        if re.fullmatch(r"[0-9a-fA-F]{7,40}", expected_commit) is None:
-            raise RecoveryStateError("GIT_COMMIT_INVALID")
-        if isinstance(previous_commit, str) and previous_commit.lower() != expected_commit:
-            block("GIT_COMMIT_MISMATCH")
-    except RecoveryStateError as error:
-        block(error.reason)
+    expected_commit = current.get("git_commit")
+    if (
+        isinstance(previous_commit, str)
+        and isinstance(expected_commit, str)
+        and previous_commit.lower() != expected_commit
+    ):
+        block("GIT_COMMIT_MISMATCH")
 
     if not _paths_equal(payload["previous_repository_root"], root):
         block("REPOSITORY_ROOT_MISMATCH")
-    if guardian_status != STATUS_READY or payload["previous_guardian_status"] != STATUS_READY:
+    if payload["previous_guardian_status"] != STATUS_READY:
         block("GUARDIAN_NOT_READY")
-    if not isinstance(monitor_only, bool):
-        block("MONITOR_ONLY_INVALID")
-    if not isinstance(position_reasons, tuple) or any(
-        not isinstance(reason, str) for reason in position_reasons
-    ):
-        block("POSITION_REASONS_INVALID")
-    elif monitor_only:
-        if (
-            position_status != "WARNING"
-            or position_reasons != (POSITIONS_PRESENT_REASON,)
-        ):
-            block("POSITION_NOT_MONITOR_ONLY")
-    elif position_status != STATUS_READY:
-        block("POSITION_NOT_READY")
     previous_position_status = payload["previous_position_status"]
     previous_position_reasons = payload.get("previous_position_reasons", [])
     previous_operating_scope = payload.get(
@@ -736,6 +1077,7 @@ def run_disaster_recovery(
         reasons=reasons,
         attempt=next_attempt,
         recovered_at=recovered_at,
+        current=current,
     )
     try:
         write_recovery_artifacts(result)
@@ -816,6 +1158,23 @@ class RecoverySession:
         payload = {
             "schema_version": SCHEMA_VERSION,
             "checked_at": now.isoformat(timespec="seconds"),
+            "state_kind": STATE_KIND_PHOENIX_RUN,
+            "recovery_phase": RECOVERY_PHASE_EVALUATION,
+            "current_git_commit": self.git_commit,
+            "current_repository_root": str(self.repository_root),
+            "current_guardian_status": self.guardian_status,
+            "current_position_status": self.position_status,
+            "current_position_reasons": list(self.position_reasons),
+            "current_operating_scope": (
+                MONITOR_ONLY_SCOPE if self.monitor_only else OPERATIONAL_SCOPE
+            ),
+            "current_trading_actions": (
+                TRADING_ACTIONS_DISABLED
+                if self.monitor_only
+                else TRADING_ACTIONS_PAPER_ONLY
+            ),
+            "current_mode": MODE,
+            "current_orders_submitted": ORDERS_SUBMITTED,
             "previous_run_id": self.run_id,
             "previous_status": "RUNNING",
             "previous_started_at": now.isoformat(timespec="seconds"),
@@ -908,6 +1267,81 @@ def inspect_recovery_state_for_watchdog(
     if attempt > MAX_RECOVERY_ATTEMPTS_HARD_LIMIT or attempt >= max_recovery_attempts:
         return WatchdogRecoveryGate(
             STATUS_BLOCKED, "RECOVERY_ATTEMPT_LIMIT_EXCEEDED", attempt
+        )
+    if _is_uninitialized_recovery_decision(
+        payload, checked=_now_jst()
+    ):
+        if (
+            payload.get("state_kind") != STATE_KIND_RECOVERY_DECISION
+            or payload.get("recovery_phase") != RECOVERY_PHASE_BOOTSTRAP
+        ):
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "BOOTSTRAP_DIRECT_START_REQUIRED", attempt
+            )
+        if payload.get("recovery_status") != STATUS_READY:
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "RECOVERY_BLOCKED", attempt
+            )
+        if payload.get("current_mode") != MODE:
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "MODE_NOT_PAPER", attempt
+            )
+        current_orders = payload.get("current_orders_submitted")
+        if (
+            isinstance(current_orders, bool)
+            or not isinstance(current_orders, int)
+            or current_orders != ORDERS_SUBMITTED
+        ):
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "ORDERS_SUBMITTED_NOT_ZERO", attempt
+            )
+        if not _paths_equal(
+            payload.get("current_repository_root"), expected_repository_root
+        ):
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "REPOSITORY_ROOT_MISMATCH", attempt
+            )
+        if payload.get("current_guardian_status") != STATUS_READY:
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "GUARDIAN_NOT_READY", attempt
+            )
+        current_commit = payload.get("current_git_commit")
+        if (
+            not isinstance(current_commit, str)
+            or re.fullmatch(r"[0-9a-fA-F]{7,40}", current_commit) is None
+        ):
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "GIT_COMMIT_INVALID", attempt
+            )
+        current_position_status = payload.get("current_position_status")
+        current_scope = payload.get("current_operating_scope")
+        current_reasons = payload.get("current_position_reasons")
+        current_trading_actions = payload.get("current_trading_actions")
+        if current_position_status == "WARNING":
+            if (
+                current_scope != MONITOR_ONLY_SCOPE
+                or current_reasons != [POSITIONS_PRESENT_REASON]
+                or current_trading_actions != TRADING_ACTIONS_DISABLED
+            ):
+                return WatchdogRecoveryGate(
+                    STATUS_BLOCKED, "POSITION_NOT_MONITOR_ONLY", attempt
+                )
+        elif current_position_status != STATUS_READY:
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "POSITION_NOT_READY", attempt
+            )
+        elif (
+            current_scope != OPERATIONAL_SCOPE
+            or current_reasons != []
+            or current_trading_actions != TRADING_ACTIONS_PAPER_ONLY
+        ):
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "POSITION_STATE_INCONSISTENT", attempt
+            )
+        return WatchdogRecoveryGate(
+            STATUS_RECOVERY_REQUIRED,
+            "BOOTSTRAP_CONFIRMATION_REQUIRED",
+            attempt,
         )
     if payload.get("previous_mode") != MODE:
         return WatchdogRecoveryGate(STATUS_BLOCKED, "MODE_NOT_PAPER", attempt)

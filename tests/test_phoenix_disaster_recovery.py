@@ -19,8 +19,11 @@ from phoenix_disaster_recovery import (
     MAX_RECOVERY_ATTEMPTS_HARD_LIMIT,
     MODE,
     ORDERS_SUBMITTED,
+    RECOVERY_PHASE_BOOTSTRAP,
     RecoveryRequiredExit,
     RecoverySession,
+    STATE_KIND_PHOENIX_RUN,
+    STATE_KIND_RECOVERY_DECISION,
     STATUS_BLOCKED,
     STATUS_READY,
     STATUS_RECOVERY_REQUIRED,
@@ -95,6 +98,7 @@ class DisasterRecoveryStep40Test(unittest.TestCase):
             "guardian_status": "READY",
             "position_status": "READY",
             "repository_root": self.root,
+            "expected_repository_root": self.root,
             "state_path": self.state_path,
             "report_dir": self.log_dir,
             "current_git_commit": self.commit,
@@ -103,6 +107,116 @@ class DisasterRecoveryStep40Test(unittest.TestCase):
         }
         arguments.update(overrides)
         return run_disaster_recovery(**arguments)
+
+    def legacy_uninitialized_payload(self) -> dict[str, object]:
+        payload = self.payload()
+        for field in (
+            "previous_run_id",
+            "previous_status",
+            "previous_started_at",
+            "previous_finished_at",
+            "previous_pid",
+            "previous_git_commit",
+            "previous_repository_root",
+            "previous_guardian_status",
+            "previous_position_status",
+            "previous_position_reasons",
+            "previous_operating_scope",
+            "previous_trading_actions",
+            "previous_heartbeat_status",
+            "previous_fail_safe_status",
+            "previous_orders_submitted",
+            "previous_mode",
+        ):
+            payload[field] = None
+        payload.update(
+            {
+                "recovery_status": "BLOCKED",
+                "recovery_reasons": [
+                    "PREVIOUS_STARTED_AT_TIMESTAMP_TYPE_INVALID",
+                    "PREVIOUS_RUN_ID_INVALID",
+                    "PREVIOUS_STATUS_INVALID",
+                    "PREVIOUS_PID_INVALID",
+                    "PREVIOUS_GIT_COMMIT_INVALID",
+                    "REPOSITORY_ROOT_MISMATCH",
+                    "GUARDIAN_NOT_READY",
+                    "PREVIOUS_OPERATING_SCOPE_INVALID",
+                    "POSITION_NOT_READY",
+                    "HEARTBEAT_STATUS_INVALID",
+                    "FAIL_SAFE_STATUS_INVALID",
+                    "MODE_NOT_PAPER",
+                    "ORDERS_SUBMITTED_NOT_ZERO",
+                    "PREVIOUS_RECOVERY_BLOCKED",
+                ],
+                "recovery_attempt": 0,
+                "recovered_at": None,
+                "exit_code": 2,
+            }
+        )
+        return payload
+
+    def test_missing_state_bootstraps_only_after_current_ready_scope_is_safe(self) -> None:
+        result = self.run_recovery()
+
+        self.assertEqual(STATUS_READY, result.recovery_status)
+        self.assertEqual(RECOVERY_PHASE_BOOTSTRAP, result.recovery_phase)
+        self.assertEqual(STATE_KIND_RECOVERY_DECISION, result.state_kind)
+        self.assertEqual(self.commit, result.current_git_commit)
+        self.assertEqual(str(self.root), result.current_repository_root)
+        self.assertEqual("READY", result.current_guardian_status)
+        self.assertEqual("READY", result.current_position_status)
+        self.assertEqual("OPERATIONAL", result.current_operating_scope)
+        self.assertEqual("PAPER_ONLY", result.current_trading_actions)
+        self.assertEqual("PAPER", result.current_mode)
+        self.assertEqual(0, result.current_orders_submitted)
+        self.assertIsNone(result.previous_run_id)
+        persisted = json.loads(self.state_path.read_text(encoding="utf-8"))
+        watchdog_gate = inspect_recovery_state_for_watchdog(
+            self.state_path,
+            expected_repository_root=self.root,
+        )
+        self.assertEqual(RECOVERY_PHASE_BOOTSTRAP, persisted["recovery_phase"])
+        self.assertEqual(STATUS_RECOVERY_REQUIRED, watchdog_gate.status)
+        self.assertTrue(watchdog_gate.restart_allowed)
+
+    def test_legacy_self_generated_all_null_blocked_state_bootstraps(self) -> None:
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(
+            json.dumps(self.legacy_uninitialized_payload()),
+            encoding="utf-8",
+        )
+
+        result = self.run_recovery()
+
+        self.assertEqual(STATUS_READY, result.recovery_status)
+        self.assertEqual(RECOVERY_PHASE_BOOTSTRAP, result.recovery_phase)
+        self.assertEqual([], result.recovery_reasons)
+        self.assertIsNone(result.previous_status)
+
+    def test_partial_null_previous_record_is_blocked_not_bootstrapped(self) -> None:
+        self.write_state(previous_run_id=None)
+
+        result = self.run_recovery()
+
+        self.assertEqual(STATUS_BLOCKED, result.recovery_status)
+        self.assertIn("PREVIOUS_RUN_ID_INVALID", result.recovery_reasons)
+        self.assertNotEqual(RECOVERY_PHASE_BOOTSTRAP, result.recovery_phase)
+
+    def test_bootstrap_current_safety_violations_remain_blocked(self) -> None:
+        cases = (
+            ({"current_mode": "LIVE"}, "MODE_NOT_PAPER"),
+            ({"current_orders_submitted": 1}, "ORDERS_SUBMITTED_NOT_ZERO"),
+            (
+                {"expected_repository_root": self.root / "other"},
+                "REPOSITORY_ROOT_MISMATCH",
+            ),
+        )
+        for arguments, reason in cases:
+            with self.subTest(reason=reason):
+                result = self.run_recovery(**arguments)
+                self.assertEqual(STATUS_BLOCKED, result.recovery_status)
+                self.assertEqual(RECOVERY_PHASE_BOOTSTRAP, result.recovery_phase)
+                self.assertIn(reason, result.recovery_reasons)
 
     def test_completed_previous_run_is_ready(self) -> None:
         self.write_state()
@@ -228,15 +342,16 @@ class DisasterRecoveryStep40Test(unittest.TestCase):
                 self.assertEqual(STATUS_BLOCKED, result.recovery_status)
                 self.assertIn(reason, result.recovery_reasons)
 
-    def test_missing_and_corrupt_json_are_blocked(self) -> None:
-        missing = self.run_recovery()
-        self.assertEqual(STATUS_BLOCKED, missing.recovery_status)
-        self.assertIn("RECOVERY_STATE_JSON_MISSING", missing.recovery_reasons)
-
+    def test_corrupt_json_is_blocked_and_cannot_become_bootstrap(self) -> None:
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
         self.state_path.write_text("{broken", encoding="utf-8")
-        corrupt = self.run_recovery()
-        self.assertEqual(STATUS_BLOCKED, corrupt.recovery_status)
-        self.assertIn("RECOVERY_STATE_JSON_INVALID", corrupt.recovery_reasons)
+        first = self.run_recovery()
+        second = self.run_recovery()
+
+        self.assertEqual(STATUS_BLOCKED, first.recovery_status)
+        self.assertIn("RECOVERY_STATE_JSON_INVALID", first.recovery_reasons)
+        self.assertEqual(STATUS_BLOCKED, second.recovery_status)
+        self.assertNotEqual(RECOVERY_PHASE_BOOTSTRAP, second.recovery_phase)
 
     def test_missing_required_field_is_blocked(self) -> None:
         payload = self.payload()
@@ -333,6 +448,7 @@ class DisasterRecoveryStep40Test(unittest.TestCase):
         completed = json.loads(self.state_path.read_text(encoding="utf-8"))
 
         self.assertEqual("RUNNING", running["previous_status"])
+        self.assertEqual(STATE_KIND_PHOENIX_RUN, running["state_kind"])
         self.assertEqual("COMPLETED", completed["previous_status"])
         self.assertEqual("READY", completed["recovery_status"])
         self.assertEqual("PAPER", completed["previous_mode"])
@@ -410,7 +526,13 @@ class RunPhoenixDisasterRecoveryIntegrationTest(unittest.TestCase):
     def test_integration_order_is_guardian_position_recovery_heartbeat_fail_safe(self) -> None:
         events = self.events
         guardian = mock.Mock(ready=True, status="READY", reasons=(), report_error=None)
-        position = mock.Mock(status="READY", reasons=(), report_error=None)
+        position = mock.Mock(
+            status="READY",
+            reasons=(),
+            report_error=None,
+            mode="PAPER",
+            orders_submitted=0,
+        )
         recovery = mock.Mock(
             blocked=False,
             recovery_required=False,
@@ -418,6 +540,7 @@ class RunPhoenixDisasterRecoveryIntegrationTest(unittest.TestCase):
             recovery_reasons=[],
             state_path="recovery.json",
             previous_git_commit="a" * 40,
+            current_git_commit="a" * 40,
             recovery_attempt=0,
             recovered_at=None,
         )
@@ -509,7 +632,13 @@ class RunPhoenixDisasterRecoveryIntegrationTest(unittest.TestCase):
 
     def test_recovery_required_stops_before_heartbeat_and_existing_processing(self) -> None:
         guardian = mock.Mock(ready=True, status="READY", reasons=(), report_error=None)
-        position = mock.Mock(status="READY", reasons=(), report_error=None)
+        position = mock.Mock(
+            status="READY",
+            reasons=(),
+            report_error=None,
+            mode="PAPER",
+            orders_submitted=0,
+        )
         recovery = mock.Mock(
             blocked=False,
             recovery_required=True,
@@ -533,7 +662,13 @@ class RunPhoenixDisasterRecoveryIntegrationTest(unittest.TestCase):
 
     def test_recovery_blocked_exits_two(self) -> None:
         guardian = mock.Mock(ready=True, status="READY", reasons=(), report_error=None)
-        position = mock.Mock(status="READY", reasons=(), report_error=None)
+        position = mock.Mock(
+            status="READY",
+            reasons=(),
+            report_error=None,
+            mode="PAPER",
+            orders_submitted=0,
+        )
         recovery = mock.Mock(
             blocked=True,
             recovery_required=False,
