@@ -22,6 +22,7 @@ from phoenix_heartbeat import PhoenixHeartbeat
 from phoenix_core.virtual_rss_paper import prepare_quote_environment
 from position_reconciliation import run_position_reconciliation
 from repository_guardian import run_repository_guardian
+from weekly_signal_comparison import run_latest_weekly_signal_comparison
 
 
 # =========================================================
@@ -950,6 +951,88 @@ def _is_monitor_only_reconciliation(
     return 0 <= age_seconds <= MAX_POSITION_STATE_AGE_SECONDS
 
 
+def _format_weekly_signal_comparison_counts(counts: dict[str, int]) -> str:
+    ordered_keys = ("new", "continued", "upgraded", "downgraded", "excluded")
+    return ", ".join(
+        f"{key}={counts.get(key, 0)}"
+        for key in ordered_keys
+    )
+
+
+def _log_weekly_signal_comparison_result(result: dict[str, Any]) -> None:
+    write_log("=" * 90)
+    write_log("WEEKLY SIGNAL COMPARISON")
+    status = str(result.get("status", "READY"))
+    write_log(f"Status       : {status}")
+
+    if status == "SKIPPED":
+        selection = result.get("selection")
+        if isinstance(selection, dict):
+            write_log(
+                "Source date  : "
+                f"{selection.get('source_report_date') or '-'}"
+            )
+            write_log(
+                "Target date  : "
+                f"{selection.get('target_report_date') or '-'}"
+            )
+        reason = result.get("reason")
+        if reason is not None:
+            write_log(f"Reason       : {reason}")
+        return
+
+    source = result["source"]
+    target = result["target"]
+    write_log(
+        "Source date  : "
+        f"{source['report_date']} ({source['report_file']})"
+    )
+    write_log(
+        "Target date  : "
+        f"{target['report_date']} ({target['report_file']})"
+    )
+    write_log(
+        "Signal counts: "
+        + _format_weekly_signal_comparison_counts(
+            result.get("signal_change_counts", {})
+        )
+    )
+    safety = result["safety"]
+    write_log(
+        "Safety       : "
+        f"broker_mode={safety['broker_mode']}, "
+        f"orders_submitted={safety['orders_submitted']}, "
+        f"trading_actions=DISABLED, "
+        f"external_connections={safety['external_connections']}, "
+        f"notification_sent={safety['notification_sent']}"
+    )
+    paths = result.get("paths")
+    if isinstance(paths, dict) and paths:
+        write_log(
+            "Saved to     : "
+            + ", ".join(f"{name.upper()}={path}" for name, path in paths.items())
+        )
+
+
+def _run_weekly_signal_comparison() -> dict[str, Any] | None:
+    target_date = datetime.now().date()
+    try:
+        result = run_latest_weekly_signal_comparison(
+            target_date,
+            report_dir=REPORT_DIR,
+            output_dir=REPORT_DIR,
+        )
+    except Exception as error:
+        write_log("=" * 90)
+        write_log("WEEKLY SIGNAL COMPARISON OPTIONAL FAILURE")
+        write_log(f"Target date  : {target_date.isoformat()}")
+        write_log(f"{type(error).__name__}: {error}")
+        return None
+
+    _log_weekly_signal_comparison_result(result)
+    return result
+
+
 def _run_main() -> None:
     global _ACTIVE_FAIL_SAFE, _ACTIVE_HEARTBEAT, _ACTIVE_RECOVERY_SESSION
     fail_safe = FailSafeController(
@@ -1253,13 +1336,6 @@ def _run_main() -> None:
     output_results = verify_output_files(refresh_only=args.refresh_only)
 
     fail_safe.raise_if_triggered()
-    heartbeat.set_stage("FINAL_SUMMARY")
-    print_final_summary(
-        task_results=task_results,
-        output_results=output_results,
-        started_at=started_at,
-    )
-
     required_failures = [
         result
         for result in task_results
@@ -1279,6 +1355,16 @@ def _run_main() -> None:
         in output_results.items()
         if not exists
     ]
+
+    if not required_failures and not missing_outputs:
+        _run_weekly_signal_comparison()
+
+    heartbeat.set_stage("FINAL_SUMMARY")
+    print_final_summary(
+        task_results=task_results,
+        output_results=output_results,
+        started_at=started_at,
+    )
 
     print_morning_run_summary(
         task_results=task_results,
@@ -1366,6 +1452,8 @@ def main() -> None:
             "NOT_TRIGGERED",
             preserve_active_exception=True,
         )
+        raise
+    except SystemExit:
         raise
     except BaseException as error:
         fail_safe = _ACTIVE_FAIL_SAFE
