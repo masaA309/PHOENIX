@@ -128,6 +128,12 @@ TASKS: list[dict[str, Any]] = [
         "enabled": True,
     },
     {
+        "name": "Step43 VBA Bridge Contract",
+        "script": "vba_bridge.py",
+        "required": True,
+        "enabled": True,
+    },
+    {
         "name": "監視優先ランキングAI",
         "script": "ranking_ai.py",
         "required": True,
@@ -155,6 +161,7 @@ REFRESH_ONLY_SCRIPTS = {
     "ai_judgement.py",
     "trade_engine.py",
     "order_manager.py",
+    "vba_bridge.py",
 }
 
 MONITOR_ONLY_ALLOWED_SCRIPTS = frozenset(
@@ -167,6 +174,7 @@ MONITOR_ONLY_ALLOWED_SCRIPTS = frozenset(
         "ai_judgement.py",
         "trade_engine.py",
         "order_manager.py",
+        "vba_bridge.py",
         "ranking_ai.py",
         "chart_generator.py",
         "notify.py",

@@ -117,6 +117,7 @@ class MonitorOnlyGateTest(unittest.TestCase):
                 "ai_judgement.py",
                 "trade_engine.py",
                 "order_manager.py",
+                "vba_bridge.py",
                 "ranking_ai.py",
                 "chart_generator.py",
                 "notify.py",
