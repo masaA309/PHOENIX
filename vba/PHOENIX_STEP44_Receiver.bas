@@ -20,16 +20,29 @@ Private Const MOVEFILE_WRITE_THROUGH As Long = &H8
 
 Public Sub RunPhoenixStep44LocalReceiver()
     Dim rootPath As String
+    Dim currentStage As String
+    Dim errorNumber As Long
+    Dim errorSource As String
+    Dim errorDescription As String
+    Dim errorLine As Long
 
     On Error GoTo CleanFail
+    currentStage = "RESOLVE_ROOT"
     rootPath = FindRepositoryRoot(ThisWorkbook.Path)
+    currentStage = "ENSURE_DIRECTORIES"
     EnsureBridgeDirectories rootPath
+    currentStage = "ACQUIRE_LOCK"
     AcquireStep44Lock rootPath
+    currentStage = "PROCESS_PENDING"
     ProcessPendingOutboxFiles rootPath
 CleanExit:
     ReleaseStep44Lock
     Exit Sub
 CleanFail:
+    errorNumber = Err.Number
+    errorSource = Err.Source
+    errorDescription = Err.Description
+    errorLine = Erl
     On Error Resume Next
     If Len(rootPath) > 0 Then
         AppendAuditJsonLine rootPath, BuildAuditJsonLine( _
@@ -45,7 +58,13 @@ CleanFail:
             "", _
             VBA_INSTANCE_ID, _
             "0", _
-            Err.Description)
+            "top_level_failure", _
+            currentStage, _
+            "", _
+            CStr(errorNumber), _
+            errorSource, _
+            errorDescription, _
+            CStr(errorLine))
     End If
     On Error GoTo 0
     Resume CleanExit
@@ -261,7 +280,13 @@ Private Function BuildAuditJsonLine( _
     ByVal outboxFile As String, _
     ByVal readerId As String, _
     ByVal ordersSubmitted As String, _
-    ByVal note As String) As String
+    ByVal note As String, _
+    Optional ByVal currentStage As String = "", _
+    Optional ByVal currentFile As String = "", _
+    Optional ByVal errorNumber As String = "", _
+    Optional ByVal errorSource As String = "", _
+    Optional ByVal errorDescription As String = "", _
+    Optional ByVal errorLine As String = "") As String
 
     BuildAuditJsonLine = "{" & _
         """kind"":" & JsonStringText(kind) & "," & _
@@ -276,7 +301,122 @@ Private Function BuildAuditJsonLine( _
         """outbox_file"":" & JsonStringText(outboxFile) & "," & _
         """reader_id"":" & JsonStringText(readerId) & "," & _
         """orders_submitted"":" & JsonStringText(ordersSubmitted) & "," & _
-        """note"":" & JsonStringText(note) & "}"
+        """note"":" & JsonStringText(note) & "," & _
+        """current_stage"":" & JsonStringText(currentStage) & "," & _
+        """current_file"":" & JsonStringText(currentFile) & "," & _
+        """error_number"":" & JsonStringText(errorNumber) & "," & _
+        """error_source"":" & JsonStringText(errorSource) & "," & _
+        """error_description"":" & JsonStringText(errorDescription) & "," & _
+        """error_line"":" & JsonStringText(errorLine) & "}"
+End Function
+
+Private Function JsonPropertyText(ByVal key As String, ByVal value As String) As String
+    JsonPropertyText = JsonStringText(key) & ":" & JsonStringText(value)
+End Function
+
+Private Function FindLatestFinalStateRowIndex(ByVal rows As Collection, ByVal columnIndex As Long, ByVal targetValue As String) As Long
+    Dim index As Long
+    Dim rowValues As Variant
+
+    For index = rows.Count To 1 Step -1
+        rowValues = rows.Item(index)
+        If NormalizeText(rowValues(columnIndex)) = targetValue Then
+            If IsFinalStatus(rowValues(ST_STATUS)) Then
+                FindLatestFinalStateRowIndex = index
+                Exit Function
+            End If
+        End If
+    Next index
+End Function
+
+Private Function CanonicalJsonFromOutboxRow(ByVal rowValues As Variant) As String
+    Dim parts(0 To 18) As String
+
+    parts(0) = JsonPropertyText("bridge_status", NormalizeText(rowValues(OB_BRIDGE_STATUS)))
+    parts(1) = JsonPropertyText("estimated_max_loss", NormalizeText(rowValues(OB_ESTIMATED_MAX_LOSS)))
+    parts(2) = JsonPropertyText("estimated_notional", NormalizeText(rowValues(OB_ESTIMATED_NOTIONAL)))
+    parts(3) = JsonPropertyText("execution_mode", NormalizeText(rowValues(OB_EXECUTION_MODE)))
+    parts(4) = JsonPropertyText("expires_at", NormalizeText(rowValues(OB_EXPIRES_AT)))
+    parts(5) = JsonPropertyText("generated_at", NormalizeText(rowValues(OB_GENERATED_AT)))
+    parts(6) = JsonPropertyText("idempotency_key", NormalizeText(rowValues(OB_IDEMPOTENCY_KEY)))
+    parts(7) = JsonPropertyText("intent_id", NormalizeText(rowValues(OB_INTENT_ID)))
+    parts(8) = JsonPropertyText("limit_price", NormalizeText(rowValues(OB_LIMIT_PRICE)))
+    parts(9) = JsonPropertyText("market", NormalizeText(rowValues(OB_MARKET)))
+    parts(10) = JsonPropertyText("order_type", NormalizeText(rowValues(OB_ORDER_TYPE)))
+    parts(11) = JsonPropertyText("quantity", NormalizeText(rowValues(OB_QUANTITY)))
+    parts(12) = JsonPropertyText("reference_price", NormalizeText(rowValues(OB_REFERENCE_PRICE)))
+    parts(13) = JsonPropertyText("schema_version", NormalizeText(rowValues(OB_SCHEMA_VERSION)))
+    parts(14) = JsonPropertyText("side", NormalizeText(rowValues(OB_SIDE)))
+    parts(15) = JsonPropertyText("stop_loss_price", NormalizeText(rowValues(OB_STOP_LOSS_PRICE)))
+    parts(16) = JsonPropertyText("take_profit_price", NormalizeText(rowValues(OB_TAKE_PROFIT_PRICE)))
+    parts(17) = JsonPropertyText("ticker", NormalizeText(rowValues(OB_TICKER)))
+    parts(18) = JsonPropertyText("trading_mode", NormalizeText(rowValues(OB_TRADING_MODE)))
+    CanonicalJsonFromOutboxRow = "{" & Join(parts, ",") & "}"
+End Function
+
+Private Function CanonicalJsonFromReceiptRow(ByVal rowValues As Variant) As String
+    Dim parts(0 To 8) As String
+
+    parts(0) = JsonPropertyText("idempotency_key", NormalizeText(rowValues(RC_IDEMPOTENCY_KEY)))
+    parts(1) = JsonPropertyText("intent_id", NormalizeText(rowValues(RC_INTENT_ID)))
+    parts(2) = JsonPropertyText("orders_submitted", NormalizeText(rowValues(RC_ORDERS_SUBMITTED)))
+    parts(3) = JsonPropertyText("reason_codes", NormalizeText(rowValues(RC_REASON_CODES)))
+    parts(4) = JsonPropertyText("received_at", NormalizeText(rowValues(RC_RECEIVED_AT)))
+    parts(5) = JsonPropertyText("result", NormalizeText(rowValues(RC_RESULT)))
+    parts(6) = JsonPropertyText("schema_version", NormalizeText(rowValues(RC_SCHEMA_VERSION)))
+    parts(7) = JsonPropertyText("source_checksum", NormalizeText(rowValues(RC_SOURCE_CHECKSUM)))
+    parts(8) = JsonPropertyText("vba_instance_id", NormalizeText(rowValues(RC_VBA_INSTANCE_ID)))
+    CanonicalJsonFromReceiptRow = "{" & Join(parts, ",") & "}"
+End Function
+
+Private Function IsHexDigestText(ByVal value As String) As Boolean
+    Dim index As Long
+    Dim character As String
+
+    If Len(value) <> 64 Then Exit Function
+    For index = 1 To Len(value)
+        character = Mid$(value, index, 1)
+        If InStr(1, "0123456789abcdefABCDEF", character, vbBinaryCompare) = 0 Then Exit Function
+    Next index
+    IsHexDigestText = True
+End Function
+
+Private Function Sha256HexUtf8(ByVal text As String) As String
+    Dim shell As Object
+    Dim environmentValues As Object
+    Dim execObject As Object
+    Dim command As String
+    Dim stdoutText As String
+    Dim lines As Variant
+    Dim lineValue As Variant
+    Dim index As Long
+
+    Set shell = CreateObject("WScript.Shell")
+    Set environmentValues = shell.Environment("Process")
+    environmentValues("PHOENIX_STEP44_HASH_INPUT") = text
+
+    ' Inline PowerShell avoids temporary script execution-policy failures and keeps hashing self-contained.
+    command = "powershell.exe -NoProfile -NonInteractive -Command ""$sha=[System.Security.Cryptography.SHA256]::Create(); try { $bytes=[System.Text.Encoding]::UTF8.GetBytes($env:PHOENIX_STEP44_HASH_INPUT); ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }) -join '' } finally { $sha.Dispose() }"""
+    Set execObject = shell.Exec(command)
+    stdoutText = execObject.StdOut.ReadAll
+
+    On Error Resume Next
+    environmentValues("PHOENIX_STEP44_HASH_INPUT") = ""
+    On Error GoTo 0
+
+    stdoutText = Replace$(Replace$(stdoutText, vbCrLf, vbLf), vbCr, vbLf)
+    lines = Split(stdoutText, vbLf)
+    For index = UBound(lines) To LBound(lines) Step -1
+        lineValue = Trim$(CStr(lines(index)))
+        If Len(lineValue) = 64 Then
+            If IsHexDigestText(lineValue) Then
+                Sha256HexUtf8 = LCase$(lineValue)
+                Exit Function
+            End If
+        End If
+    Next index
+
+    Err.Raise vbObjectError + 4419, CONTRACT_ID, "SHA-256 calculation failed"
 End Function
 
 Private Function NormalizeOutboxRow(ByVal rowValues As Variant) As Variant
@@ -315,13 +455,13 @@ Private Sub EvaluateContractResult( _
     Dim generatedAt As Date
     Dim expiresAt As Date
     Dim computedChecksum As String
-    Dim fileStem As String
+    Dim sourceFileStem As String
 
     resultValue = "ACCEPTED"
     reasonCodes = ""
 
-    fileStem = FileStem(sourceFile)
-    If NormalizeText(rowValues(OB_INTENT_ID)) <> fileStem Then
+    sourceFileStem = FileStem(sourceFile)
+    If NormalizeText(rowValues(OB_INTENT_ID)) <> sourceFileStem Then
         resultValue = "CORRUPT"
         AddReason reasonCodes, "INTENT_FILENAME_MISMATCH"
     End If
@@ -422,26 +562,67 @@ Private Sub ProcessSingleOutboxFile( _
     Dim receiptPath As String
     Dim stateRow As Variant
     Dim auditLine As String
+    Dim currentStage As String
+    Dim currentFile As String
+    Dim finalStateNote As String
+    Dim fatalNote As String
+    Dim cleanupNote As String
+    Dim cleanupSourcePath As String
+    Dim cleanupDestinationPath As String
+    Dim fatalRecordedAt As String
+    Dim fatalIntentId As String
+    Dim fatalIdempotencyKey As String
+    Dim fatalSourceChecksum As String
+    Dim errorNumber As Long
+    Dim errorSource As String
+    Dim errorDescription As String
+    Dim errorLine As Long
+    Dim hasPriorFinalState As Boolean
+    Dim hasPriorFinalStateChecked As Boolean
+    Dim receiptWritten As Boolean
 
+    On Error GoTo FatalFail
+    currentStage = "MOVE_TO_PROCESSING"
+    currentFile = pendingFilePath
     currentTime = CurrentJst()
     processingPath = RepositoryPath(rootPath, PROCESSING_DIR) & "\" & FileStem(pendingFilePath) & ".csv"
     finalOutboxPath = processingPath
     MoveFileAtomic pendingFilePath, processingPath
+    currentFile = processingPath
 
-    On Error GoTo ParseFailure
+    currentStage = "READ_CSV"
     outboxRow = ReadSingleCsvRecord(processingPath, OutboxColumns())
+
+    currentStage = "NORMALIZE"
     normalizedRow = NormalizeOutboxRow(outboxRow)
-    On Error GoTo 0
 
     intentId = NormalizeText(normalizedRow(OB_INTENT_ID))
     idempotencyKey = NormalizeText(normalizedRow(OB_IDEMPOTENCY_KEY))
     sourceChecksum = NormalizeText(normalizedRow(OB_CHECKSUM))
+
+    currentStage = "LOAD_STATE"
     Set stateRows = LoadStateRows(rootPath)
 
-    latestIntentIndex = FindLatestStateRowIndex(stateRows, ST_INTENT_ID, intentId)
-    latestIdemIndex = FindLatestStateRowIndex(stateRows, ST_IDEMPOTENCY_KEY, idempotencyKey)
+    currentStage = "WRITE_PROCESSING_STATE"
+    AppendStateRow rootPath, BuildStateRow( _
+        FormatJstTimestamp(currentTime), _
+        intentId, _
+        idempotencyKey, _
+        sourceChecksum, _
+        "PROCESSING", _
+        "PROCESSING", _
+        "ENTERED_PROCESSING", _
+        processingPath, _
+        "", _
+        "working")
+
+    currentStage = "VALIDATE_CONTRACT"
     resultValue = ""
     reasonCodes = ""
+    latestIntentIndex = FindLatestFinalStateRowIndex(stateRows, ST_INTENT_ID, intentId)
+    latestIdemIndex = FindLatestFinalStateRowIndex(stateRows, ST_IDEMPOTENCY_KEY, idempotencyKey)
+    hasPriorFinalState = (latestIntentIndex > 0) Or (latestIdemIndex > 0)
+    hasPriorFinalStateChecked = True
 
     If latestIntentIndex > 0 Then
         latestRow = stateRows.Item(latestIntentIndex)
@@ -466,18 +647,6 @@ Private Sub ProcessSingleOutboxFile( _
     End If
 
     If resultValue = "" Then
-        AppendStateRow rootPath, BuildStateRow( _
-            FormatJstTimestamp(currentTime), _
-            intentId, _
-            idempotencyKey, _
-            sourceChecksum, _
-            "PROCESSING", _
-            "PROCESSING", _
-            "ENTERED_PROCESSING", _
-            processingPath, _
-            "", _
-            "working")
-
         EvaluateContractResult normalizedRow, processingPath, currentTime, resultValue, reasonCodes
     End If
 
@@ -493,12 +662,32 @@ Private Sub ProcessSingleOutboxFile( _
         corruptCount = corruptCount + 1
     End If
 
+    currentStage = "BUILD_RECEIPT"
     receiptRow = BuildReceiptRow(intentId, idempotencyKey, FormatJstTimestamp(currentTime), resultValue, reasonCodes, sourceChecksum)
+
+    currentStage = "WRITE_RECEIPT"
     receiptPath = RepositoryPath(rootPath, INBOX_DIR) & "\" & intentId & ".csv"
     WriteCsvRecordAtomic receiptPath, ReceiptColumns(), receiptRow
+    receiptWritten = True
 
+    If resultValue = "ACCEPTED" Then
+        finalOutboxPath = RepositoryPath(rootPath, COMPLETE_DIR) & "\" & FileStem(processingPath) & ".csv"
+    Else
+        finalOutboxPath = RepositoryPath(rootPath, REJECTED_DIR) & "\" & FileStem(processingPath) & ".csv"
+    End If
+
+    currentStage = "MOVE_TO_FINAL"
+    MoveFileAtomic processingPath, finalOutboxPath
+    currentFile = finalOutboxPath
+
+    finalStateNote = ""
+    If hasPriorFinalState Then
+        finalStateNote = "prior_final_exists=TRUE"
+    End If
+
+    currentStage = "WRITE_FINAL_STATE"
     stateRow = BuildStateRow( _
-        FormatJstTimestamp(currentTime), _
+        FormatJstTimestamp(CurrentJst()), _
         intentId, _
         idempotencyKey, _
         sourceChecksum, _
@@ -510,12 +699,7 @@ Private Sub ProcessSingleOutboxFile( _
         "finalized")
     AppendStateRow rootPath, stateRow
 
-    If resultValue = "ACCEPTED" Then
-        MoveFileAtomic processingPath, RepositoryPath(rootPath, COMPLETE_DIR) & "\" & FileStem(processingPath) & ".csv"
-    Else
-        MoveFileAtomic processingPath, RepositoryPath(rootPath, REJECTED_DIR) & "\" & FileStem(processingPath) & ".csv"
-    End If
-
+    currentStage = "WRITE_AUDIT"
     auditLine = BuildAuditJsonLine( _
         "receipt", _
         FormatJstTimestamp(currentTime), _
@@ -529,28 +713,129 @@ Private Sub ProcessSingleOutboxFile( _
         finalOutboxPath, _
         VBA_INSTANCE_ID, _
         CStr(ORDERS_SUBMITTED), _
+        finalStateNote, _
+        currentStage, _
+        currentFile, _
+        "", _
+        "", _
+        "", _
         "")
     AppendAuditJsonLine rootPath, auditLine
     Exit Sub
 
-ParseFailure:
-    corruptCount = corruptCount + 1
+FatalFail:
+    errorNumber = Err.Number
+    errorSource = Err.Source
+    errorDescription = Err.Description
+    errorLine = Erl
+    fatalRecordedAt = FormatJstTimestamp(CurrentJst())
+    fatalIntentId = intentId
+    If Len(fatalIntentId) = 0 Then
+        fatalIntentId = FileStem(pendingFilePath)
+    End If
+    fatalIdempotencyKey = idempotencyKey
+    fatalSourceChecksum = sourceChecksum
+
+    Err.Clear
+    cleanupNote = ""
     On Error Resume Next
-    AppendAuditJsonLine rootPath, BuildAuditJsonLine( _
-        "receipt", _
-        FormatJstTimestamp(CurrentJst()), _
-        FileStem(pendingFilePath), _
-        "", _
-        "", _
+    If receiptWritten And UCase$(NormalizeText(resultValue)) = "ACCEPTED" Then
+        If Len(receiptPath) > 0 And FileExists(receiptPath) Then
+            Kill receiptPath
+            If Err.Number <> 0 Then
+                cleanupNote = cleanupNote & "receipt_cleanup_failed=" & CStr(Err.Number) & ";"
+                Err.Clear
+            Else
+                cleanupNote = cleanupNote & "receipt_cleanup=DELETED;"
+                Err.Clear
+            End If
+        End If
+    End If
+
+    cleanupSourcePath = currentFile
+    If Len(cleanupSourcePath) = 0 Or Not FileExists(cleanupSourcePath) Then
+        If Len(finalOutboxPath) > 0 And FileExists(finalOutboxPath) Then
+            cleanupSourcePath = finalOutboxPath
+        ElseIf Len(processingPath) > 0 And FileExists(processingPath) Then
+            cleanupSourcePath = processingPath
+        ElseIf Len(pendingFilePath) > 0 And FileExists(pendingFilePath) Then
+            cleanupSourcePath = pendingFilePath
+        End If
+    End If
+
+    If Len(cleanupSourcePath) > 0 Then
+        cleanupDestinationPath = RepositoryPath(rootPath, REJECTED_DIR) & "\" & FileStem(cleanupSourcePath) & ".csv"
+        If StrComp(NormalizeText(cleanupSourcePath), NormalizeText(cleanupDestinationPath), vbTextCompare) <> 0 Then
+            MoveFileAtomic cleanupSourcePath, cleanupDestinationPath
+            If Err.Number <> 0 Then
+                cleanupNote = cleanupNote & "cleanup_move_failed=" & CStr(Err.Number) & ";"
+                Err.Clear
+            Else
+                cleanupNote = cleanupNote & "cleanup_move=REJECTED;"
+                Err.Clear
+            End If
+        Else
+            cleanupNote = cleanupNote & "cleanup_move=SKIPPED_ALREADY_REJECTED;"
+        End If
+    Else
+        cleanupNote = cleanupNote & "cleanup_move=SKIPPED_NO_SOURCE;"
+    End If
+    On Error GoTo 0
+
+    Do While Len(cleanupNote) > 0 And Right$(cleanupNote, 1) = ";"
+        cleanupNote = Left$(cleanupNote, Len(cleanupNote) - 1)
+    Loop
+
+    fatalNote = "stage=" & currentStage
+    If Len(cleanupNote) > 0 Then
+        fatalNote = fatalNote & ";" & cleanupNote
+    End If
+    If hasPriorFinalStateChecked And hasPriorFinalState Then
+        fatalNote = fatalNote & ";prior_final_exists=TRUE"
+    End If
+
+    On Error Resume Next
+    stateRow = BuildStateRow( _
+        fatalRecordedAt, _
+        fatalIntentId, _
+        fatalIdempotencyKey, _
+        fatalSourceChecksum, _
         "CORRUPT", _
-        "CSV_PARSE_FAILED", _
+        "RUN_FAILED", _
+        "RUN_FAILED", _
+        currentFile, _
+        receiptPath, _
+        fatalNote)
+    AppendStateRow rootPath, stateRow
+    If Err.Number <> 0 Then
+        If Len(fatalNote) > 0 Then fatalNote = fatalNote & ";"
+        fatalNote = fatalNote & "state_write_failed=" & CStr(Err.Number)
+        Err.Clear
+    End If
+    On Error GoTo 0
+
+    On Error Resume Next
+    auditLine = BuildAuditJsonLine( _
+        "fatal", _
+        fatalRecordedAt, _
+        fatalIntentId, _
+        fatalIdempotencyKey, _
+        fatalSourceChecksum, _
+        "RUN_FAILED", _
+        "RUN_FAILED", _
         pendingFilePath, _
-        "", _
-        processingPath, _
+        receiptPath, _
+        currentFile, _
         VBA_INSTANCE_ID, _
         CStr(ORDERS_SUBMITTED), _
-        Err.Description)
-    MoveFileAtomic processingPath, RepositoryPath(rootPath, REJECTED_DIR) & "\" & FileStem(processingPath) & ".csv"
+        fatalNote, _
+        currentStage, _
+        currentFile, _
+        CStr(errorNumber), _
+        errorSource, _
+        errorDescription, _
+        CStr(errorLine))
+    AppendAuditJsonLine rootPath, auditLine
     On Error GoTo 0
 End Sub
 
