@@ -1,0 +1,57 @@
+{
+  "historical_replay": {
+    "enabled": true,
+    "manifest": "data/historical_replay_manifest.json",
+    "price_glob": "data/market_cache/*_T.csv",
+    "active_pipeline_config": "config/v7_direct_pipeline_config.json",
+    "train_sessions": 504,
+    "test_sessions": 252,
+    "step_sessions": 252,
+    "minimum_history_sessions": 100,
+    "validation_protocol": {
+      "replay_scope": "SURROGATE_TECHNICAL_BASELINE",
+      "parameter_policy": "FROZEN_TRACKED_CONFIG",
+      "sealed_holdout_status": "NOT_ESTABLISHED"
+    },
+    "strategy": {
+      "rsi_min": 40.0,
+      "rsi_max": 72.0,
+      "ma_short": 5,
+      "ma_mid": 25,
+      "ma_long": 75,
+      "signal_score_threshold": 70.0,
+      "stop_atr_multiplier": 2.25,
+      "target_r_multiplier": 2.0,
+      "max_hold_sessions": 20
+    },
+    "execution_assumptions": {
+      "entry_slippage_rate": 0.0005,
+      "exit_slippage_rate": 0.0005,
+      "maximum_volume_participation_rate": 0.01,
+      "daily_price_limit_model": "NOT_IMPLEMENTED"
+    },
+    "gate": {
+      "minimum_folds": 5,
+      "minimum_oos_sessions": 1000,
+      "minimum_simulated_trades": 30,
+      "minimum_profit_factor": 1.2,
+      "minimum_successful_fold_rate": 0.6,
+      "maximum_drawdown_pct": 10.0,
+      "maximum_risk_halt_days": 0,
+      "maximum_risk_limit_violations": 0
+    },
+    "protected_files": [
+      "state/v7_paper_broker.json",
+      "state/v7_risk_state.json",
+      "state/v7_scheduler_state.json",
+      "state/v7_market_data_guard.json",
+      "state/v7_order_lifecycle_snapshot.json",
+      "state/v7_order_lifecycle_events.jsonl",
+      "reports/v7_run_history.jsonl"
+    ],
+    "report_json": "reports/v7_historical_replay.json",
+    "report_text": "reports/v7_historical_replay.txt",
+    "folds_csv": "reports/v7_historical_replay_folds.csv",
+    "trades_csv": "reports/v7_historical_replay_trades.csv"
+  }
+}

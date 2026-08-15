@@ -47,3 +47,16 @@ reports/v7_readiness_gate.txt
 reports/v7_order_lifecycle.json
 reports/v7_order_lifecycle.txt
 state/*.jsonl
+
+# PHOENIX generated runtime/cache files
+data/market_cache/
+data/market_data_cache*.pkl
+data/market_risk_history*.csv
+data/market_risk_latest*.json
+.step*_test_tmp/
+.historical_*_tmp/
+
+# PHOENIX local/runtime artifacts
+PHOENIX_STEP44_LocalReceiver.xlsm
+state/v7_vba_bridge_step44_state.csv
+work/
