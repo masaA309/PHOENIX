@@ -1,120 +1,238 @@
 # PHOENIX 運用標準
 
-このファイルをPHOENIX運用ルールの唯一の標準書（Single Source of Truth）とする。`knowledge` は事実・判断履歴・失敗記録・テンプレートを保持する補助記憶であり、このファイルと競合する別標準を作らない。
+この `AGENTS.md` をPHOENIX開発・運用ルールの唯一の標準書とする。
+過去メモ、会話、knowledge、旧ルールと矛盾する場合は、現在のユーザー明示指示を最優先し、その次に本ファイルを優先する。
 
-## 1. 最優先目標
+## 0. MANDATORY STARTUP GATE
 
-- PHOENIXを最短・最小コストで完成させる。
-- クレジット、時間、ユーザー操作を無駄にしない。
-- 安全性、再現性、費用控除後の証拠を損なってまで完了を急がない。
+PHOENIXに関する全ての回答・設計・校正・Codex指示・実装判断・実機指示の最初に、必ずその回の `AGENTS.md` 実体を読む。
 
-## 2. 基本原則
+実体の定義:
+- ChatGPT: GitHub main 上の `masaA309/PHOENIX/AGENTS.md` 実体を読む。
+- Codex: ローカル正本の `AGENTS.md` 実体を読む。
+- 実際に読んだ場合のみ `AGENTS_READ:YES` とする。
+- 会話履歴、要約、記憶だけで `AGENTS_READ:YES` にしてはならない。
 
-- 現在のユーザー指示を、過去の記憶・保存済み指示・既定手順より最優先する。
-- 推測しない。ツール、権限、正本、実行結果を実際に確認する。
-- 未確認事項を断定しない。不明点は不明、未実施は未実施と明記する。
-- 現在の事実と将来案を混同しない。
-- リスク制限、鮮度確認、Readiness Gate、費用前提を、都合のよい結果を作るために弱めない。
+開始順序:
+1. AGENTS.mdを読む
+2. 今回の目的を1文で固定
+3. 禁止事項・正本・既存PASS領域・実機制約を確認
+4. CALIBRATION_RECORDを作る
+5. その後にのみ指示・実装・実機判断へ進む
 
-## 3. 作業開始
+AGENTS.mdを確認できない場合:
+`AGENTS_GATE: FAIL`
+として停止する。推測で進まない。
 
-1. 最初にこの `AGENTS.md` を読む。
-2. `knowledge/00_INDEX.md` の導線を使い、今回必要な `knowledge` だけを読む。
-3. 前回の目的と今回の目的を確認し、今回の目的を1文で固定する。
-4. 目的が変わる場合は、既存タスクへ混在させず新しいCodexチャットを開始する。
-5. 正本、使用可能なツール、権限、変更対象、保護対象を確認してから作業する。
+## 1. 役割
 
-## 4. タスク管理
+- USER: 最終方針・仕様変更・実注文・Git・保護操作を承認する。
+- ChatGPT: 設計、完成条件、事前検証、独立校正、最終判断を担当する。
+- Codex: ChatGPTが確定した範囲の実装・指定実行だけを担当する。独自設計・横断調査・別方式追加は禁止。
+- Claude: ユーザー明示時のみ第三者監査。
+- Copilotは使用しない。
+- Work handoff / 自動handoffは禁止。ユーザー明示時のみ許可。
 
-- 1タスク1目的とする。
-- 目的に無関係な調査をしない。
-- 全体テストをしない。検証は変更箇所に直接関係する最小範囲に限定する。
-- 無関係なリファクタリングをしない。
-- 指定された変更対象だけを扱い、保護対象へ触れない。
-- 保存済みの共通前提を長文で繰り返さず、`knowledge/PROMPT_LIBRARY.md` の該当テンプレートを使う。
+## 2. CALIBRATION RECORD
 
-## 5. 実行判断
+Codex実装指示またはユーザー実機指示の前に必ず以下を明示的に確認する。
 
-- 初回実行前に「この操作で新しい情報が得られるか」を確認し、YESの場合だけ実行する。
-- 再実行前には上記に加えて「前回から失敗条件が変わったか」を確認し、両方がYESの場合だけ実行する。
-- 同じ失敗条件では再実行しない。
-- 同じ目的の実行が2回失敗したら停止し、失敗条件、得られた事実、再開に必要な条件を報告する。
-- 成功済みの取得、検証、通知を、新しい理由なしに繰り返さない。
+CALIBRATION_RECORD:
+AGENTS_READ:
+OBJECTIVE:
+VERIFIED_FACTS:
+UNVERIFIED_RUNTIME_ASSUMPTIONS:
+PAST_FAILURE_CLASS_CHECK:
+OWNER_LIFECYCLE_CONTEXT:
+FAILURE_ROLLBACK_PATH:
+RESULT_BRANCHES:
+USER_MACHINE_ROLE:
+CALIBRATION_RESULT:
 
-## 6. 実行環境
+規則:
+- 項目省略禁止。
+- AGENTS_READ != YES → FAIL。
+- correctness/safetyに必要な未証明runtime前提が残る → FAIL。
+- mock/unit PASSだけでruntime成立済み扱い禁止。
+- 公式APIであることだけで実機成立済み扱い禁止。
+- 類似経路が過去に動いたことだけで成立済み扱い禁止。
+- AGENTS_READ は当該 actor が上記の実体を実際に read したときのみ YES とする。
+- PASS/FAIL/NOT_PROVEN後の進行を実装前に固定する。
+- record無しの「校正PASS」は無効。
+- ユーザーが「校正」と言った場合、直前の自分の案を信用せず独立監査として再実施する。
 
-- `knowledge/CURRENT_STATE.md` に記載された正本だけを使用する。
-- ブラウザWorkを使用しない。
-- 自動handoffを使用しない。
-- 別worktree、`Documents\Codex`、別コピーを正本または実装先にしない。
-- 通常のPython実行・通知・運用検証は、正本の `.venv\Scripts\python.exe` を最優先する。
-- 代替Pythonが必要な場合は、実行前に理由、絶対パス、依存関係差を報告し、承認を得る。
-- PATH変更、パッケージ導入、外部接続、Git操作は、現在のユーザー指示で許可された範囲だけ行う。
+## 3. 過去失敗class照合
 
-## 7. 実装
+最低限、毎回今回の変更と関係する以下を照合する。
 
-- 合意済み仕様を変更しない。
-- 設計・アーキテクチャ・正本方針の変更は、理由、利点、欠点、影響を提示し、ユーザー承認後に行う。
-- PAPERを維持し、実注文やライブ運用を自動で有効化しない。資本投入とライブ移行は人間の判断とする。
-- Dry Runでbroker、order、fill、risk、readiness、evidenceの状態を変更しない。
-- 通知前に当日レポートとデータ基準日時を確認し、古い結果を現在結果として送らない。
-- Guardian、Position Reconciliation、Fail Safeを迂回せず、`PAPER` と `Orders submitted: 0` を維持する。
-- 認証情報、口座識別子、Cookie、Webhookその他の秘密情報をリポジトリへ記録しない。
-- runtime、ログ、生成レポート、workbook、broker取込データをGit対象にしない。
+- heartbeat / PID ownership
+- process lifecycle / PROCESS_IDLE
+- monitoring-ready と trading-ready の混同
+- Excel instance / workbook owner
+- COM activation / logon session
+- ROT session visibility
+- GetActiveObject wrong-instance
+- sandbox desktop / user desktop 混同
+- EnumWindows / EnumDesktopWindows visibility
+- source変更のproduction未反映
+- consumer owner / trigger欠落
+- startup pending sequencing
+- backupが最初のmutationより後
+- bootstrap import後dirty state
+- 未証明runtime前提をunit testで成立済み扱い
+- AGENTS実体をreadせず `AGENTS_READ:YES` と自己申告
+- ChatGPTから参照可能な GitHub main 版を読まずに、ローカル AGENTS だけで自己停止
+- AGENTSローカル/GitHub不一致を放置
 
-## 8. 回答形式
+同じfailure classを未対策で再使用する指示は自動FAIL。
+新しい重大failure classが判明した場合、次作業前に本章へ統合する。
 
-毎回、次の3項目を同じ返答へ含める。
+## 4. USER MACHINE
 
-1. ①完了確認
-   - 変更ファイル、検証結果、保護対象、Git操作、外部接続を簡潔に示す。
-2. ②保存コマンド
-   - ユーザーが許可した範囲のコマンドだけを示す。Git操作禁止時は「保存コマンドなし」と明記する。
-3. ③次のCodex指示書
-   - 次の1目的だけを扱う短い指示書を示す。自動handoffはしない。
+- ユーザーをデバッガー・エラー報告要員にしない。
+- 原則、ユーザー実機は最終受入だけ。
+- `start → error → log → 修正 → 再実行` の反復禁止。
+- USER_MACHINE_READY=YESにはCALIBRATION_RECORD PASS必須。
+- 診断が不可避ならread-only、観測項目固定、1回だけ。
+- 同じfailure classで2回目の実機診断は禁止。
+- 実機で新しい重大前提欠陥が出た場合、それは校正失敗として扱う。
 
-## 9. 標準化（PDCA/SDCA）
+## 5. 設計・実装順序
 
-ミスが起きた場合は、次の順序をすべて完了して改善終了とする。
+必ず:
+事実
+→ feasibility
+→ owner/lifecycle/state transition
+→ process/session/desktop/permission
+→ external dependency
+→ deployment/persistence
+→ failure/rollback/recovery
+→ observable completion
+→ tests
+→ Codex実装
+→ 校正
+→ 最終実機受入
 
-原因分析
+完成仕様が固定される前に実装・大量testを行わない。
+後から完成条件を小出し追加してtestを増築し続けない。
 
-↓
+## 6. Codex送信ゲート
 
-最小修正
+Codexへ送る前に:
+- 1目的か
+- ChatGPT側で設計・調査を完了したか
+- 未確定仕様がないか
+- owner/lifecycle/contextが閉じているか
+- READ/WRITE最小範囲が固定済みか
+- failure/rollbackが固定済みか
+- PASS/FAIL/NOT_PROVEN分岐が固定済みか
+- test/PASS条件が固定済みか
+- 既存PASS領域を再調査しないか
+を確認する。
 
-↓
+1つでもNOならCodexへ送らない。
 
-検証
+Codex指示は簡潔な完成版とし、必ず:
+WORKSPACE
+TASK
+ALLOWED
+FORBIDDEN
+SAFETY
+OUTPUT
+を含む。
 
-↓
+差分指示禁止。
+open-ended横断調査禁止。
+「必要なら調べる」「潜在defectを広く探す」禁止。
+途中実況禁止。
 
-標準化
+## 7. FAIL / NOT_PROVEN
 
-↓
+- 推測修正禁止。
+- 新方式を次々試してユーザー実機で答え合わせしない。
+- 同じfailure classなら局所patchではなく前提・方式を再評価する。
+- FAIL/HOLD時は理由だけで終わらない。
+- 安全な代替完成指示を確定できる場合は同じ返答で提示する。
+- 確定できない場合はNOT_PROVENとして、ユーザー実機を使わない次の安全な工程を提示する。
+- 「次に校正する」「後で考える」で終了しない。
 
-AGENTS統合
+## 8. テスト
 
-↓
+- 仕様固定後のみ実施。
+- 変更に直接関係する既存testを最小限使用する。
+- 新規test fileは原則禁止。
+- 全体test・重いvalidationは明示許可なし禁止。
+- PASS済み検証を新しいproof targetなしに再実行しない。
+- OOS / Formal Validation / Future Poison再実行禁止。
 
-PROMPT_LIBRARY更新
+## 9. 実行環境
 
-↓
+正本:
+`C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX`
 
-FAILURES更新
+- `work/` 使用禁止。
+- 別worktree、Documents\Codex、別コピーを実装先にしない。
+- Python:
+  `./.venv/Scripts/python.exe`
+- .venv削除・再作成禁止。
+- package再install・大量削除は禁止。明示許可時のみ。
+- rm -rf / git clean禁止。
+- destructive Git禁止。
 
-↓
+## 10. Trading Safety
 
-次回確認
+明示解禁まで:
+- PAPER維持
+- orders_submitted=0維持
+- BRIDGE_ARMED=False維持
+- 実注文禁止
+- live_trading変更禁止
+- broker/RSS送信禁止
 
-ルールの追記で済ませず、必ず既存ルール、既存テンプレート、既存Failureへ統合する。
+Guardian / reconciliation / fail-safeを迂回しない。
 
-## 10. AGENTS管理
+## 11. Git
 
-- 1テーマ1ルールとする。
-- 重複を作らない。
-- 矛盾を残さない。
-- この `AGENTS.md` をPHOENIX運用ルールのSingle Source of Truthとする。
-- ルール追加ではなく、該当する既存章を統合更新する。
-- `knowledge` へ同じルールを複製せず、事実、判断履歴、Failure、テンプレートだけを役割別に保存する。
-- 新しい記憶はユーザー承認前に `approved` または確定ルールへ昇格させない。
+ユーザー明示許可なしに以下禁止:
+- git add
+- git commit
+- git push
+- destructive Git
+
+例外:
+- ユーザーが AGENTS.md ルールの追加・修正・上書きを明示要求した場合、その要求は `AGENTS.md` 単独の `git add` / `git commit` / `git push` を許可したものとして扱う。
+- ただし、ユーザーが `commitしない` または `pushしない` と明示した場合は除く。
+- AGENTS.md 以外のファイルを同じ commit に含めてはならない。
+- 通常のコード変更については従来どおり明示許可なし commit/push 禁止を維持する。
+
+runtime、ログ、生成レポート、workbook、broker取込データを勝手にGit対象にしない。
+
+## 12. 仕様・正本保護
+
+- 合意済み仕様を勝手に変更しない。
+- `max_positions=5` を承認仕様として扱わない。
+- 設計・アーキテクチャ変更はChatGPTが先に確定する。
+- Codexは確定設計を再解釈しない。
+- production workbook/fileを勝手に作り直さない。
+- 認証情報・口座識別子・秘密情報をrepoへ記録しない。
+
+## 13. 回答・指示形式
+
+- 簡潔に結果を返す。
+- 実況・進行宣言禁止。
+- 複数案を並べてユーザーに選択させず、最善案を1つ出す。
+- 差分ではなく完成版を出す。
+- Codex指示が不要なら出さない。
+- FAILを出す場合、可能なら同じ返答で修正版完成指示も出す。
+- ユーザーに同じログ・同じ試験を繰り返させない。
+
+## 14. AGENTS管理
+
+- 1テーマ1ルール。
+- 重複禁止。
+- 矛盾禁止。
+- 追記で衝突させず、既存章を統合・上書きする。
+- 恒久ルールはAGENTS.mdだけに置く。
+- knowledgeには状態・Failure・履歴・テンプレートだけを置く。
+- AGENTS更新後、旧ルールとの互換性を確認する。
+- 変更後に重複・矛盾が1つでも残る場合は完了扱い禁止。
