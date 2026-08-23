@@ -53,6 +53,8 @@ CALIBRATION_RESULT:
 - 項目省略禁止。
 - AGENTS_READ != YES → FAIL。
 - correctness/safetyに必要な未証明runtime前提が残る → FAIL。
+- correctness / safety / acceptance に影響する未証明 runtime 前提は漏れなく `UNVERIFIED_RUNTIME_ASSUMPTIONS` に列挙する。1件でも残る場合は `USER_MACHINE_READY=NO` とする。`実機で確認すれば分かる` は PASS 理由にしない。`NONE` の場合も、なぜ `NONE` と言えるかを `VERIFIED_FACTS` または `OWNER_LIFECYCLE_CONTEXT` に明示する。
+- owner / writer / reader / update trigger / persistence先が異なる類似概念は同一扱いしない。monitoring heartbeat と Excel heartbeat、source変更済み と production反映済みなどは概念分離して確認する。いずれかの同一性が未証明なら校正 PASS にしない。
 - mock/unit PASSだけでruntime成立済み扱い禁止。
 - 公式APIであることだけで実機成立済み扱い禁止。
 - 類似経路が過去に動いたことだけで成立済み扱い禁止。
@@ -88,6 +90,7 @@ CALIBRATION_RESULT:
 - AGENTSローカル/GitHub不一致を放置
 
 同じfailure classを未対策で再使用する指示は自動FAIL。
+- 新しい `UNVERIFIED_RUNTIME_ASSUMPTIONS` は毎回、該当する過去 failure class と照合する。類似 failure class を別 API・別手段へ置き換えただけでは対策済みとみなさない。重複がある場合は非実機工程で閉じるか方式選定へ戻し、同型前提の再使用は自動 FAIL とする。
 新しい重大failure classが判明した場合、次作業前に本章へ統合する。
 
 ## 4. USER MACHINE
@@ -95,6 +98,7 @@ CALIBRATION_RESULT:
 - ユーザーをデバッガー・エラー報告要員にしない。
 - ユーザーにファイル内の該当箇所探索、必要部分の選別、コード抽出、値の推測・選択をさせない。ChatGPT/Codex側で事前に完成内容を確定し、対象場所、入力値、貼付用コード全文まで、そのまま実行できる形で提示する。`ファイルを開いて必要部分を探す`、`該当箇所だけコピーする`、`適切な値を選ぶ`、`必要部分を抜き出す` 等の指示は禁止する。コード貼付が必要なら元ファイルから抽出させず、完成コード全文を提示する。値入力が必要なら判断させず、確定済みの値そのものを提示する。例外は、ユーザー自身が探索・選択を明示的に希望した場合のみ。
 - 原則、ユーザー実機は最終受入だけ。
+- 最終受入は1回消費の厳密な証明サイクルとする。実機開始前に証明対象リストを固定し、同じ起動〜終了サイクルで全項目を同時に証明する。未列挙の重大前提欠陥が出たらその受入は FAIL とし、その場で修正→再実行しない。再受入は、依存グラフ再閉鎖と CALIBRATION_RECORD 再作成後、ユーザーが明示的に再受入を許可した場合のみ可能とする。
 - `start → error → log → 修正 → 再実行` の反復禁止。
 - USER_MACHINE_READY=YESにはCALIBRATION_RECORD PASS必須。
 - 診断が不可避ならread-only、観測項目固定、1回だけ。
@@ -116,6 +120,8 @@ CALIBRATION_RESULT:
 → Codex実装
 → 校正
 → 最終実機受入
+
+実機受入前に対象機能の owner / lifecycle / trigger / heartbeat / readiness / external dependency / deployment / persistence / failure path / observable completion を一つの依存グラフとして閉じる。一部だけ閉じて実機へ進むことは禁止する。各段の input / 成立条件 / failure 時挙動 / 次段への副作用 / observable completion を事前固定し、未閉鎖段が1つでもあれば implementation complete / calibration PASS / USER_MACHINE_READY 扱いにしない。
 
 完成仕様が固定される前に実装・大量testを行わない。
 後から完成条件を小出し追加してtestを増築し続けない。
