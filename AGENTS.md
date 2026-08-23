@@ -79,6 +79,9 @@ CALIBRATION_RESULT:
 - startup pending sequencing
 - backupが最初のmutationより後
 - bootstrap import後dirty state
+- OneDrive web/local path equivalenceを未確認のままworkbook identity / path / write判定に使う
+- production workbook自身によるVBProject mutation + Saveをruntime permission/state未証明のまま成立扱いする
+- pending残留だけでscheduler未起動とREADY=false CleanExitを判別できると扱う
 - 未証明runtime前提をunit testで成立済み扱い
 - AGENTS実体をreadせず `AGENTS_READ:YES` と自己申告
 - ChatGPTから参照可能な GitHub main 版を読まずに、ローカル AGENTS だけで自己停止
