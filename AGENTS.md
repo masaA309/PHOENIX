@@ -135,6 +135,10 @@ Codexへ送る前に:
 - owner/lifecycle/contextが閉じているか
 - READ/WRITE最小範囲が固定済みか
 - exact file / exact function / exact call path / exact input が1本に固定されているか
+- PROOF TARGETを含む指示では、各targetと `EXACT_EVIDENCE_SOURCE` を1対1で明示し、各PROOF TARGETについて `EXACT_EVIDENCE_SOURCE` を1つに固定しているか
+- 証拠source未固定のPROOF TARGETが1件でもあればCodexへ送らないか
+- Codexに証拠sourceの選定・探索・代替・推定を残していないか
+- Codexによる別sourceへの切替を許していないか
 - Codexにworkspace選定を残していないか
 - failure/rollbackが固定済みか
 - PASS/FAIL/NOT_PROVEN分岐が固定済みか
