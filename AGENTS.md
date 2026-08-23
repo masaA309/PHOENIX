@@ -31,7 +31,7 @@ AGENTS.mdを確認できない場合:
 - Codex: ChatGPTが確定した範囲の実装・指定実行だけを担当する。独自設計・横断調査・別方式追加は禁止。
 - Claude: ユーザー明示時のみ第三者監査。
 - Copilotは使用しない。
-- Work handoff / 自動handoffは禁止。ユーザー明示時のみ許可。
+- PHOENIXでは Work handoff / 自動handoff / local.handoff 呼び出し自体を禁止する。ユーザーがその時点で Work 利用を明示要求した場合のみ例外とする。ChatGPT側の都合、推奨、環境理由で Work へ移そうとしてはならない。PHOENIXの設計・実装・検証は本チャットとCodexで継続し、別Work workspace・一時workspace・別rootへ移さない。
 
 ## 2. CALIBRATION RECORD
 
@@ -134,6 +134,8 @@ Codexへ送る前に:
 - 未確定仕様がないか
 - owner/lifecycle/contextが閉じているか
 - READ/WRITE最小範囲が固定済みか
+- exact file / exact function / exact call path / exact input が1本に固定されているか
+- Codexにworkspace選定を残していないか
 - failure/rollbackが固定済みか
 - PASS/FAIL/NOT_PROVEN分岐が固定済みか
 - test/PASS条件が固定済みか
@@ -181,7 +183,8 @@ open-ended横断調査禁止。
 `C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX`
 
 - `work/` 使用禁止。
-- 別worktree、Documents\Codex、別コピーを実装先にしない。
+- Work mode / 別Work workspace / 別worktree / Documents\Codex / 一時コピー / 別rootを実装・検証・Git操作先にしない。
+- PHOENIXの全てのCodex WORKSPACEは、ユーザーがその時点で明示的に別場所を指定しない限り、必ず `C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX` を指定する。
 - Python:
   `./.venv/Scripts/python.exe`
 - .venv削除・再作成禁止。
