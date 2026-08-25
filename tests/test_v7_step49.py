@@ -1097,16 +1097,17 @@ class ProductionRakutenRssTransportStep49Test(unittest.TestCase):
         self.assertIn("OBR_BridgePath(bridgeRoot, OBR_INBOX_RELATIVE)", text)
         self.assertIn("Private Const OBR_BRIDGE_ARMED As Boolean = False", text)
         self.assertIn("Public Sub RunPhoenixRssOrderBridgeConsumer()", text)
-        self.assertIn("If Not OBR_BRIDGE_ARMED Then", text)
         self.assertIn("OBR_ReadBridgeReadyState readyState", text)
         self.assertIn("If Not readyState.Ready Then", text)
         self.assertIn("OBR_LogOrderBridgeEvent bridgeRoot, OBR_OBSERVABILITY_EVENT_READY_FALSE", text)
-        gate_index = text.index("If Not OBR_BRIDGE_ARMED Then")
         ready_index = text.index("OBR_ReadBridgeReadyState readyState")
         ready_false_index = text.index("OBR_LogOrderBridgeEvent bridgeRoot, OBR_OBSERVABILITY_EVENT_READY_FALSE")
         exit_index = text.index("GoTo CleanExit", text.index("If Not readyState.Ready Then"))
         process_index = text.index("OBR_ProcessBridgePendingRequests bridgeRoot")
-        self.assertLess(gate_index, ready_index)
+        consumer_section = text[
+            text.index("Public Sub RunPhoenixRssOrderBridgeConsumer()"):text.index("Private Sub OBR_ProcessPendingRequestPath")
+        ]
+        self.assertNotIn("If Not OBR_BRIDGE_ARMED Then", consumer_section)
         self.assertLess(ready_index, ready_false_index)
         self.assertLess(ready_false_index, exit_index)
         self.assertLess(exit_index, process_index)
@@ -1184,8 +1185,15 @@ class ProductionRakutenRssTransportStep49Test(unittest.TestCase):
         self.assertIn('"AddInReady=" & OBR_BooleanText(readyState.AddInReady)', module_text)
         self.assertIn('"OrderTransportReady=" & OBR_BooleanText(readyState.OrderTransportReady)', module_text)
         self.assertIn('"HeartbeatAgeSeconds=" & CStr(readyState.HeartbeatAgeSeconds)', module_text)
-        self.assertIn('"Armed/B2=" & OBR_BooleanText(readyState.ArmedFalse)', module_text)
+        self.assertNotIn('ArmedFalse As Boolean', module_text)
+        self.assertNotIn('readyState.ArmedFalse', module_text)
+        self.assertNotIn('"Armed/B2="', module_text)
         self.assertIn('"Ready=" & OBR_BooleanText(readyState.Ready)', module_text)
+        self.assertIn("OBR_RequestIsLiveIntent(requestRow)", module_text)
+        self.assertIn("OBR_RequestLiveFlagsComplete(requestRow)", module_text)
+        self.assertIn("LIVE_REQUEST_FLAGS_INSUFFICIENT", module_text)
+        self.assertIn("LIVE_REQUEST_REQUIRES_BRIDGE_ARMED", module_text)
+        self.assertIn("LIVE_FIRE_CALL_CONTRACT_NOT_PROVEN", module_text)
 
         self.assertIn('OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, OBR_REQUEST_READ_FAILED_MESSAGE, "REQUEST_ID_MISMATCH", "request_id does not match file name"', module_text)
         self.assertIn('OBR_LogOrderBridgeEvent bridgeRoot, OBR_OBSERVABILITY_EVENT_OBSERVABILITY_ERROR, "", "", "request csv read failed"', module_text)
@@ -1921,7 +1929,14 @@ class ProductionRakutenRssTransportStep49Test(unittest.TestCase):
         writes: list[tuple[str, object]] = []
         fixed_now = datetime(2026, 8, 21, 8, 47, 42, tzinfo=ZoneInfo("Asia/Tokyo"))
 
-        backend._read_status_values = lambda session: (False, "READY", "NOT_CONNECTED")  # type: ignore[method-assign]
+        backend._read_status_values = mock.Mock(side_effect=AssertionError("B2 must not gate READY"))  # type: ignore[method-assign]
+        backend._read_runtime_values = lambda session: {  # type: ignore[method-assign]
+            WORKBOOK_STATE_EXCEL_ALIVE_CELL: True,
+            WORKBOOK_STATE_RSS_CONNECTED_CELL: True,
+            WORKBOOK_STATE_ADDIN_READY_CELL: True,
+            WORKBOOK_STATE_ORDER_TRANSPORT_READY_CELL: True,
+            WORKBOOK_STATE_HEARTBEAT_CELL: fixed_now.isoformat(timespec="seconds"),
+        }
         backend._has_required_addins = lambda application: (  # type: ignore[method-assign]
             True,
             "MarketSpeed2_RSS_64bit.xll=C:/rss/MarketSpeed2_RSS_64bit.xll; "
@@ -1934,14 +1949,15 @@ class ProductionRakutenRssTransportStep49Test(unittest.TestCase):
         session = mock.Mock()
         session.application = mock.Mock()
 
-        connected, message = backend.health_check(session, publish=False)
-
-        self.assertTrue(connected)
-        self.assertEqual([], writes)
-        self.assertIn("RSS_CONNECTED", message)
-        self.assertIn("MarketSpeed2_RSS_64bit.xll", message)
-
         with mock.patch("phoenix_core.production_rakuten_rss_transport._now_jst", return_value=fixed_now):
+            connected, message = backend.health_check(session, publish=False)
+
+            self.assertTrue(connected)
+            backend._read_status_values.assert_not_called()
+            self.assertEqual([], writes)
+            self.assertIn("RSS_CONNECTED", message)
+            self.assertIn("MarketSpeed2_RSS_64bit.xll", message)
+
             connected, message = backend.health_check(session, publish=True)
 
         self.assertTrue(connected)

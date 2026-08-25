@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -15,6 +16,7 @@ RISK_CONFIG_FILE = "config/v7_risk_config.json"
 OUTPUT_FILE = "reports/market_regime.json"
 LEGACY_MARKET_RISK_FILE = "data/market_risk_latest.json"
 REQUIRED_COLUMNS = ("ticker", "価格", "MA25", "MA75", "前日比%", "MACD判定", "RSI")
+RAW_REQUIRED_COLUMNS = ("price_raw", "ma75_raw")
 VALID_REGIMES = {"BULL", "NEUTRAL", "BEAR"}
 
 
@@ -55,15 +57,29 @@ def _load_manifest(root: Path) -> dict[str, Any]:
     return manifest
 
 
-def _load_risk_threshold(root: Path) -> float:
+def _load_risk_contract(root: Path) -> dict[str, Any]:
     payload = _read_json(resolve_path(root, RISK_CONFIG_FILE))
+    risk_policy_id = _normalize_text(payload.get("risk_policy_id"))
+    breadth_metric = _normalize_text(payload.get("breadth_metric"))
     value = payload.get("breadth_threshold")
+    if not risk_policy_id:
+        raise ValueError("risk_policy_id is missing from risk config")
+    if not breadth_metric:
+        raise ValueError("breadth_metric is missing from risk config")
     if value is None:
         raise ValueError("breadth_threshold is missing from risk config")
     threshold = float(value)
     if not (0.0 <= threshold <= 1.0):
         raise ValueError("breadth_threshold must be between 0 and 1")
-    return threshold
+    bear_max_total_invested_pct = float(payload.get("bear_max_total_invested_pct", 0.0))
+    if not (0.0 <= bear_max_total_invested_pct <= 1.0):
+        raise ValueError("bear_max_total_invested_pct must be between 0 and 1")
+    return {
+        "risk_policy_id": risk_policy_id,
+        "breadth_metric": breadth_metric,
+        "breadth_threshold": threshold,
+        "bear_max_total_invested_pct": bear_max_total_invested_pct,
+    }
 
 
 def _load_report(root: Path, manifest: Mapping[str, Any]) -> pd.DataFrame:
@@ -78,7 +94,11 @@ def _load_report(root: Path, manifest: Mapping[str, Any]) -> pd.DataFrame:
         raise ValueError("report_sha256 mismatch")
 
     frame = pd.read_csv(report_path, encoding="utf-8-sig")
-    missing_columns = [column for column in REQUIRED_COLUMNS if column not in frame.columns]
+    missing_columns = [
+        column
+        for column in (*REQUIRED_COLUMNS, *RAW_REQUIRED_COLUMNS)
+        if column not in frame.columns
+    ]
     if missing_columns:
         raise ValueError(f"daily report is missing columns: {', '.join(missing_columns)}")
 
@@ -93,11 +113,24 @@ def _load_report(root: Path, manifest: Mapping[str, Any]) -> pd.DataFrame:
     if frame["ticker"].map(_normalize_text).nunique() != ticker_count:
         raise ValueError("ticker column must contain 225 unique symbols")
 
-    for column in ("価格", "MA25", "MA75", "前日比%", "RSI"):
+    for column in ("価格", "MA25", "MA75", "price_raw", "ma75_raw", "前日比%", "RSI"):
         numeric = pd.to_numeric(frame[column], errors="coerce")
-        if numeric.isna().any():
+        if numeric.isna().any() or not numeric.map(math.isfinite).all():
             raise ValueError(f"{column} column contains invalid numeric values")
         frame[column] = numeric
+
+    if (frame["価格"] <= 0).any():
+        raise ValueError("price column must be positive for every active row")
+    if (frame["MA75"] <= 0).any():
+        raise ValueError("MA75 column must be positive for every active row")
+    if (frame["price_raw"] <= 0).any():
+        raise ValueError("price_raw column must be positive for every active row")
+    if (frame["ma75_raw"] <= 0).any():
+        raise ValueError("ma75_raw column must be positive for every active row")
+
+    eligible_mask = (frame["price_raw"] > 0) & (frame["ma75_raw"] > 0)
+    if int(eligible_mask.sum()) != ticker_count:
+        raise ValueError("active eligible row count must be 225")
 
     macd = frame["MACD判定"].map(_normalize_text)
     if macd.eq("").any():
@@ -139,8 +172,8 @@ def _legacy_bear_override(root: Path) -> bool:
     return False
 
 
-def _determine_regime(*, breadth_ratio: float, threshold: float, legacy_bear: bool) -> str:
-    if legacy_bear or breadth_ratio < threshold:
+def _determine_regime(*, breadth_ratio: float, threshold: float) -> str:
+    if breadth_ratio < threshold:
         return "BEAR"
     if breadth_ratio >= min(1.0, threshold + 0.10):
         return "BULL"
@@ -149,16 +182,12 @@ def _determine_regime(*, breadth_ratio: float, threshold: float, legacy_bear: bo
 
 def build_market_regime(root: Path) -> dict[str, Any]:
     manifest = _load_manifest(root)
-    threshold = _load_risk_threshold(root)
+    risk_contract = _load_risk_contract(root)
+    threshold = float(risk_contract["breadth_threshold"])
     report = _load_report(root, manifest)
-    breadth_count = int((report["価格"] > report["MA25"]).sum())
+    breadth_count = int((report["price_raw"] > report["ma75_raw"]).sum())
     breadth_ratio = round(breadth_count / len(report), 6)
-    legacy_bear = _legacy_bear_override(root)
-    regime = _determine_regime(
-        breadth_ratio=breadth_ratio,
-        threshold=threshold,
-        legacy_bear=legacy_bear,
-    )
+    regime = _determine_regime(breadth_ratio=breadth_ratio, threshold=threshold)
 
     return {
         "schema_version": 2,
@@ -166,6 +195,8 @@ def build_market_regime(root: Path) -> dict[str, Any]:
         "source_run_id": _normalize_text(manifest.get("run_id")),
         "source_report_sha256": _normalize_text(manifest.get("report_sha256")),
         "source_ticker_count": int(manifest.get("ticker_count", 0)),
+        "risk_policy_id": risk_contract["risk_policy_id"],
+        "breadth_metric": risk_contract["breadth_metric"],
         "breadth_ratio": breadth_ratio,
         "breadth_threshold": threshold,
         "regime": regime,

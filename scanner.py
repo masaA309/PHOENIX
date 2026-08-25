@@ -578,6 +578,9 @@ def analyze_stock(
     latest_price = float(
         close.iloc[-1]
     )
+    ma75_raw = float(
+        close.iloc[-75:].mean()
+    )
 
     latest_date = pd.Timestamp(
         close.index[-1]
@@ -608,6 +611,8 @@ def analyze_stock(
         "MA75": score_data[
             "ma75"
         ],
+        "price_raw": latest_price,
+        "ma75_raw": ma75_raw,
         "RSI": score_data[
             "rsi"
         ],

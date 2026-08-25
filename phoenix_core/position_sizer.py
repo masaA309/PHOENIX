@@ -397,6 +397,7 @@ def calculate_sizing(
     ranking_score: float = 0.0,
     reserved_cash_yen: float = 0.0,
     reserved_market_value_yen: float = 0.0,
+    max_total_invested_pct_override: float | None = None,
 ) -> SizingDecision:
     config.validate()
 
@@ -505,8 +506,15 @@ def calculate_sizing(
         config.lot_size,
     )
 
+    effective_total_invested_pct = config.max_total_invested_pct
+    if max_total_invested_pct_override is not None:
+        effective_total_invested_pct = min(
+            effective_total_invested_pct,
+            float(max_total_invested_pct_override),
+        )
+
     maximum_invested_value = (
-        equity * config.max_total_invested_pct
+        equity * effective_total_invested_pct
     )
     current_invested_value = (
         snapshot.market_value_yen
@@ -605,6 +613,7 @@ def size_candidates(
     broker: BrokerAdapter,
     candidates: pd.DataFrame,
     config: PositionSizingConfig,
+    max_total_invested_pct_override: float | None = None,
 ) -> list[SizingDecision]:
     snapshot = broker.get_account_snapshot()
     decisions: list[SizingDecision] = []
@@ -630,6 +639,7 @@ def size_candidates(
             reserved_market_value_yen=(
                 reserved_market_value
             ),
+            max_total_invested_pct_override=max_total_invested_pct_override,
         )
         decisions.append(decision)
 

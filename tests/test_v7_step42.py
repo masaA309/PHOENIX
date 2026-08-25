@@ -19,6 +19,7 @@ from phoenix_core.position_sizer import SizingDecision
 import phoenix_core.risk_controller as risk_controller
 from phoenix_core.risk_controller import RiskDecision
 
+import market_regime_ai as market_regime_ai_module
 import phoenix_core.order_bridge_gate as gate
 import trade_engine as trade_engine_module
 
@@ -86,7 +87,14 @@ class Step42PreOrderGateTest(unittest.TestCase):
             },
             "operating_mode": "PAPER_SAFE",
         }
-        sizing = {"position_sizing": {"lot_size": 100}}
+        sizing = {
+            "position_sizing": {
+                "lot_size": 100,
+                "max_total_invested_pct": 0.95,
+                "minimum_cash_reserve_pct": 0.0,
+                "commission_buffer_pct": 0.0,
+            }
+        }
         risk = {
             "risk": {
                 "max_daily_loss_pct": 0.03,
@@ -103,8 +111,8 @@ class Step42PreOrderGateTest(unittest.TestCase):
             "breadth_threshold": 0.40,
             "bear_max_total_invested_pct": 0.70,
             "market_regime_file": "reports/market_regime.json",
-            "risk_policy_id": "RISK_V2_PRODUCTION_MA25_BREADTH_V1",
-            "breadth_metric": "ABOVE_MA25_RATIO_FULL225",
+            "risk_policy_id": "RISK_V2_PRODUCTION_MA75_BREADTH_V1",
+            "breadth_metric": "ABOVE_MA75_RATIO_ACTIVE225",
         }
         return direct, sizing, risk
 
@@ -422,6 +430,8 @@ class Step42PreOrderGateTest(unittest.TestCase):
                 "source_run_id": "RUN-OK",
                 "source_report_sha256": "1" * 64,
                 "source_ticker_count": 225,
+                "risk_policy_id": "RISK_V2_PRODUCTION_MA75_BREADTH_V1",
+                "breadth_metric": "ABOVE_MA75_RATIO_ACTIVE225",
                 "breadth_ratio": 0.55,
                 "breadth_threshold": 0.40,
                 "regime": "BULL",
@@ -550,6 +560,8 @@ class Step42PreOrderGateTest(unittest.TestCase):
                 "source_run_id": "RUN-OK",
                 "source_report_sha256": "1" * 64,
                 "source_ticker_count": 225,
+                "risk_policy_id": "RISK_V2_PRODUCTION_MA75_BREADTH_V1",
+                "breadth_metric": "ABOVE_MA75_RATIO_ACTIVE225",
                 "breadth_ratio": 0.55,
                 "breadth_threshold": 0.40,
                 "regime": "BULL",
@@ -773,6 +785,8 @@ class Step42PreOrderGateTest(unittest.TestCase):
                 "source_run_id": source_manifest["run_id"],
                 "source_report_sha256": source_manifest["report_sha256"],
                 "source_ticker_count": 225,
+                "risk_policy_id": "RISK_V2_PRODUCTION_MA75_BREADTH_V1",
+                "breadth_metric": "ABOVE_MA75_RATIO_ACTIVE225",
                 "breadth_ratio": 0.55,
                 "breadth_threshold": 0.40,
                 "regime": "BULL",
@@ -866,8 +880,8 @@ class Step42PreOrderGateTest(unittest.TestCase):
             max_total_invested_pct=0.95,
             max_single_position_pct=1.0,
             risk_v2_enabled=True,
-            risk_policy_id="RISK_V2_PRODUCTION_MA25_BREADTH_V1",
-            breadth_metric="ABOVE_MA25_RATIO_FULL225",
+            risk_policy_id="RISK_V2_PRODUCTION_MA75_BREADTH_V1",
+            breadth_metric="ABOVE_MA75_RATIO_ACTIVE225",
             breadth_threshold=0.40,
             bear_max_total_invested_pct=0.70,
         )
@@ -905,8 +919,8 @@ class Step42PreOrderGateTest(unittest.TestCase):
         market_context = {
             "breadth_ratio": 0.50,
             "breadth_threshold": 0.40,
-            "risk_policy_id": "RISK_V2_PRODUCTION_MA25_BREADTH_V1",
-            "breadth_metric": "ABOVE_MA25_RATIO_FULL225",
+            "risk_policy_id": "RISK_V2_PRODUCTION_MA75_BREADTH_V1",
+            "breadth_metric": "ABOVE_MA75_RATIO_ACTIVE225",
             "regime": "BULL",
             "source_run_id": "RUN-COUNT",
             "source_report_sha256": "1" * 64,
@@ -923,8 +937,8 @@ class Step42PreOrderGateTest(unittest.TestCase):
             max_total_invested_pct=0.95,
             max_single_position_pct=1.0,
             risk_v2_enabled=True,
-            risk_policy_id="RISK_V2_PRODUCTION_MA25_BREADTH_V1",
-            breadth_metric="ABOVE_MA25_RATIO_FULL225",
+            risk_policy_id="RISK_V2_PRODUCTION_MA75_BREADTH_V1",
+            breadth_metric="ABOVE_MA75_RATIO_ACTIVE225",
             breadth_threshold=0.40,
             bear_max_total_invested_pct=0.70,
         )
@@ -950,8 +964,8 @@ class Step42PreOrderGateTest(unittest.TestCase):
         bull_context = {
             "breadth_ratio": 0.4000,
             "breadth_threshold": 0.40,
-            "risk_policy_id": "RISK_V2_PRODUCTION_MA25_BREADTH_V1",
-            "breadth_metric": "ABOVE_MA25_RATIO_FULL225",
+            "risk_policy_id": "RISK_V2_PRODUCTION_MA75_BREADTH_V1",
+            "breadth_metric": "ABOVE_MA75_RATIO_ACTIVE225",
             "regime": "BULL",
             "source_run_id": "RUN-BULL",
             "source_report_sha256": "2" * 64,
@@ -960,8 +974,8 @@ class Step42PreOrderGateTest(unittest.TestCase):
         bear_context = {
             "breadth_ratio": 0.3999,
             "breadth_threshold": 0.40,
-            "risk_policy_id": "RISK_V2_PRODUCTION_MA25_BREADTH_V1",
-            "breadth_metric": "ABOVE_MA25_RATIO_FULL225",
+            "risk_policy_id": "RISK_V2_PRODUCTION_MA75_BREADTH_V1",
+            "breadth_metric": "ABOVE_MA75_RATIO_ACTIVE225",
             "regime": "BEAR",
             "source_run_id": "RUN-BEAR",
             "source_report_sha256": "2" * 64,
@@ -985,6 +999,221 @@ class Step42PreOrderGateTest(unittest.TestCase):
 
         self.assertEqual(1, len(bull_report.accepted_orders))
         self.assertEqual(0, len(bear_report.accepted_orders))
+
+    def test_market_regime_ai_ma75_contract_ignores_legacy_bear_override_and_fail_closes_invalid_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            (root / "config").mkdir(parents=True, exist_ok=True)
+            (root / "reports").mkdir(parents=True, exist_ok=True)
+            (root / "data").mkdir(parents=True, exist_ok=True)
+
+            risk_config = {
+                "risk_policy_id": "RISK_V2_PRODUCTION_MA75_BREADTH_V1",
+                "breadth_metric": "ABOVE_MA75_RATIO_ACTIVE225",
+                "breadth_threshold": 0.40,
+                "bear_max_total_invested_pct": 0.70,
+            }
+            (root / "config" / "v7_risk_config.json").write_text(
+                json.dumps(risk_config, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            rows = []
+            for index in range(225):
+                above = index < 150
+                price_raw = 100.0049 if above else 100.0041
+                ma75_raw = 100.0041 if above else 100.0049
+                rows.append(
+                    {
+                        "ticker": f"{1301 + index}.T",
+                        "価格": round(price_raw, 2),
+                        "MA25": 99.99,
+                        "MA75": round(ma75_raw, 2),
+                        "price_raw": price_raw,
+                        "ma75_raw": ma75_raw,
+                        "前日比%": 0.5 if above else -0.5,
+                        "MACD判定": "GC" if above else "DC",
+                        "RSI": 55.0 if above else 45.0,
+                    }
+                )
+            report = pd.DataFrame(rows)
+            report_path = root / "reports" / "report_20260825.csv"
+            report.to_csv(report_path, index=False, encoding="utf-8-sig")
+            report_sha256 = hashlib.sha256(report_path.read_bytes()).hexdigest()
+            manifest = {
+                "schema_version": 1,
+                "run_id": "RUN-MA75-225",
+                "generated_at": "2026-08-25T09:00:00+09:00",
+                "report_file": "reports/report_20260825.csv",
+                "report_sha256": report_sha256,
+                "ticker_count": 225,
+                "expected_ticker_count": 225,
+                "ticker_universe_sha256": "9" * 64,
+                "market_data_evidence": {"status": "READY"},
+            }
+            (root / "reports" / "notification_source_manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            (root / "data" / "market_risk_latest.json").write_text(
+                json.dumps({"regime": "BEAR", "score": -9.9}, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            payload = market_regime_ai_module.build_market_regime(root)
+
+            self.assertEqual("RISK_V2_PRODUCTION_MA75_BREADTH_V1", payload["risk_policy_id"])
+            self.assertEqual("ABOVE_MA75_RATIO_ACTIVE225", payload["breadth_metric"])
+            self.assertEqual(225, payload["source_ticker_count"])
+            self.assertEqual("BULL", payload["regime"])
+            self.assertAlmostEqual(150 / 225, payload["breadth_ratio"], places=6)
+
+            invalid_rows = list(rows)
+            invalid_rows[0] = {**invalid_rows[0], "ma75_raw": 0.0}
+            invalid_report = pd.DataFrame(invalid_rows[:224])
+            invalid_report_path = root / "reports" / "report_20260825_invalid.csv"
+            invalid_report.to_csv(invalid_report_path, index=False, encoding="utf-8-sig")
+            invalid_manifest = {
+                **manifest,
+                "report_file": "reports/report_20260825_invalid.csv",
+                "report_sha256": hashlib.sha256(invalid_report_path.read_bytes()).hexdigest(),
+                "ticker_count": 225,
+                "expected_ticker_count": 225,
+            }
+            (root / "reports" / "notification_source_manifest.json").write_text(
+                json.dumps(invalid_manifest, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "daily report row count does not match manifest"):
+                market_regime_ai_module.build_market_regime(root)
+
+            invalid_225 = pd.DataFrame(rows)
+            invalid_225.loc[0, "ma75_raw"] = 0.0
+            invalid_225_path = root / "reports" / "report_20260825_invalid_ma75.csv"
+            invalid_225.to_csv(invalid_225_path, index=False, encoding="utf-8-sig")
+            invalid_225_manifest = {
+                **manifest,
+                "report_file": "reports/report_20260825_invalid_ma75.csv",
+                "report_sha256": hashlib.sha256(invalid_225_path.read_bytes()).hexdigest(),
+            }
+            (root / "reports" / "notification_source_manifest.json").write_text(
+                json.dumps(invalid_225_manifest, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "ma75_raw column must be positive for every active row"):
+                market_regime_ai_module.build_market_regime(root)
+
+    def test_risk_v2_override_transmits_effective_cap_and_rechecks_context(self) -> None:
+        generated_at = datetime(2026, 8, 4, 12, 0, tzinfo=JST)
+        decision = self._decision(quantity=100, stop_price=950.0)
+        direct, sizing, risk = self._configs()
+        risk["risk_v2_enabled"] = True
+        source_manifest = {
+            "schema_version": 1,
+            "run_id": "RUN-BEAR-CAP",
+            "generated_at": "2026-08-04T12:00:00+09:00",
+            "report_file": "reports/report_20260804.csv",
+            "report_sha256": "1" * 64,
+            "ticker_count": 225,
+            "expected_ticker_count": 225,
+            "ticker_universe_sha256": "2" * 64,
+            "market_data_evidence": {"status": "READY"},
+        }
+        market_regime = {
+            "schema_version": 2,
+            "source_run_id": "RUN-BEAR-CAP",
+            "source_report_sha256": "1" * 64,
+            "source_ticker_count": 225,
+            "risk_policy_id": "RISK_V2_PRODUCTION_MA75_BREADTH_V1",
+            "breadth_metric": "ABOVE_MA75_RATIO_ACTIVE225",
+            "breadth_ratio": 0.3999,
+            "breadth_threshold": 0.40,
+            "regime": "BEAR",
+        }
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            trade_signals_sha256, market_regime_sha256 = self._write_provenance_files(
+                root,
+                source_manifest=source_manifest,
+                market_regime=market_regime,
+            )
+            trade_signals_manifest = {
+                "schema_version": 1,
+                "generated_at": "2026-08-04T12:00:00+09:00",
+                "source_run_id": source_manifest["run_id"],
+                "source_report_sha256": source_manifest["report_sha256"],
+                "source_ticker_count": source_manifest["ticker_count"],
+                "ai_judgement_sha256": "4" * 64,
+                "market_regime_sha256": market_regime_sha256,
+                "trade_signals_sha256": trade_signals_sha256,
+                "trade_signals_row_count": 1,
+            }
+            captured: dict[str, object] = {}
+
+            def fake_size_candidates(broker, candidates, config, max_total_invested_pct_override=None):
+                captured["override"] = max_total_invested_pct_override
+                return (decision,)
+
+            def fake_evaluate_orders(broker, orders, config, state, market_context=None):
+                captured["market_context"] = market_context
+                return SimpleNamespace(
+                    accepted_orders=tuple(orders),
+                    decisions=(
+                        RiskDecision(
+                            ticker=orders[0].ticker,
+                            side=orders[0].side.value,
+                            quantity=orders[0].quantity,
+                            price=orders[0].limit_price,
+                            accepted=True,
+                            reason="",
+                            estimated_value_yen=orders[0].quantity * orders[0].limit_price,
+                        ),
+                    ),
+                )
+
+            def fake_read_json(path: Path) -> tuple[dict[str, object], str | None]:
+                name = path.name
+                if name == "v7_direct_pipeline_config.json":
+                    return direct, None
+                if name == "v7_position_sizer_config.json":
+                    return sizing, None
+                if name == "v7_risk_config.json":
+                    return risk, None
+                if name == "notification_source_manifest.json":
+                    return source_manifest, None
+                if name == "trade_signals_manifest.json":
+                    return trade_signals_manifest, None
+                if name == "market_regime.json":
+                    return market_regime, None
+                return {}, f"unexpected file: {path}"
+
+            with (
+                mock.patch.object(gate, "_read_json", side_effect=fake_read_json),
+                mock.patch.object(
+                    gate,
+                    "_load_candidate_batch",
+                    return_value=(self._candidate_batch(generated_at=generated_at), None, root / "reports" / "trade_signals.csv"),
+                ),
+                mock.patch.object(gate, "_load_broker", return_value=(SimpleNamespace(get_account_snapshot=lambda: SimpleNamespace(equity_yen=300_000.0)), None)),
+                mock.patch.object(gate, "size_candidates", side_effect=fake_size_candidates),
+                mock.patch.object(gate, "load_risk_state", return_value=SimpleNamespace()),
+                mock.patch.object(gate, "evaluate_orders", side_effect=fake_evaluate_orders),
+                mock.patch.dict(
+                    gate.os.environ,
+                    {
+                        "PHOENIX_OPERATING_SCOPE": "OPERATIONAL",
+                        "PHOENIX_TRADING_ACTIONS": "PAPER_ONLY",
+                    },
+                    clear=False,
+                ),
+            ):
+                report = gate.build_preorder_report(root, generated_at=generated_at)
+
+            self.assertEqual("APPROVED", report["status"])
+            self.assertEqual(0.70, captured["override"])
+            self.assertEqual("BEAR", captured["market_context"]["regime"])
+            self.assertEqual(0.3999, captured["market_context"]["breadth_ratio"])
+            self.assertEqual(0, report["orders_submitted"])
 
     def test_live_dispatch_mode_transition_helper(self) -> None:
         self.assertEqual(

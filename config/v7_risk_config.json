@@ -17,8 +17,8 @@
     "block_on_broker_health_failure": true
   },
   "risk_v2_enabled": true,
-  "risk_policy_id": "RISK_V2_PRODUCTION_MA25_BREADTH_V1",
-  "breadth_metric": "ABOVE_MA25_RATIO_FULL225",
+  "risk_policy_id": "RISK_V2_PRODUCTION_MA75_BREADTH_V1",
+  "breadth_metric": "ABOVE_MA75_RATIO_ACTIVE225",
   "breadth_threshold": 0.4,
   "bear_max_total_invested_pct": 0.7,
   "market_regime_file": "reports/market_regime.json",

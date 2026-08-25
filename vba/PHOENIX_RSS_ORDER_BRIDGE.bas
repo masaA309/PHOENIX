@@ -151,6 +151,9 @@ Private Const OBR_DUPLICATE_MESSAGE As String = "duplicate request"
 Private Const OBR_REQUEST_READ_FAILED_MESSAGE As String = "request read failed"
 Private Const OBR_SUBMIT_ACCEPTED_MESSAGE As String = "submit accepted"
 Private Const OBR_CANCEL_ACCEPTED_MESSAGE As String = "cancel accepted"
+Private Const OBR_LIVE_REQUEST_FLAGS_INSUFFICIENT_ERROR_CODE As String = "LIVE_REQUEST_FLAGS_INSUFFICIENT"
+Private Const OBR_LIVE_REQUEST_REQUIRES_BRIDGE_ARMED_ERROR_CODE As String = "LIVE_REQUEST_REQUIRES_BRIDGE_ARMED"
+Private Const OBR_LIVE_FIRE_CALL_CONTRACT_NOT_PROVEN_ERROR_CODE As String = "LIVE_FIRE_CALL_CONTRACT_NOT_PROVEN"
 Private Const OBR_DISCONNECTED_STATUS As String = "DISCONNECTED"
 Private Const OBR_DUPLICATE_STATUS As String = "DUPLICATE"
 Private Const OBR_CORRUPT_STATUS As String = "CORRUPT"
@@ -173,7 +176,6 @@ Private Type OBRBridgeReadyState
     RssConnected As Boolean
     AddInReady As Boolean
     OrderTransportReady As Boolean
-    ArmedFalse As Boolean
     HeartbeatAgeSeconds As Long
     Ready As Boolean
     Reason As String
@@ -349,12 +351,10 @@ Public Sub RunPhoenixRssOrderBridgeConsumer()
     If gOrderBridgeConsumerRunning Then Exit Sub
     gOrderBridgeConsumerRunning = True
     OBR_CancelScheduledRun
-    If Not OBR_BRIDGE_ARMED Then
-        OBR_ReadBridgeReadyState readyState
-        If Not readyState.Ready Then
-            OBR_LogOrderBridgeEvent bridgeRoot, OBR_OBSERVABILITY_EVENT_READY_FALSE, "", OBR_OBSERVABILITY_READY_FALSE, OBR_ReadyFalseDetail(readyState)
-            GoTo CleanExit
-        End If
+    OBR_ReadBridgeReadyState readyState
+    If Not readyState.Ready Then
+        OBR_LogOrderBridgeEvent bridgeRoot, OBR_OBSERVABILITY_EVENT_READY_FALSE, "", OBR_OBSERVABILITY_READY_FALSE, OBR_ReadyFalseDetail(readyState)
+        GoTo CleanExit
     End If
     OBR_EnsureBridgeDirectories bridgeRoot
     OBR_ReconcileBridgeState bridgeRoot
@@ -675,6 +675,19 @@ Private Sub OBR_ProcessSubmitRequestRow(ByVal bridgeRoot As String, ByVal reques
         Exit Sub
     End If
 
+    If OBR_RequestIsLiveIntent(requestRow) Then
+        If Not OBR_RequestLiveFlagsComplete(requestRow) Then
+            OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, "live request flags insufficient", OBR_LIVE_REQUEST_FLAGS_INSUFFICIENT_ERROR_CODE, "live request flags insufficient"
+            Exit Sub
+        End If
+        If Not OBR_BRIDGE_ARMED Then
+            OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, "live request requires bridge armed", OBR_LIVE_REQUEST_REQUIRES_BRIDGE_ARMED_ERROR_CODE, "live request requires bridge armed"
+            Exit Sub
+        End If
+        OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, "live fire call contract not proven", OBR_LIVE_FIRE_CALL_CONTRACT_NOT_PROVEN_ERROR_CODE, "live fire call contract not proven"
+        Exit Sub
+    End If
+
     receiptValues = OBR_BuildReceiptValues( _
         requestRow, _
         CurrentJst(), _
@@ -897,7 +910,6 @@ Private Sub OBR_ReadBridgeReadyState(ByRef readyState As OBRBridgeReadyState)
 
     On Error GoTo ReadyFail
     Set sheet = ThisWorkbook.Worksheets(OBR_TRANSPORT_SHEET_NAME)
-    readyState.ArmedFalse = Not IsTruthyValue(sheet.Range("B2").Value2)
     readyState.ExcelAlive = IsTruthyValue(sheet.Range("J2").Value2)
     readyState.RssConnected = IsTruthyValue(sheet.Range("J3").Value2)
     readyState.AddInReady = IsTruthyValue(sheet.Range("J4").Value2)
@@ -911,7 +923,7 @@ Private Sub OBR_ReadBridgeReadyState(ByRef readyState As OBRBridgeReadyState)
         readyState.Ready = False
         Exit Sub
     End If
-    readyState.Ready = readyState.ExcelAlive And readyState.RssConnected And readyState.AddInReady And readyState.OrderTransportReady And readyState.ArmedFalse And (Not OBR_BRIDGE_ARMED) And ageSeconds >= 0 And ageSeconds <= OBR_HEARTBEAT_MAX_AGE_SECONDS
+    readyState.Ready = readyState.ExcelAlive And readyState.RssConnected And readyState.AddInReady And readyState.OrderTransportReady And ageSeconds >= 0 And ageSeconds <= OBR_HEARTBEAT_MAX_AGE_SECONDS
     If Not readyState.Ready Then
         readyState.Reason = OBR_READY_ERROR_MESSAGE
     End If
@@ -1116,8 +1128,21 @@ Private Function OBR_ReadyFalseDetail(ByRef readyState As OBRBridgeReadyState) A
         "AddInReady=" & OBR_BooleanText(readyState.AddInReady) & ";" & _
         "OrderTransportReady=" & OBR_BooleanText(readyState.OrderTransportReady) & ";" & _
         "HeartbeatAgeSeconds=" & CStr(readyState.HeartbeatAgeSeconds) & ";" & _
-        "Armed/B2=" & OBR_BooleanText(readyState.ArmedFalse) & ";" & _
         "Ready=" & OBR_BooleanText(readyState.Ready)
+End Function
+
+Private Function OBR_RequestIsLiveIntent(ByVal requestRow As Variant) As Boolean
+    OBR_RequestIsLiveIntent = _
+        IsTruthyValue(requestRow(OBR_REQ_LIVE_TRADING_ENABLED)) Or _
+        IsTruthyValue(requestRow(OBR_REQ_PRODUCTION_TRANSPORT_ENABLED)) Or _
+        IsTruthyValue(requestRow(OBR_REQ_ARMED))
+End Function
+
+Private Function OBR_RequestLiveFlagsComplete(ByVal requestRow As Variant) As Boolean
+    OBR_RequestLiveFlagsComplete = _
+        IsTruthyValue(requestRow(OBR_REQ_LIVE_TRADING_ENABLED)) And _
+        IsTruthyValue(requestRow(OBR_REQ_PRODUCTION_TRANSPORT_ENABLED)) And _
+        IsTruthyValue(requestRow(OBR_REQ_ARMED))
 End Function
 
 Private Function OBR_ObservabilityPath(ByVal bridgeRoot As String) As String

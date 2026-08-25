@@ -33,6 +33,7 @@ from phoenix_core.risk_controller import (
     RiskState,
     evaluate_orders,
     load_risk_state,
+    resolve_effective_total_invested_pct,
 )
 
 
@@ -165,8 +166,8 @@ def _risk_config(payload: Mapping[str, Any]) -> RiskConfig:
     if not isinstance(risk, Mapping):
         raise ValueError("risk config must be an object")
     return RiskConfig(
-        risk_policy_id=str(payload.get("risk_policy_id", "RISK_V2_PRODUCTION_MA25_BREADTH_V1")),
-        breadth_metric=str(payload.get("breadth_metric", "ABOVE_MA25_RATIO_FULL225")),
+        risk_policy_id=str(payload.get("risk_policy_id", "RISK_V2_PRODUCTION_MA75_BREADTH_V1")),
+        breadth_metric=str(payload.get("breadth_metric", "ABOVE_MA75_RATIO_ACTIVE225")),
         risk_v2_enabled=bool(payload.get("risk_v2_enabled", False)),
         breadth_threshold=float(payload.get("breadth_threshold", 0.40)),
         bear_max_total_invested_pct=float(payload.get("bear_max_total_invested_pct", 0.70)),
@@ -227,6 +228,8 @@ def _market_regime_context(
         source_run_id = _normalize_text(regime_source.get("source_run_id"))
         source_report_sha256 = _normalize_text(regime_source.get("source_report_sha256"))
         source_ticker_count = int(regime_source.get("source_ticker_count", 0))
+        risk_policy_id = _normalize_text(regime_source.get("risk_policy_id"))
+        breadth_metric = _normalize_text(regime_source.get("breadth_metric"))
         breadth_ratio = float(regime_source.get("breadth_ratio"))
         breadth_threshold = float(regime_source.get("breadth_threshold"))
         regime = _normalize_text(regime_source.get("regime")).upper()
@@ -240,6 +243,14 @@ def _market_regime_context(
         blockers.append("MARKET_REGIME_STALE: MANIFEST_MISMATCH")
     if source_ticker_count != manifest_ticker_count:
         blockers.append("MARKET_REGIME_STALE: TICKER_COUNT_MISMATCH")
+    if not risk_policy_id:
+        blockers.append("MARKET_REGIME_INVALID: RISK_POLICY_ID")
+    elif risk_policy_id != risk_config.risk_policy_id:
+        blockers.append("MARKET_REGIME_STALE: RISK_POLICY_ID_MISMATCH")
+    if not breadth_metric:
+        blockers.append("MARKET_REGIME_INVALID: BREADTH_METRIC")
+    elif breadth_metric != risk_config.breadth_metric:
+        blockers.append("MARKET_REGIME_STALE: BREADTH_METRIC_MISMATCH")
     if not (0.0 <= breadth_ratio <= 1.0):
         blockers.append("MARKET_REGIME_INVALID: BREADTH_RATIO_RANGE")
     if not (0.0 <= breadth_threshold <= 1.0):
@@ -250,12 +261,16 @@ def _market_regime_context(
         blockers.append("MARKET_REGIME_INVALID: REGIME")
     if breadth_ratio < risk_config.breadth_threshold and regime != "BEAR":
         blockers.append("MARKET_CONTEXT_INCONSISTENT: BEAR_REQUIRED")
+    if breadth_ratio >= risk_config.breadth_threshold and regime == "BEAR":
+        blockers.append("MARKET_CONTEXT_INCONSISTENT: BEAR_FORBIDDEN")
 
     if blockers:
         return None, blockers
 
     return (
         {
+            "risk_policy_id": risk_policy_id,
+            "breadth_metric": breadth_metric,
             "breadth_ratio": breadth_ratio,
             "breadth_threshold": breadth_threshold,
             "regime": regime,
@@ -1149,7 +1164,16 @@ def _build_preorder_report_artifacts(
             )
         else:
             try:
-                sizing_decisions = size_candidates(broker, candidate_batch.candidates, sizing_config)
+                effective_total_invested_pct_override = resolve_effective_total_invested_pct(
+                    risk_config,
+                    market_context,
+                )
+                sizing_decisions = size_candidates(
+                    broker,
+                    candidate_batch.candidates,
+                    sizing_config,
+                    max_total_invested_pct_override=effective_total_invested_pct_override,
+                )
             except Exception as error:
                 report_blockers.append(f"SIZING_FAILED: {type(error).__name__}: {error}")
                 rows = _fallback_rows(

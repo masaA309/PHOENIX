@@ -742,12 +742,11 @@ class Win32ComExcelBackend:
     def _read_status_values(self, session: ExcelTransportSession) -> tuple[Any, Any, Any]:
         sheet = self._sheet(session)
         try:
-            armed_value = sheet.Range("B2").Value2
             ready_value = sheet.Range(RSS_CONNECTION_CELL).Value2
             status_value = sheet.Range(RSS_CONNECTION_MESSAGE_CELL).Value2
         except Exception as error:
             raise RssNotConnectedError("Transport sheet status is unreadable.") from error
-        return armed_value, ready_value, status_value
+        return False, ready_value, status_value
 
     def _read_runtime_values(self, session: ExcelTransportSession) -> dict[str, Any]:
         sheet = self._sheet(session)
@@ -862,12 +861,6 @@ class Win32ComExcelBackend:
         publish: bool = False,
     ) -> tuple[bool, str]:
         try:
-            armed_value, ready_value, status_value = self._read_status_values(session)
-            if self._is_truthy_cell(armed_value):
-                return False, "armed=true; production transport must stay fail-closed."
-            if not self._is_truthy_cell(ready_value):
-                return False, f"Workbook is not READY: {ready_value!r}"
-
             addins_ok, addins_message = self._has_required_addins(session.application)
             if not addins_ok:
                 return False, addins_message
@@ -889,6 +882,9 @@ class Win32ComExcelBackend:
                         WORKBOOK_STATE_HEARTBEAT_CELL: heartbeat_at.isoformat(timespec="seconds"),
                     },
                 )
+            runtime_state = self.read_runtime_state(session)
+            if not runtime_state.ready:
+                return False, runtime_state.message
             live_message = str(probe_message).strip() or RSS_CONNECTED_STATUS
             return True, f"{live_message}; {addins_message}"
         except RssNotConnectedError as error:

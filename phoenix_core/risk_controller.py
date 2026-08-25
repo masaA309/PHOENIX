@@ -23,8 +23,8 @@ class RiskConfig:
     minimum_cash_reserve_pct: float = 0.10
     block_on_broker_health_failure: bool = True
     risk_v2_enabled: bool = False
-    risk_policy_id: str = "RISK_V2_PRODUCTION_MA25_BREADTH_V1"
-    breadth_metric: str = "ABOVE_MA25_RATIO_FULL225"
+    risk_policy_id: str = "RISK_V2_PRODUCTION_MA75_BREADTH_V1"
+    breadth_metric: str = "ABOVE_MA75_RATIO_ACTIVE225"
     breadth_threshold: float = 0.40
     bear_max_total_invested_pct: float = 0.70
     market_regime_file: str = "reports/market_regime.json"
@@ -106,6 +106,23 @@ class RiskReport:
     decisions: tuple[RiskDecision, ...]
 
 
+def resolve_effective_total_invested_pct(
+    config: RiskConfig,
+    market_context: Mapping[str, Any] | None = None,
+) -> float:
+    if not config.risk_v2_enabled or market_context is None:
+        return float(config.max_total_invested_pct)
+
+    breadth_ratio = float(market_context["breadth_ratio"])
+    breadth_threshold = float(market_context["breadth_threshold"])
+    if breadth_ratio < breadth_threshold:
+        return min(
+            float(config.max_total_invested_pct),
+            float(config.bear_max_total_invested_pct),
+        )
+    return float(config.max_total_invested_pct)
+
+
 def _normalize_market_context(
     market_context: Mapping[str, Any],
     config: RiskConfig,
@@ -154,6 +171,8 @@ def _normalize_market_context(
         raise ValueError("market_context.regimeが不正です")
     if normalized["breadth_ratio"] < normalized["breadth_threshold"] and normalized["regime"] != "BEAR":
         raise ValueError("market_contextはbreadth_ratio閾値未満ならBEARでなければなりません")
+    if normalized["breadth_ratio"] >= normalized["breadth_threshold"] and normalized["regime"] == "BEAR":
+        raise ValueError("market_contextはbreadth_ratio閾値以上ならBEARであってはなりません")
     if config.breadth_threshold != normalized["breadth_threshold"]:
         raise ValueError("market_contextのbreadth_thresholdが設定値と一致しません")
     if normalized["risk_policy_id"] != config.risk_policy_id:
@@ -341,12 +360,10 @@ def evaluate_orders(
             decisions.append(_reject(order, "最低現金保持率を下回る"))
             continue
 
-        effective_total_invested_pct = config.max_total_invested_pct
-        if normalized_market_context is not None and normalized_market_context["regime"] == "BEAR":
-            effective_total_invested_pct = min(
-                config.max_total_invested_pct,
-                config.bear_max_total_invested_pct,
-            )
+        effective_total_invested_pct = resolve_effective_total_invested_pct(
+            config,
+            normalized_market_context,
+        )
         portfolio_capacity = _portfolio_capacity_yen(
             equity,
             projected_market_value,
