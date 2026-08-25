@@ -20,6 +20,7 @@ class Step44LocalVbaReceiverTest(unittest.TestCase):
             "PHOENIX_STEP44_Csv.bas",
             "PHOENIX_STEP44_State.bas",
             "PHOENIX_STEP44_Receiver.bas",
+            "ThisWorkbook.cls",
             "STEP44_SETUP.md",
         ]
         for file_name in expected_files:
@@ -29,6 +30,7 @@ class Step44LocalVbaReceiverTest(unittest.TestCase):
         csv_text = (VBA_DIR / "PHOENIX_STEP44_Csv.bas").read_text(encoding="utf-8")
         state_text = (VBA_DIR / "PHOENIX_STEP44_State.bas").read_text(encoding="utf-8")
         receiver_text = (VBA_DIR / "PHOENIX_STEP44_Receiver.bas").read_text(encoding="utf-8")
+        workbook_text = (VBA_DIR / "ThisWorkbook.cls").read_text(encoding="utf-8")
         setup_text = (VBA_DIR / "STEP44_SETUP.md").read_text(encoding="utf-8")
 
         for text in (config_text, csv_text, state_text, receiver_text):
@@ -36,6 +38,34 @@ class Step44LocalVbaReceiverTest(unittest.TestCase):
             self.assertIn("Option Explicit", text)
 
         self.assertIn('RunPhoenixStep44LocalReceiver', receiver_text)
+        self.assertIn('StartPhoenixStep44ReceiverScheduler', receiver_text)
+        self.assertIn('StopPhoenixStep44ReceiverScheduler', receiver_text)
+        self.assertIn('Application.OnTime', receiver_text)
+        self.assertIn('Schedule:=True', receiver_text)
+        self.assertIn('Schedule:=False', receiver_text)
+        self.assertIn('rootPath = NormalizeRepositoryStartPath(ThisWorkbook.Path)', receiver_text)
+        self.assertIn('rootPath = FindRepositoryRoot(rootPath)', receiver_text)
+        self.assertIn('currentStage = "RECONCILE_FINAL"', receiver_text)
+        self.assertIn('ReconcileFinalOutboxFiles', receiver_text)
+        self.assertIn('ReconcileFinalOutboxFile', receiver_text)
+        self.assertIn('currentStage = "RECONCILE_PROCESSING"', receiver_text)
+        self.assertIn('ReconcileProcessingOutboxFiles', receiver_text)
+        self.assertIn('If Len(rootPath) = 0 Then', receiver_text)
+        self.assertIn('shouldReraise = True', receiver_text)
+        self.assertIn('Err.Raise errorNumber, errorSource, errorDescription', receiver_text)
+        self.assertIn('STEP44_ONEDRIVE_WEB_PREFIX', receiver_text)
+        self.assertIn('NormalizeRepositoryStartPath', receiver_text)
+        self.assertIn('OneDriveLocalRoot', receiver_text)
+        self.assertIn('https://d.docs.live.net/', receiver_text)
+        self.assertIn('Unable to map OneDrive web path to a local folder', receiver_text)
+        self.assertIn('gStep44SchedulerArmed', receiver_text)
+        self.assertIn('gStep44NextRunAt', receiver_text)
+        self.assertIn('gStep44NextRunScheduled', receiver_text)
+        self.assertIn('gStep44ConsumerRunning', receiver_text)
+        self.assertIn('Workbook_Open', workbook_text)
+        self.assertIn('Workbook_BeforeClose', workbook_text)
+        self.assertIn('StartPhoenixStep44ReceiverScheduler', workbook_text)
+        self.assertIn('StopPhoenixStep44ReceiverScheduler', workbook_text)
         self.assertIn('runtime/v7_vba_bridge/outbox/pending', config_text)
         self.assertIn('runtime/v7_vba_bridge/outbox/complete', config_text)
         self.assertIn('runtime/v7_vba_bridge/outbox/rejected', config_text)

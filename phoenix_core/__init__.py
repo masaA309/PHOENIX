@@ -74,6 +74,26 @@ from phoenix_core.staged_pilot_gate import (
     build_staged_pilot_report,
     run_staged_pilot_gate,
 )
+from phoenix_core.rakuten_rss_adapter import (
+    MockRakutenRssAdapter,
+    RakutenRssAdapter,
+    RakutenRssAdapterHealth,
+    RakutenRssCancelAck,
+    RakutenRssOrderUpdate,
+    RakutenRssSubmitAck,
+)
+from phoenix_core.production_rakuten_rss_adapter import (
+    DisabledProductionRakutenRssTransport,
+    ProductionRakutenRssAdapter,
+    RakutenRssTransport,
+    RakutenRssTransportHealth,
+)
+from phoenix_core.production_rakuten_rss_transport import (
+    MockExcelComBackend,
+    ProductionRakutenRssTransport,
+    Win32ComExcelBackend,
+)
+from phoenix_core.rakuten_rss_broker import RakutenRssBroker
 
 __all__ = [
     "RunPolicy",
@@ -96,6 +116,20 @@ __all__ = [
     "OrderStatus",
     "OrderType",
     "PaperBroker",
+    "RakutenRssBroker",
+    "MockRakutenRssAdapter",
+    "ProductionRakutenRssAdapter",
+    "DisabledProductionRakutenRssTransport",
+    "ProductionRakutenRssTransport",
+    "MockExcelComBackend",
+    "Win32ComExcelBackend",
+    "RakutenRssAdapter",
+    "RakutenRssAdapterHealth",
+    "RakutenRssCancelAck",
+    "RakutenRssOrderUpdate",
+    "RakutenRssSubmitAck",
+    "RakutenRssTransport",
+    "RakutenRssTransportHealth",
     "Position",
     "PositionSizingConfig",
     "SizingDecision",
@@ -134,3 +168,7 @@ __all__ = [
     "build_staged_pilot_report",
     "run_staged_pilot_gate",
 ]
+try:
+    from . import protective_order_hooks  # noqa: F401
+except Exception:
+    pass

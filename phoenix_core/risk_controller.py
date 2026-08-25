@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime
 import json
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from phoenix_core.broker import BrokerAdapter
 from phoenix_core.models import OrderRequest, OrderSide
@@ -15,13 +15,19 @@ from phoenix_core.performance_tracker import atomic_write
 class RiskConfig:
     max_daily_loss_pct: float = 0.03
     max_drawdown_pct: float = 0.10
-    max_positions: int = 5
-    max_total_invested_pct: float = 0.80
+    max_positions: int | None = None
+    max_total_invested_pct: float = 0.95
     max_single_position_pct: float = 0.30
     max_orders_per_run: int = 3
     max_consecutive_losses: int = 3
     minimum_cash_reserve_pct: float = 0.10
     block_on_broker_health_failure: bool = True
+    risk_v2_enabled: bool = False
+    risk_policy_id: str = "RISK_V2_PRODUCTION_MA25_BREADTH_V1"
+    breadth_metric: str = "ABOVE_MA25_RATIO_FULL225"
+    breadth_threshold: float = 0.40
+    bear_max_total_invested_pct: float = 0.70
+    market_regime_file: str = "reports/market_regime.json"
 
     def validate(self) -> None:
         pct_fields = {
@@ -34,8 +40,16 @@ class RiskConfig:
         for name, value in pct_fields.items():
             if value < 0 or value > 1:
                 raise ValueError(f"{name}は0以上1以下にしてください")
-        if self.max_positions <= 0:
+        if self.max_positions is not None and self.max_positions <= 0:
             raise ValueError("max_positionsは1以上にしてください")
+        if not self.risk_policy_id.strip():
+            raise ValueError("risk_policy_idは空にできません")
+        if not self.breadth_metric.strip():
+            raise ValueError("breadth_metricは空にできません")
+        if self.breadth_threshold < 0 or self.breadth_threshold > 1:
+            raise ValueError("breadth_thresholdは0以上1以下にしてください")
+        if self.bear_max_total_invested_pct < 0 or self.bear_max_total_invested_pct > 1:
+            raise ValueError("bear_max_total_invested_pctは0以上1以下にしてください")
         if self.max_orders_per_run <= 0:
             raise ValueError("max_orders_per_runは1以上にしてください")
         if self.max_consecutive_losses < 0:
@@ -90,6 +104,63 @@ class RiskReport:
     halt_reason: str
     accepted_orders: tuple[OrderRequest, ...]
     decisions: tuple[RiskDecision, ...]
+
+
+def _normalize_market_context(
+    market_context: Mapping[str, Any],
+    config: RiskConfig,
+) -> dict[str, Any]:
+    if not isinstance(market_context, Mapping):
+        raise ValueError("market_contextはオブジェクトにしてください")
+
+    required_fields = (
+        "breadth_ratio",
+        "breadth_threshold",
+        "risk_policy_id",
+        "breadth_metric",
+        "regime",
+        "source_run_id",
+        "source_report_sha256",
+        "source_ticker_count",
+    )
+    normalized: dict[str, Any] = {}
+    missing = [field for field in required_fields if field not in market_context]
+    if missing:
+        raise ValueError(f"market_contextが不足しています: {', '.join(missing)}")
+
+    try:
+        normalized["breadth_ratio"] = float(market_context["breadth_ratio"])
+        normalized["breadth_threshold"] = float(market_context["breadth_threshold"])
+        normalized["risk_policy_id"] = str(market_context["risk_policy_id"]).strip()
+        normalized["breadth_metric"] = str(market_context["breadth_metric"]).strip()
+        normalized["regime"] = str(market_context["regime"]).strip().upper()
+        normalized["source_run_id"] = str(market_context["source_run_id"]).strip()
+        normalized["source_report_sha256"] = str(market_context["source_report_sha256"]).strip()
+        normalized["source_ticker_count"] = int(market_context["source_ticker_count"])
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"market_contextの型が不正です: {error}") from error
+
+    if not (0.0 <= normalized["breadth_ratio"] <= 1.0):
+        raise ValueError("market_context.breadth_ratioは0以上1以下にしてください")
+    if not (0.0 <= normalized["breadth_threshold"] <= 1.0):
+        raise ValueError("market_context.breadth_thresholdは0以上1以下にしてください")
+    if normalized["source_ticker_count"] <= 0:
+        raise ValueError("market_context.source_ticker_countは1以上にしてください")
+    if not normalized["risk_policy_id"]:
+        raise ValueError("market_context.risk_policy_idは空にできません")
+    if not normalized["breadth_metric"]:
+        raise ValueError("market_context.breadth_metricは空にできません")
+    if normalized["regime"] not in {"BULL", "SIDEWAYS", "NEUTRAL", "BEAR"}:
+        raise ValueError("market_context.regimeが不正です")
+    if normalized["breadth_ratio"] < normalized["breadth_threshold"] and normalized["regime"] != "BEAR":
+        raise ValueError("market_contextはbreadth_ratio閾値未満ならBEARでなければなりません")
+    if config.breadth_threshold != normalized["breadth_threshold"]:
+        raise ValueError("market_contextのbreadth_thresholdが設定値と一致しません")
+    if normalized["risk_policy_id"] != config.risk_policy_id:
+        raise ValueError("market_context.risk_policy_idが設定値と一致しません")
+    if normalized["breadth_metric"] != config.breadth_metric:
+        raise ValueError("market_context.breadth_metricが設定値と一致しません")
+    return normalized
 
 
 def load_risk_state(path: Path, equity_yen: float) -> RiskState:
@@ -155,13 +226,27 @@ def _reject(order: OrderRequest, reason: str) -> RiskDecision:
     )
 
 
+def _portfolio_capacity_yen(
+    equity_yen: float,
+    current_exposure_yen: float,
+    effective_total_invested_pct: float,
+) -> float:
+    return max(equity_yen * effective_total_invested_pct - current_exposure_yen, 0.0)
+
+
 def evaluate_orders(
     broker: BrokerAdapter,
     orders: Iterable[OrderRequest],
     config: RiskConfig,
     state: RiskState,
+    market_context: Mapping[str, Any] | None = None,
 ) -> RiskReport:
     config.validate()
+    normalized_market_context = None
+    if config.risk_v2_enabled:
+        if market_context is None:
+            raise ValueError("risk_v2_enabledがtrueのときはmarket_contextが必要です")
+        normalized_market_context = _normalize_market_context(market_context, config)
     health = broker.health_check()
     snapshot = broker.get_account_snapshot()
     equity = max(snapshot.equity_yen, 0.0)
@@ -178,7 +263,7 @@ def evaluate_orders(
     )
 
     halt_reasons: list[str] = []
-    if config.block_on_broker_health_failure and not health.healthy:
+    if config.block_on_broker_health_failure and not health.healthy and not config.risk_v2_enabled:
         halt_reasons.append("Broker Health異常")
     if daily_loss_pct >= config.max_daily_loss_pct:
         halt_reasons.append("日次損失上限到達")
@@ -211,18 +296,17 @@ def evaluate_orders(
             decisions.append(_reject(order, f"注文形式異常: {error}"))
             continue
 
-        if global_halt:
-            decisions.append(_reject(order, state.halt_reason))
-            continue
-
-        if len(accepted) >= config.max_orders_per_run:
-            decisions.append(_reject(order, "1回の最大発注件数を超過"))
-            continue
-
         value = round(order.quantity * order.limit_price, 2)
 
         if order.side is OrderSide.SELL:
             accepted.append(order)
+            projected_cash += value
+            projected_market_value = max(projected_market_value - value, 0.0)
+            projected_position_value = max(projected_positions.get(order.ticker, 0.0) - value, 0.0)
+            if projected_position_value > 0:
+                projected_positions[order.ticker] = projected_position_value
+            elif order.ticker in projected_positions:
+                projected_positions.pop(order.ticker, None)
             decisions.append(
                 RiskDecision(
                     ticker=order.ticker,
@@ -236,22 +320,39 @@ def evaluate_orders(
             )
             continue
 
+        if global_halt:
+            decisions.append(_reject(order, state.halt_reason))
+            continue
+
+        if len(accepted) >= config.max_orders_per_run:
+            decisions.append(_reject(order, "1回の最大発注件数を超過"))
+            continue
+
         new_ticker = order.ticker not in projected_positions
-        if new_ticker and len(projected_positions) >= config.max_positions:
+        if config.max_positions is not None and new_ticker and len(projected_positions) >= config.max_positions:
             decisions.append(_reject(order, "最大保有銘柄数を超過"))
             continue
 
         post_cash = projected_cash - value
         post_market = projected_market_value + value
-        post_equity = max(post_cash + post_market, 0.0)
 
         reserve = equity * config.minimum_cash_reserve_pct
         if post_cash < reserve:
             decisions.append(_reject(order, "最低現金保持率を下回る"))
             continue
 
-        total_ratio = post_market / equity if equity > 0 else 1.0
-        if total_ratio > config.max_total_invested_pct:
+        effective_total_invested_pct = config.max_total_invested_pct
+        if normalized_market_context is not None and normalized_market_context["regime"] == "BEAR":
+            effective_total_invested_pct = min(
+                config.max_total_invested_pct,
+                config.bear_max_total_invested_pct,
+            )
+        portfolio_capacity = _portfolio_capacity_yen(
+            equity,
+            projected_market_value,
+            effective_total_invested_pct,
+        )
+        if portfolio_capacity + 1e-9 < value:
             decisions.append(_reject(order, "総投資率上限を超過"))
             continue
 

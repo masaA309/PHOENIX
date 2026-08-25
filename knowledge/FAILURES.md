@@ -84,3 +84,12 @@
 - 検証: `AGENTS.md` に1テーマ1ルールで統合され、対応テンプレートとFailureが更新され、次回確認項目が存在することを確認する
 - 標準化: `AGENTS.md` の「標準化（PDCA/SDCA）」「AGENTS管理」を唯一の標準とし、追記ではなく既存内容を統合更新する
 - 次回確認: 同種ミスの次回作業で標準が実際に参照され、8工程の欠落と重複ルールがないか確認する
+
+## F-014 Production RSS workbook path drift
+- Status: approved
+- 失敗: ProductionRakutenRssTransport が `.invalid_backup` を含む非正規Workbook候補を選択し、Excel が誤ったファイルを開こうとした
+- 原因分析: 生成入口が外部の `workbook_path` に従っており、正規Workbookの固定値より候補探索やバックアップ名の混入を許していた
+- 最小修正: `runtime/v7_rss_production/PHOENIX_RSS_PRODUCTION.xlsm` に固定し、live Workbook が既に開かれている場合のみ再利用し、それ以外は正規 `.xlsm` のみを開く
+- 検証: step48/49 は PASS、canonical workbook path は PASS、`.invalid_backup` selected は NO、実機 health_check は Excel 不在で FAIL
+- 標準化: `AGENTS.md` の workbook固定方針と `PROMPT_LIBRARY.md` の RSS workbook固定テンプレートへ統合する
+- 次回確認: `backup/old/tmp/.invalid_backup` を Workbook 候補にしていないか、変更前に確認する

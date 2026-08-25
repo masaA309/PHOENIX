@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from pathlib import Path
 import argparse
 import os
@@ -33,6 +34,7 @@ ROOT_DIR = Path(__file__).resolve().parent
 LOG_DIR = ROOT_DIR / "logs"
 REPORT_DIR = ROOT_DIR / "reports"
 DATA_DIR = ROOT_DIR / "data"
+DIRECT_PIPELINE_CONFIG_FILE = ROOT_DIR / "config" / "v7_direct_pipeline_config.json"
 
 LOG_FILE = LOG_DIR / (
     "phoenix_"
@@ -48,6 +50,13 @@ STOP_ON_REQUIRED_FAILURE = True
 _ACTIVE_HEARTBEAT: PhoenixHeartbeat | None = None
 _ACTIVE_FAIL_SAFE: FailSafeController | None = None
 _ACTIVE_RECOVERY_SESSION: RecoverySession | None = None
+_ACTIVE_OPERATING_MODE = "PAPER_SAFE"
+
+OPERATING_MODE_TRADING_ACTIONS = {
+    "PAPER_SAFE": "PAPER_ONLY",
+    "LIVE_ACTIVE": "LIVE_ONLY",
+    "LIVE_RECONCILE_ONLY": "RECONCILE_ONLY",
+}
 
 
 # =========================================================
@@ -70,11 +79,12 @@ _ACTIVE_RECOVERY_SESSION: RecoverySession | None = None
 # 2. Price Monitor
 # 3. 日経225構成銘柄更新
 # 4. 日次スキャン・レポート
-# 5. Learning Engine
-# 6. AI売買判断
-# 7. ランキングAI
-# 8. チャート生成
-# 9. LINE・Discord通知
+# 5. Market Regime AI
+# 6. Learning Engine
+# 7. AI売買判断
+# 8. ランキングAI
+# 9. チャート生成
+# 10. LINE・Discord通知
 #
 
 TASKS: list[dict[str, Any]] = [
@@ -104,6 +114,12 @@ TASKS: list[dict[str, Any]] = [
         "enabled": True,
     },
     {
+        "name": "Market Regime AI",
+        "script": "market_regime_ai.py",
+        "required": True,
+        "enabled": True,
+    },
+    {
         "name": "自己学習エンジン",
         "script": "learning_engine.py",
         "required": True,
@@ -124,12 +140,6 @@ TASKS: list[dict[str, Any]] = [
     {
         "name": "Step42 Pre-Order Gate",
         "script": "order_manager.py",
-        "required": True,
-        "enabled": True,
-    },
-    {
-        "name": "Step43 VBA Bridge Contract",
-        "script": "vba_bridge.py",
         "required": True,
         "enabled": True,
     },
@@ -157,11 +167,11 @@ REFRESH_ONLY_SCRIPTS = {
     "market_risk_ai.py",
     "get_nikkei225.py",
     "daily_report.py",
+    "market_regime_ai.py",
     "learning_engine.py",
     "ai_judgement.py",
     "trade_engine.py",
     "order_manager.py",
-    "vba_bridge.py",
 }
 
 MONITOR_ONLY_ALLOWED_SCRIPTS = frozenset(
@@ -170,11 +180,11 @@ MONITOR_ONLY_ALLOWED_SCRIPTS = frozenset(
         "price_monitor.py",
         "get_nikkei225.py",
         "daily_report.py",
+        "market_regime_ai.py",
         "learning_engine.py",
         "ai_judgement.py",
         "trade_engine.py",
         "order_manager.py",
-        "vba_bridge.py",
         "ranking_ai.py",
         "chart_generator.py",
         "notify.py",
@@ -253,10 +263,39 @@ def build_environment(*, monitor_only: bool = False) -> dict[str, str]:
         "MONITOR_ONLY" if monitor_only else "OPERATIONAL"
     )
     environment["PHOENIX_TRADING_ACTIONS"] = (
-        "DISABLED" if monitor_only else "PAPER_ONLY"
+        "DISABLED"
+        if monitor_only
+        else OPERATING_MODE_TRADING_ACTIONS[_ACTIVE_OPERATING_MODE]
     )
+    environment["PHOENIX_OPERATING_MODE"] = _ACTIVE_OPERATING_MODE
 
     return environment
+
+
+def load_operating_mode() -> str:
+    if not DIRECT_PIPELINE_CONFIG_FILE.is_file():
+        raise RuntimeError(
+            "Operating mode config is missing: "
+            f"{DIRECT_PIPELINE_CONFIG_FILE}"
+        )
+
+    try:
+        payload = json.loads(DIRECT_PIPELINE_CONFIG_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            "Operating mode config could not be read: "
+            f"{type(error).__name__}: {error}"
+        ) from error
+
+    if not isinstance(payload, dict):
+        raise RuntimeError("Operating mode config root must be an object")
+
+    operating_mode = str(payload.get("operating_mode", "")).strip().upper()
+    if operating_mode not in OPERATING_MODE_TRADING_ACTIONS:
+        raise RuntimeError(
+            "operating_mode must be one of PAPER_SAFE, LIVE_ACTIVE, LIVE_RECONCILE_ONLY"
+        )
+    return operating_mode
 
 
 def configure_quote_transport() -> dict[str, Any]:
@@ -535,6 +574,10 @@ def verify_output_files(*, refresh_only: bool = False) -> dict[str, bool]:
             REPORT_DIR
             / f"report_{today}.csv"
         ),
+        "Market Regime JSON": (
+            REPORT_DIR
+            / "market_regime.json"
+        ),
         "AI判断CSV": (
             REPORT_DIR
             / "ai_judgement.csv"
@@ -542,6 +585,10 @@ def verify_output_files(*, refresh_only: bool = False) -> dict[str, bool]:
         "取引候補CSV": (
             REPORT_DIR
             / "trade_signals.csv"
+        ),
+        "取引候補manifest": (
+            REPORT_DIR
+            / "trade_signals_manifest.json"
         ),
         "ランキングCSV": (
             REPORT_DIR
@@ -869,7 +916,10 @@ def print_morning_run_summary(
     write_log(
         "Market Guard : "
         + phase_status(
-            {"market_risk_ai.py"},
+            {
+                "market_risk_ai.py",
+                "market_regime_ai.py",
+            },
             "READY",
         )
     )
@@ -964,7 +1014,11 @@ def _is_monitor_only_reconciliation(
     if checked_at is None or source_timestamp is None:
         return False
     age_seconds = (checked_at - source_timestamp).total_seconds()
-    return 0 <= age_seconds <= MAX_POSITION_STATE_AGE_SECONDS
+    if age_seconds < 0:
+        return False
+    if getattr(reconciliation_result, "mode", None) == "PAPER":
+        return True
+    return age_seconds <= MAX_POSITION_STATE_AGE_SECONDS
 
 
 def _format_weekly_signal_comparison_counts(counts: dict[str, int]) -> str:
@@ -1218,6 +1272,14 @@ def _run_main() -> None:
         "Quote transport: "
         f"{quote_environment.get('status')} / {quote_environment.get('ca_bundle_mode')} / TLS=True"
     )
+    global _ACTIVE_OPERATING_MODE
+    try:
+        _ACTIVE_OPERATING_MODE = load_operating_mode()
+    except RuntimeError as error:
+        write_log("PHOENIX OPERATING MODE CONFIG FAILED")
+        write_log(str(error))
+        raise SystemExit(1) from error
+    write_log(f"Operating mode: {_ACTIVE_OPERATING_MODE}")
 
     started_at = time.time()
 

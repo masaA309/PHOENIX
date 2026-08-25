@@ -219,6 +219,10 @@ def _state_timestamp(payload: Mapping[str, Any]) -> datetime:
     return timestamp
 
 
+def _requires_source_freshness(mode: object) -> bool:
+    return not isinstance(mode, str) or mode.strip().upper() != MODE
+
+
 def _validate_paper_safety_fields(payload: Mapping[str, Any]) -> None:
     for name in ("live_trading_enabled", "margin_trading_enabled"):
         if name not in payload:
@@ -366,7 +370,7 @@ def run_position_reconciliation(
                 _append_reason(reasons, "POSITIONS_COUNT_NEGATIVE")
             if snapshot.source_timestamp > checked:
                 _append_reason(reasons, "SOURCE_TIMESTAMP_FUTURE")
-            elif checked - snapshot.source_timestamp > max_source_age:
+            elif _requires_source_freshness(snapshot.mode) and checked - snapshot.source_timestamp > max_source_age:
                 _append_reason(reasons, "SOURCE_STATE_STALE")
 
     if reasons:

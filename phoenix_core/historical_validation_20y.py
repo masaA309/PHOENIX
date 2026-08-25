@@ -69,6 +69,14 @@ DEFAULT_MINIMUM_HISTORY_SESSIONS = 100
 DEFAULT_REQUESTED_YEARS = 20
 DEFAULT_ALLOW_NETWORK_FETCH = True
 DEFAULT_BENCHMARK_TICKER = "^N225"
+
+# Risk v2: point-in-time market breadth filter.
+# OFF by default so Risk v1 remains byte-for-byte strategy compatible
+# unless explicitly enabled by a validation config.
+DEFAULT_MARKET_BREADTH_FILTER_ENABLED = False
+DEFAULT_MARKET_BREADTH_BEAR_THRESHOLD = 0.40
+DEFAULT_MARKET_BREADTH_BEAR_MAX_TOTAL_INVESTED_PCT = 0.70
+
 TRADING_DAY_TOLERANCE_DAYS = 3
 _QUOTE_TRANSPORT_INITIALIZED = False
 HISTORY_COLUMNS = ("Open", "High", "Low", "Close", "Volume")
@@ -157,6 +165,9 @@ class HistoricalValidationConfig:
     allow_network_fetch: bool = DEFAULT_ALLOW_NETWORK_FETCH
     universe_csv: str = "data/nikkei225.csv"
     benchmark_ticker: str = DEFAULT_BENCHMARK_TICKER
+    market_breadth_filter_enabled: bool = DEFAULT_MARKET_BREADTH_FILTER_ENABLED
+    market_breadth_bear_threshold: float = DEFAULT_MARKET_BREADTH_BEAR_THRESHOLD
+    market_breadth_bear_max_total_invested_pct: float = DEFAULT_MARKET_BREADTH_BEAR_MAX_TOTAL_INVESTED_PCT
     output_dir: str = DEFAULT_OUTPUT_DIR
     report_json: str = "reports/historical_validation_20y/summary.json"
     report_text: str = "reports/historical_validation_20y/report.txt"
@@ -185,6 +196,8 @@ class HistoricalValidationConfig:
             "signal_score_threshold": self.signal_score_threshold,
             "rsi_min": self.rsi_min,
             "rsi_max": self.rsi_max,
+            "market_breadth_bear_threshold": self.market_breadth_bear_threshold,
+            "market_breadth_bear_max_total_invested_pct": self.market_breadth_bear_max_total_invested_pct,
         }
         for name, value in numeric_values.items():
             if not math.isfinite(float(value)):
@@ -233,6 +246,14 @@ class HistoricalValidationConfig:
             raise ValueError("universe_csv must not be empty")
         if not self.benchmark_ticker:
             raise ValueError("benchmark_ticker must not be empty")
+        if not 0 <= self.market_breadth_bear_threshold <= 1:
+            raise ValueError("market_breadth_bear_threshold must be within [0, 1]")
+        if not 0 <= self.market_breadth_bear_max_total_invested_pct <= 1:
+            raise ValueError("market_breadth_bear_max_total_invested_pct must be within [0, 1]")
+        if self.market_breadth_bear_max_total_invested_pct > self.max_total_invested_pct:
+            raise ValueError(
+                "market_breadth_bear_max_total_invested_pct must be <= max_total_invested_pct"
+            )
 
     def strategy_parameters(self) -> BacktestStrategyParameters:
         return BacktestStrategyParameters(
@@ -337,6 +358,18 @@ def _empty_diagnostics_frame() -> pd.DataFrame:
     return pd.DataFrame(columns=["year", "reason", "count"])
 
 
+RISK_V2_RESEARCH_COLUMNS = (
+    "date",
+    "market_regime",
+    "market_breadth_above_ma_long_pct",
+    "effective_max_total_invested_pct",
+)
+
+
+def _empty_risk_v2_research_frame() -> pd.DataFrame:
+    return pd.DataFrame(columns=list(RISK_V2_RESEARCH_COLUMNS))
+
+
 @dataclass(slots=True)
 class HistoricalValidationResult:
     trades: pd.DataFrame
@@ -346,6 +379,7 @@ class HistoricalValidationResult:
     rejected_due_to_lot: int = 0
     rejected_due_to_buying_power: int = 0
     diagnostics: pd.DataFrame = field(default_factory=_empty_diagnostics_frame)
+    risk_v2_research: pd.DataFrame = field(default_factory=_empty_risk_v2_research_frame)
 
 
 def configure_console() -> None:
@@ -845,6 +879,7 @@ def calculate_shares(
     current_exposure: float,
     config: HistoricalValidationConfig,
     current_portfolio_risk_yen: float = 0.0,
+    max_total_invested_pct_override: float | None = None,
 ) -> int:
     limits = _share_sizing_limits(
         current_equity=current_equity,
@@ -854,6 +889,7 @@ def calculate_shares(
         current_exposure=current_exposure,
         current_portfolio_risk_yen=current_portfolio_risk_yen,
         config=config,
+        max_total_invested_pct_override=max_total_invested_pct_override,
     )
     quantity = min(
         limits["risk_quantity"],
@@ -874,6 +910,7 @@ def _share_sizing_limits(
     current_exposure: float,
     config: HistoricalValidationConfig,
     current_portfolio_risk_yen: float = 0.0,
+    max_total_invested_pct_override: float | None = None,
 ) -> dict[str, int]:
     if entry_price <= 0 or stop_price <= 0 or entry_price <= stop_price:
         return {
@@ -931,8 +968,15 @@ def _share_sizing_limits(
     cash_limit_quantity = int(spendable_cash // buffered_unit_price)
 
     # Total invested capital.
+    effective_max_total_invested_pct = config.max_total_invested_pct
+    if max_total_invested_pct_override is not None:
+        effective_max_total_invested_pct = min(
+            config.max_total_invested_pct,
+            max(float(max_total_invested_pct_override), 0.0),
+        )
+
     portfolio_capacity = max(
-        current_equity * config.max_total_invested_pct - current_exposure,
+        current_equity * effective_max_total_invested_pct - current_exposure,
         0.0,
     )
     portfolio_limit_quantity = int(portfolio_capacity // entry_price)
@@ -961,6 +1005,7 @@ def _classify_share_rejection_reason(
     config: HistoricalValidationConfig,
     d1: bool,
     current_portfolio_risk_yen: float = 0.0,
+    max_total_invested_pct_override: float | None = None,
 ) -> str:
     limits = _share_sizing_limits(
         current_equity=current_equity,
@@ -970,6 +1015,7 @@ def _classify_share_rejection_reason(
         current_exposure=current_exposure,
         current_portfolio_risk_yen=current_portfolio_risk_yen,
         config=config,
+        max_total_invested_pct_override=max_total_invested_pct_override,
     )
 
     lot_size = config.lot_size
@@ -1132,6 +1178,47 @@ def _close_position(
     return exit_value - exit_fee
 
 
+def _market_breadth_above_ma_long_ratio(
+    *,
+    prepared_histories: Mapping[str, pd.DataFrame],
+    membership_lookup: Mapping[str, Any],
+    current_date: pd.Timestamp,
+    uses_membership: bool,
+) -> float | None:
+    eligible = 0
+    above = 0
+
+    for ticker, frame in prepared_histories.items():
+        if uses_membership and not _is_member_on_date(
+            membership_lookup.get(ticker, []),
+            current_date,
+        ):
+            continue
+
+        work = normalize_history_frame(frame)
+        if work.empty or current_date not in work.index:
+            continue
+
+        row = work.loc[current_date]
+        close_price = safe_float(row.get("Close"))
+        ma_long = safe_float(row.get("MA_LONG"))
+
+        if (
+            not _is_positive_finite_price(close_price)
+            or not _is_positive_finite_price(ma_long)
+        ):
+            continue
+
+        eligible += 1
+        if close_price > ma_long:
+            above += 1
+
+    if eligible == 0:
+        return None
+
+    return above / eligible
+
+
 def simulate_validation(
     prepared_histories: Mapping[str, pd.DataFrame],
     universe: pd.DataFrame,
@@ -1169,6 +1256,7 @@ def simulate_validation(
     pending_orders: dict[pd.Timestamp, list[PendingOrder]] = {}
     trades: list[TradeRecord] = []
     equity_rows: list[dict[str, Any]] = []
+    risk_v2_research_rows: list[dict[str, Any]] = []
     rejected_due_to_lot = 0
     rejected_due_to_buying_power = 0
     diagnostics_counts: Counter[tuple[int, str]] = Counter()
@@ -1362,6 +1450,42 @@ def simulate_validation(
             market_value += _history_close_at_or_before(frame, current_date) * position.quantity
 
         current_equity = cash + market_value
+
+        effective_max_total_invested_pct = config.max_total_invested_pct
+        if config.market_breadth_filter_enabled:
+            # Risk v2 market regime is evaluated only when the filter is enabled.
+            market_breadth_ratio = _market_breadth_above_ma_long_ratio(
+                prepared_histories=prepared_histories,
+                membership_lookup=membership_lookup,
+                current_date=current_date,
+                uses_membership=uses_membership,
+            )
+            market_regime = "NORMAL"
+            if (
+                market_breadth_ratio is not None
+                and market_breadth_ratio < config.market_breadth_bear_threshold
+            ):
+                market_regime = "BEAR"
+                effective_max_total_invested_pct = min(
+                    config.max_total_invested_pct,
+                    config.market_breadth_bear_max_total_invested_pct,
+                )
+            risk_v2_research_rows.append(
+                {
+                    "date": current_date.date().isoformat(),
+                    "market_regime": market_regime,
+                    "market_breadth_above_ma_long_pct": (
+                        round(market_breadth_ratio * 100.0, 4)
+                        if market_breadth_ratio is not None
+                        else None
+                    ),
+                    "effective_max_total_invested_pct": round(
+                        effective_max_total_invested_pct,
+                        6,
+                    ),
+                }
+            )
+
         pending_tickers = {order.ticker for orders in pending_orders.values() for order in orders}
         todays_entry_candidates: list[EntryCandidate] = []
         for ticker, frame in prepared_histories.items():
@@ -1428,6 +1552,7 @@ def simulate_validation(
                 current_exposure=current_exposure,
                 config=config,
                 current_portfolio_risk_yen=candidate_portfolio_risk_yen,
+                max_total_invested_pct_override=effective_max_total_invested_pct,
             )
             if quantity < config.lot_size:
                 # Separate cash/exposure shortages from risk or position-sizing shortages.
@@ -1440,13 +1565,17 @@ def simulate_validation(
                     config=config,
                     d1=False,
                     current_portfolio_risk_yen=candidate_portfolio_risk_yen,
+                    max_total_invested_pct_override=effective_max_total_invested_pct,
                 )
                 if reason:
                     record_diagnostic(current_date.year, reason)
                 spendable_cash = max(available_cash - current_equity * config.minimum_cash_reserve_pct, 0.0)
                 lot_entry_value = candidate.estimated_entry_price * config.lot_size
                 lot_cash_cost = lot_entry_value * (1.0 + config.commission_rate)
-                portfolio_capacity = max(current_equity * config.max_total_invested_pct - current_exposure, 0.0)
+                portfolio_capacity = max(
+                    current_equity * effective_max_total_invested_pct - current_exposure,
+                    0.0,
+                )
                 if spendable_cash + 1e-9 < lot_cash_cost or portfolio_capacity + 1e-9 < lot_entry_value:
                     rejected_due_to_buying_power += 1
                 else:
@@ -1543,6 +1672,7 @@ def simulate_validation(
 
     trades_df = pd.DataFrame([asdict(trade) for trade in trades])
     equity_df = pd.DataFrame(equity_rows)
+    risk_v2_research_df = pd.DataFrame(risk_v2_research_rows, columns=list(RISK_V2_RESEARCH_COLUMNS))
     annual_df = build_period_returns(
         equity_df,
         trades_df,
@@ -1563,6 +1693,7 @@ def simulate_validation(
         rejected_due_to_lot=rejected_due_to_lot,
         rejected_due_to_buying_power=rejected_due_to_buying_power,
         diagnostics=_build_diagnostics_frame(diagnostics_counts, requested_start_ts.year, requested_end_ts.year),
+        risk_v2_research=risk_v2_research_df,
     )
 
 
@@ -1807,6 +1938,24 @@ def _build_historical_validation_config(settings: Mapping[str, Any]) -> Historic
         allow_network_fetch=bool(settings.get("allow_network_fetch", DEFAULT_ALLOW_NETWORK_FETCH)),
         universe_csv=str(settings.get("universe_csv", "data/nikkei225.csv")),
         benchmark_ticker=str(settings.get("benchmark_ticker", DEFAULT_BENCHMARK_TICKER)),
+        market_breadth_filter_enabled=bool(
+            settings.get(
+                "market_breadth_filter_enabled",
+                DEFAULT_MARKET_BREADTH_FILTER_ENABLED,
+            )
+        ),
+        market_breadth_bear_threshold=float(
+            settings.get(
+                "market_breadth_bear_threshold",
+                DEFAULT_MARKET_BREADTH_BEAR_THRESHOLD,
+            )
+        ),
+        market_breadth_bear_max_total_invested_pct=float(
+            settings.get(
+                "market_breadth_bear_max_total_invested_pct",
+                DEFAULT_MARKET_BREADTH_BEAR_MAX_TOTAL_INVESTED_PCT,
+            )
+        ),
         output_dir=str(settings.get("output_dir", DEFAULT_OUTPUT_DIR)),
         report_json=str(settings.get("report_json", "reports/historical_validation_20y/summary.json")),
         report_text=str(settings.get("report_text", "reports/historical_validation_20y/report.txt")),
@@ -2528,6 +2677,8 @@ def render_report(summary: Mapping[str, Any]) -> str:
             f"Coverage CSV       : {output_files.get('data_coverage_csv', '')}",
         ]
     )
+    if output_files.get("risk_v2_research_csv"):
+        lines.append(f"Risk v2 research   : {output_files.get('risk_v2_research_csv', '')}")
     if output_files.get("benchmark_equity_curve_csv"):
         lines.append(f"Benchmark CSV      : {output_files.get('benchmark_equity_curve_csv', '')}")
     lines.extend(
@@ -2557,6 +2708,8 @@ def save_outputs(root: Path, settings: Mapping[str, Any], report: dict[str, Any]
     monthly_path = resolve_within(root, str(settings.get("monthly_returns_csv", str(Path(DEFAULT_OUTPUT_DIR) / "monthly_returns.csv"))))
     trades_path = resolve_within(root, str(settings.get("trades_csv", str(Path(DEFAULT_OUTPUT_DIR) / "trades.csv"))))
     equity_path = resolve_within(root, str(settings.get("equity_curve_csv", str(Path(DEFAULT_OUTPUT_DIR) / "equity_curve.csv"))))
+    risk_v2_research_enabled = bool(settings.get("market_breadth_filter_enabled", False))
+    risk_v2_research_path = output_dir / "risk_v2_research.csv"
     output_dir.mkdir(parents=True, exist_ok=True)
     for path in (summary_path, report_text_path, annual_path, monthly_path, coverage_path, diagnostics_path, trades_path, equity_path):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -2571,6 +2724,8 @@ def save_outputs(root: Path, settings: Mapping[str, Any], report: dict[str, Any]
         "trades_csv": str(trades_path),
         "equity_curve_csv": str(equity_path),
     }
+    if risk_v2_research_enabled and not result.risk_v2_research.empty:
+        report["output_files"]["risk_v2_research_csv"] = str(risk_v2_research_path)
 
     coverage_df = pd.DataFrame(report.get("rows", []), columns=[
         "ticker",
@@ -2594,6 +2749,8 @@ def save_outputs(root: Path, settings: Mapping[str, Any], report: dict[str, Any]
     result.diagnostics.to_csv(diagnostics_path, index=False, encoding="utf-8-sig")
     result.trades.to_csv(trades_path, index=False, encoding="utf-8-sig")
     result.equity_curve.to_csv(equity_path, index=False, encoding="utf-8-sig")
+    if risk_v2_research_enabled and not result.risk_v2_research.empty:
+        result.risk_v2_research.to_csv(risk_v2_research_path, index=False, encoding="utf-8-sig")
     coverage_df.to_csv(coverage_path, index=False, encoding="utf-8-sig")
 
 
@@ -2828,6 +2985,7 @@ def verify_historical_validation_outputs(root: Path, config: Any | None = None) 
                 if hasattr(config, key):
                     settings[key] = getattr(config, key)
 
+        output_dir = resolve_within(root, str(settings.get("output_dir", DEFAULT_OUTPUT_DIR)))
         summary_path = resolve_within(root, str(settings.get("report_json", DEFAULT_REPORT_JSON)))
         report_text_path = resolve_within(root, str(settings.get("report_text", DEFAULT_REPORT_TEXT)))
         coverage_setting = settings.get("coverage_csv", settings.get("data_coverage_csv", DEFAULT_COVERAGE_CSV))
@@ -2837,6 +2995,8 @@ def verify_historical_validation_outputs(root: Path, config: Any | None = None) 
         monthly_path = resolve_within(root, str(settings.get("monthly_returns_csv", str(Path(DEFAULT_OUTPUT_DIR) / "monthly_returns.csv"))))
         trades_path = resolve_within(root, str(settings.get("trades_csv", str(Path(DEFAULT_OUTPUT_DIR) / "trades.csv"))))
         equity_path = resolve_within(root, str(settings.get("equity_curve_csv", str(Path(DEFAULT_OUTPUT_DIR) / "equity_curve.csv"))))
+        risk_v2_research_enabled = bool(settings.get("market_breadth_filter_enabled", False))
+        risk_v2_research_path = output_dir / "risk_v2_research.csv"
 
         summary = load_json_object(summary_path)
         coverage = read_csv_flexible(coverage_path)
@@ -2878,6 +3038,8 @@ def verify_historical_validation_outputs(root: Path, config: Any | None = None) 
             "trades_csv",
             "equity_curve_csv",
         ]
+        if risk_v2_research_enabled:
+            required_output_keys.append("risk_v2_research_csv")
         for key in required_output_keys:
             if key not in output_files:
                 errors.append(f"Output file mapping missing: {key}")
@@ -2915,6 +3077,13 @@ def verify_historical_validation_outputs(root: Path, config: Any | None = None) 
             errors.append("Summary must keep no_real_orders true")
         if list(diagnostics.columns[:3]) != ["year", "reason", "count"]:
             errors.append("diagnostics.csv columns are invalid")
+        if risk_v2_research_enabled:
+            if not risk_v2_research_path.is_file():
+                errors.append(f"Missing output artifact: {risk_v2_research_path}")
+            else:
+                risk_v2_research = read_csv_flexible(risk_v2_research_path)
+                if list(risk_v2_research.columns[: len(RISK_V2_RESEARCH_COLUMNS)]) != list(RISK_V2_RESEARCH_COLUMNS):
+                    errors.append("risk_v2_research.csv columns are invalid")
     except Exception as error:
         errors.append(f"Verification failed: {type(error).__name__}: {error}")
     return not errors, errors

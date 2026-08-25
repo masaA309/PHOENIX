@@ -13,10 +13,10 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from phoenix_core.broker import PaperBroker
+from phoenix_core.models import OrderRequest, OrderSide, OrderType
 from phoenix_core.performance_tracker import atomic_write, resolve_path
 from phoenix_core.position_sizer import (
     PositionSizingConfig,
-    build_order_requests,
     normalize_candidate_frame,
     size_candidates,
 )
@@ -24,8 +24,8 @@ from phoenix_core.risk_controller import RiskConfig, RiskState, evaluate_orders
 
 
 SCHEMA_VERSION = 2
-VERSION = "PHOENIX v7 Step46 Manual Ticket Draft"
-CREATED_BY = "PHOENIX_STEP46_MANUAL_TICKET_DRAFT"
+VERSION = "PHOENIX v7 Step46 Manual Ticket"
+CREATED_BY = "PHOENIX_STEP46_MANUAL_TICKET"
 STATUS = "REVIEW_REQUIRED"
 TRADING_MODE = "PAPER"
 EXECUTION_MODE = "MANUAL_ONLY"
@@ -51,8 +51,10 @@ SOURCE_FILES = [
     "reports/market_regime.json",
     "data/market_risk_latest.json",
     "state/v7_paper_broker.json",
+    "state/v7_real_trade_preorder_state.json",
     "config/v7_position_sizer_config.json",
 ]
+IDEMPOTENCY_STATE_FILE = "state/v7_real_trade_preorder_state.json"
 
 
 def _now_jst() -> datetime:
@@ -221,6 +223,185 @@ def _signal_date(report_path: Path, daily_report: pd.DataFrame) -> str:
         ).isoformat()
 
     return ""
+
+
+def _manual_ticket_client_order_id(signal_date: str, ticker: str, side: str) -> str:
+    compact_date = signal_date.replace("-", "") if signal_date else "UNKNOWN"
+    return f"PHX-MANUAL-{compact_date}-{ticker}-{side}"
+
+
+def _manual_ticket_idempotency_key(signal_date: str, ticker: str, side: str) -> str:
+    return _stable_hash(
+        {
+            "signal_date": signal_date,
+            "ticker": ticker,
+            "side": side,
+            "source": "manual_trade_ticket",
+        }
+    )
+
+
+def _signal_is_recent(signal_date: str, generated_at: datetime) -> bool:
+    try:
+        parsed = datetime.fromisoformat(signal_date).date()
+    except ValueError:
+        return False
+    age_days = (generated_at.date() - parsed).days
+    return 0 <= age_days <= 1
+
+
+def _load_existing_manual_ticket_idempotency_keys(root: Path) -> set[str]:
+    state_path = resolve_path(root, IDEMPOTENCY_STATE_FILE)
+    if not state_path.is_file():
+        return set()
+    payload = _read_json(state_path)
+    if isinstance(payload, list):
+        approved = payload
+    elif isinstance(payload, Mapping):
+        approved = payload.get("approved_idempotency_keys", payload.get("idempotency_keys", []))
+    else:
+        raise ValueError(f"manual ticket idempotency state is invalid: {state_path}")
+    if not isinstance(approved, list):
+        raise ValueError(f"manual ticket idempotency state is invalid: {state_path}")
+    keys: set[str] = set()
+    for item in approved:
+        key = _safe_text(item)
+        if not key:
+            raise ValueError(f"manual ticket idempotency key is invalid: {state_path}")
+        keys.add(key)
+    return keys
+
+
+def _persist_manual_ticket_idempotency_keys(root: Path, report: Mapping[str, Any]) -> None:
+    state_path = resolve_path(root, IDEMPOTENCY_STATE_FILE)
+    approved_keys = _load_existing_manual_ticket_idempotency_keys(root)
+    approved_keys.update(
+        _safe_text(candidate.get("idempotency_key"))
+        for candidate in report.get("candidates", [])
+        if _safe_text(candidate.get("idempotency_key"))
+    )
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "updated_at": report.get("generated_at", _now_jst().isoformat(timespec="seconds")),
+        "last_report_sha256": _stable_hash(report),
+        "last_approved_count": int(report.get("approved_count", 0) or 0),
+        "last_blocked_count": int(report.get("blocked_count", 0) or 0),
+        "approved_idempotency_keys": sorted(approved_keys),
+        "idempotency_keys": sorted(approved_keys),
+    }
+    atomic_write(state_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+
+
+def _broker_processed_client_order_ids(broker_state: Mapping[str, Any]) -> set[str]:
+    processed = broker_state.get("processed_client_order_ids", [])
+    if not isinstance(processed, list):
+        raise ValueError("Paper broker processed_client_order_ids is invalid")
+    keys: set[str] = set()
+    for item in processed:
+        key = _safe_text(item)
+        if not key:
+            raise ValueError("Paper broker processed_client_order_ids is invalid")
+        keys.add(key)
+    return keys
+
+
+def _manual_ticket_gate(
+    row: Mapping[str, Any],
+    *,
+    generated_at: datetime,
+    signal_date: str,
+    seen_idempotency_keys: set[str],
+    broker_processed_client_order_ids: set[str],
+) -> dict[str, Any] | None:
+    ticker = _safe_text(_mapping_value(row, "ticker", "symbol", "Symbol", default="")).upper()
+    if not ticker:
+        return None
+    reference_price = round(
+        _safe_float(
+            _mapping_value(
+                row,
+                "reference_price",
+                "基準価格",
+                "base_price",
+                "current_price",
+                "price",
+                "Price",
+                "終値",
+                default=0.0,
+            ),
+            0.0,
+        ),
+        2,
+    )
+    entry_price = round(
+        _safe_float(
+            _mapping_value(
+                row,
+                "entry_price",
+                "エントリー価格",
+                "limit_price",
+                "EntryPrice",
+                "Entry",
+                "Price",
+                "price",
+                default=0.0,
+            ),
+            0.0,
+        ),
+        2,
+    )
+    stop_loss_price = round(
+        _safe_float(
+            _mapping_value(
+                row,
+                "stop_price",
+                "stop_loss_price",
+                "StopPrice",
+                "stop",
+                "Stop",
+                "損切価格",
+                default=0.0,
+            ),
+            0.0,
+        ),
+        2,
+    )
+    take_profit_price = round(
+        _safe_float(
+            _mapping_value(
+                row,
+                "take_profit_price",
+                "利確価格",
+                "target_price",
+                "target",
+                "goal_price",
+                default=0.0,
+            ),
+            0.0,
+        ),
+        2,
+    )
+    if not _signal_is_recent(signal_date, generated_at):
+        return None
+    if any(price <= 0 for price in (reference_price, entry_price, stop_loss_price, take_profit_price)):
+        return None
+    if not (stop_loss_price < entry_price < take_profit_price):
+        return None
+    client_order_id = _manual_ticket_client_order_id(signal_date, ticker, SIDE)
+    idempotency_key = _manual_ticket_idempotency_key(signal_date, ticker, SIDE)
+    if idempotency_key in seen_idempotency_keys:
+        return None
+    if client_order_id in broker_processed_client_order_ids:
+        return None
+    return {
+        "ticker": ticker,
+        "reference_price": reference_price,
+        "entry_price": entry_price,
+        "stop_loss_price": stop_loss_price,
+        "take_profit_price": take_profit_price,
+        "client_order_id": client_order_id,
+        "idempotency_key": idempotency_key,
+    }
 
 
 def _load_market_context(
@@ -599,6 +780,8 @@ def _build_candidate(
     ai_row: Mapping[str, Any],
     sizing_decision: Any,
     market_context: Mapping[str, Any],
+    client_order_id: str | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     ticker = _safe_text(_mapping_value(trade_row, "ticker", "symbol", "Symbol", default=""))
     company_name = _safe_text(
@@ -759,12 +942,13 @@ def _build_candidate(
         "created_by": CREATED_BY,
         "status": STATUS,
     }
-    payload["idempotency_key"] = _stable_hash(
-        {
-            key: value
-            for key, value in payload.items()
-            if key not in {"idempotency_key", "checksum"}
-        }
+    payload["client_order_id"] = _safe_text(
+        client_order_id,
+        _manual_ticket_client_order_id(signal_date, ticker, SIDE),
+    )
+    payload["idempotency_key"] = _safe_text(
+        idempotency_key,
+        _manual_ticket_idempotency_key(signal_date, ticker, SIDE),
     )
     payload["checksum"] = _stable_hash(
         {
@@ -776,7 +960,7 @@ def _build_candidate(
     return payload
 
 
-def _read_root_files(root: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Path, dict[str, Any], dict[str, Any]]:
+def _read_root_files(root: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
     trade_signals = _read_csv(resolve_path(root, "reports/trade_signals.csv"))
     ai_judgement = _read_csv(resolve_path(root, "reports/ai_judgement.csv"))
     daily_report_path = resolve_path(root, "reports/report_20260807.csv")
@@ -784,9 +968,9 @@ def _read_root_files(root: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFra
     _read_json(resolve_path(root, "reports/ai_judgement_manifest.json"))
     market_regime = _read_json(resolve_path(root, "reports/market_regime.json"))
     market_risk = _read_json(resolve_path(root, "data/market_risk_latest.json"))
-    _read_json(resolve_path(root, "state/v7_paper_broker.json"))
+    broker_state = _read_json(resolve_path(root, "state/v7_paper_broker.json"))
     _read_json(resolve_path(root, "config/v7_position_sizer_config.json"))
-    return trade_signals, ai_judgement, daily_report, daily_report_path, market_regime, market_risk
+    return trade_signals, ai_judgement, daily_report, daily_report_path, market_regime, market_risk, broker_state
 
 
 def build_manual_trade_ticket(
@@ -796,14 +980,16 @@ def build_manual_trade_ticket(
 ) -> dict[str, Any]:
     actual_generated_at = generated_at or _now_jst()
     expires_at = actual_generated_at + timedelta(minutes=TTL_MINUTES)
-    trade_signals, ai_judgement, daily_report, daily_report_path, market_regime, market_risk = _read_root_files(root)
+    trade_signals, ai_judgement, daily_report, daily_report_path, market_regime, market_risk, broker_state = _read_root_files(root)
     market_context = _load_market_context(market_regime, market_risk)
     signal_date = _signal_date(daily_report_path, daily_report)
+    broker_state_path = resolve_path(root, "state/v7_paper_broker.json")
 
     candidates = _prepare_candidate_frame(trade_signals, market_context)
     sizing_config = _load_position_sizing_config(root, market_context)
     broker = PaperBroker(
         initial_cash_yen=CAPITAL_BASIS_YEN,
+        state_file=broker_state_path,
     )
     decisions = size_candidates(
         broker,
@@ -811,43 +997,91 @@ def build_manual_trade_ticket(
         sizing_config,
     )
     decision_map = {decision.ticker: decision for decision in decisions}
-    positive_orders = build_order_requests(
-        decisions,
-        run_id=actual_generated_at.strftime("%Y%m%d_%H%M%S"),
-    )
+    seen_idempotency_keys = _load_existing_manual_ticket_idempotency_keys(root)
+    broker_processed_client_order_ids = _broker_processed_client_order_ids(broker_state)
 
     # Reuse the existing risk controller for an internal validation pass.
-    risk_report = evaluate_orders(
-        broker=broker,
-        orders=positive_orders,
-        config=_load_risk_config(market_context, candidate_count=len(candidates)),
-        state=RiskState.new(max(broker.get_account_snapshot().equity_yen, 0.0)),
-    )
-    _ = risk_report
-
+    positive_orders: list[OrderRequest] = []
+    candidate_rows: list[dict[str, Any]] = []
+    accepted_tickers: set[str] = set()
     ai_lookup = {
         str(row.get("ticker", "")).strip().upper(): row.to_dict()
         for _, row in ai_judgement.iterrows()
     }
-
-    candidate_rows = []
     for _, row in candidates.iterrows():
         ticker = str(row.get("ticker", "")).strip().upper()
         decision = decision_map.get(ticker)
         if decision is None:
             raise ValueError(f"Candidate sizing decision missing: {ticker}")
         ai_row = ai_lookup.get(ticker, {})
-        candidate_rows.append(
-            _build_candidate(
-                generated_at=actual_generated_at,
-                expires_at=expires_at,
-                signal_date=signal_date,
-                trade_row=row.to_dict(),
-                ai_row=ai_row,
-                sizing_decision=decision,
-                market_context=market_context,
+        gate = _manual_ticket_gate(
+            row.to_dict(),
+            generated_at=actual_generated_at,
+            signal_date=signal_date,
+            seen_idempotency_keys=seen_idempotency_keys,
+            broker_processed_client_order_ids=broker_processed_client_order_ids,
+        )
+        if gate is None:
+            continue
+        candidate = _build_candidate(
+            generated_at=actual_generated_at,
+            expires_at=expires_at,
+            signal_date=signal_date,
+            trade_row=row.to_dict(),
+            ai_row=ai_row,
+            sizing_decision=decision,
+            market_context=market_context,
+            client_order_id=gate["client_order_id"],
+            idempotency_key=gate["idempotency_key"],
+        )
+        if candidate["quantity"] <= 0:
+            continue
+        client_order_id = str(candidate["client_order_id"])
+        if client_order_id in accepted_tickers:
+            continue
+        accepted_tickers.add(client_order_id)
+        seen_idempotency_keys.add(str(candidate["idempotency_key"]))
+        candidate_rows.append(candidate)
+        positive_orders.append(
+            OrderRequest(
+                ticker=str(candidate["ticker"]),
+                side=OrderSide.BUY,
+                quantity=int(candidate["quantity"]),
+                order_type=OrderType.LIMIT,
+                limit_price=float(candidate["limit_price"]),
+                client_order_id=client_order_id,
+                strategy_name="PHOENIX_MANUAL_TICKET",
+                metadata={
+                    "source": "manual_trade_ticket",
+                    "signal_date": signal_date,
+                },
             )
         )
+
+    risk_report = evaluate_orders(
+        broker=broker,
+        orders=positive_orders,
+        config=_load_risk_config(market_context, candidate_count=len(candidates)),
+        state=RiskState.new(max(broker.get_account_snapshot().equity_yen, 0.0)),
+    )
+    accepted_client_order_ids = {
+        str(order.client_order_id)
+        for order in risk_report.accepted_orders
+    }
+    if accepted_client_order_ids:
+        candidate_rows = [
+            candidate
+            for candidate in candidate_rows
+            if candidate["client_order_id"] in accepted_client_order_ids
+        ]
+        positive_orders = [
+            order
+            for order in positive_orders
+            if order.client_order_id in accepted_client_order_ids
+        ]
+    else:
+        candidate_rows = []
+        positive_orders = []
 
     total_required_funds = round(
         sum(candidate["estimated_notional"] for candidate in candidate_rows),
@@ -857,10 +1091,8 @@ def build_manual_trade_ticket(
         sum(candidate["estimated_max_loss"] for candidate in candidate_rows),
         2,
     )
-    positive_quantity_count = sum(
-        1 for candidate in candidate_rows if candidate["quantity"] > 0
-    )
-    zero_quantity_count = len(candidate_rows) - positive_quantity_count
+    positive_quantity_count = len(candidate_rows)
+    zero_quantity_count = 0
     cash_available_yen = round(
         max(broker.get_account_snapshot().cash_yen, 0.0),
         2,
@@ -921,47 +1153,49 @@ def _csv_frame(report: Mapping[str, Any]) -> pd.DataFrame:
         row["rss_send_allowed"] = "TRUE" if row.get("rss_send_allowed") else "FALSE"
         rows.append(row)
     frame = pd.DataFrame(rows)
-    if not frame.empty:
-        column_order = [
-            "generated_at",
-            "expires_at",
-            "signal_date",
-            "ticker",
-            "company_name",
-            "market",
-            "side",
-            "order_type",
-            "quantity",
-            "lot_size",
-            "reference_price",
-            "limit_price",
-            "stop_loss_price",
-            "take_profit_price",
-            "estimated_notional",
-            "estimated_max_loss",
-            "ai_score",
-            "phoenix_score",
-            "portfolio_score",
-            "market_risk_score",
-            "market_risk_level",
-            "pullback_state",
-            "watch_state",
-            "recheck_required",
-            "sizing_status",
-            "selection_reason",
-            "risk_check_result",
-            "blocked_reasons",
-            "idempotency_key",
-            "checksum",
-            "manual_approval_required",
-            "rss_send_allowed",
-            "orders_submitted",
-            "source_files",
-            "created_by",
-            "status",
-        ]
-        available_columns = [column for column in column_order if column in frame.columns]
-        frame = frame[available_columns]
+    column_order = [
+        "generated_at",
+        "expires_at",
+        "signal_date",
+        "ticker",
+        "company_name",
+        "market",
+        "side",
+        "order_type",
+        "quantity",
+        "lot_size",
+        "reference_price",
+        "limit_price",
+        "stop_loss_price",
+        "take_profit_price",
+        "estimated_notional",
+        "estimated_max_loss",
+        "ai_score",
+        "phoenix_score",
+        "portfolio_score",
+        "market_risk_score",
+        "market_risk_level",
+        "pullback_state",
+        "watch_state",
+        "recheck_required",
+        "sizing_status",
+        "selection_reason",
+        "risk_check_result",
+        "blocked_reasons",
+        "client_order_id",
+        "idempotency_key",
+        "checksum",
+        "manual_approval_required",
+        "rss_send_allowed",
+        "orders_submitted",
+        "source_files",
+        "created_by",
+        "status",
+    ]
+    if frame.empty:
+        frame = pd.DataFrame(columns=column_order)
+    available_columns = [column for column in column_order if column in frame.columns]
+    frame = frame[available_columns]
     return frame
 
 
@@ -1005,6 +1239,7 @@ def text_report(report: Mapping[str, Any]) -> str:
             [
                 f"Ticker               : {candidate.get('ticker', '')}",
                 f"Company              : {candidate.get('company_name', '')}",
+                f"Client order id      : {candidate.get('client_order_id', '')}",
                 f"Qty / lot            : {candidate.get('quantity', 0)} / {candidate.get('lot_size', 0)}",
                 f"Reference / limit    : {candidate.get('reference_price', 0):,.2f} / {candidate.get('limit_price', 0):,.2f}",
                 f"Stop / target        : {candidate.get('stop_loss_price', 0):,.2f} / {candidate.get('take_profit_price', 0):,.2f}",
@@ -1049,6 +1284,7 @@ def save_manual_trade_ticket_outputs(root: Path, report: Mapping[str, Any]) -> N
         quoting=csv.QUOTE_ALL,
     )
     atomic_write(text_path, text_report(report))
+    _persist_manual_ticket_idempotency_keys(root, report)
 
 
 def run_manual_trade_ticket(

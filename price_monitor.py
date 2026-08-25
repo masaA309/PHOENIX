@@ -1325,6 +1325,31 @@ def crossed_up(
     )
 
 
+def should_trigger_buy_price_alert(
+    previous_price: float,
+    current_price: float,
+    entry_price: float,
+    stop_price: float,
+) -> bool:
+    if entry_price <= 0:
+        return False
+
+    if stop_price <= 0:
+        return False
+
+    if current_price <= stop_price:
+        return False
+
+    if previous_price <= 0:
+        return current_price <= entry_price
+
+    return crossed_down(
+        previous_price=previous_price,
+        current_price=current_price,
+        trigger_price=entry_price,
+    )
+
+
 # =========================================================
 # イベント履歴
 # =========================================================
@@ -2165,14 +2190,21 @@ def process_quotes(
 
             # 起動時点ですでに押し目価格以下なら、
             # クロス待ちにせずENTRYイベントを記録する。
-            if (
-                not entry_reached
-                and entry_price > 0
-                and current_price <= entry_price
-            ):
-                process_event(
-                    state=state,
-                    index=index,
+        if (
+            not entry_reached
+            and entry_price > 0
+            and current_price <= entry_price
+            and current_price > safe_float(
+                row["損切価格"]
+            )
+            and (
+                previous_price <= 0
+                or previous_price > entry_price
+            )
+        ):
+            process_event(
+                state=state,
+                index=index,
                     row=row,
                     event_type=EVENT_ENTRY,
                     previous_price=current_price,
@@ -2194,7 +2226,7 @@ def process_quotes(
         )
 
         # 1銘柄・1周期で最大1イベント
-        if not entry_reached:
+        if False and not entry_reached:
             if crossed_down(
                 previous_price=previous_price,
                 current_price=current_price,

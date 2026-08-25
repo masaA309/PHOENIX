@@ -132,7 +132,7 @@ class PositionReconciliationStep37Test(unittest.TestCase):
         self.assertEqual("BLOCKED", result.status)
         self.assertIn("SOURCE_TIMESTAMP_FUTURE", result.reasons)
 
-    def test_stale_source_timestamp_is_blocked(self) -> None:
+    def test_stale_source_timestamp_is_allowed_for_paper(self) -> None:
         self.payload["source_timestamp"] = (
             self.now - timedelta(hours=25)
         ).isoformat()
@@ -140,8 +140,9 @@ class PositionReconciliationStep37Test(unittest.TestCase):
 
         result = self.run_reconciliation()
 
-        self.assertEqual("BLOCKED", result.status)
-        self.assertIn("SOURCE_STATE_STALE", result.reasons)
+        self.assertTrue(result.ready)
+        self.assertEqual("READY", result.status)
+        self.assertNotIn("SOURCE_STATE_STALE", result.reasons)
 
     def test_json_and_text_logs_include_required_fields(self) -> None:
         self.write_state()
@@ -317,6 +318,8 @@ class RunPhoenixPositionReconciliationIntegrationTest(unittest.TestCase):
             status="READY",
             reasons=(),
             report_error=None,
+            mode="PAPER",
+            orders_submitted=0,
         )
         recovery = SimpleNamespace(
             blocked=False,
@@ -325,6 +328,7 @@ class RunPhoenixPositionReconciliationIntegrationTest(unittest.TestCase):
             recovery_reasons=(),
             state_path="recovery.json",
             previous_git_commit="a" * 40,
+            current_git_commit="a" * 40,
             recovery_attempt=0,
             recovered_at=None,
         )

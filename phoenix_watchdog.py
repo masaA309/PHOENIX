@@ -14,6 +14,7 @@ import time
 from types import FrameType
 from typing import Any
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from phoenix_disaster_recovery import (
     DEFAULT_MAX_RECOVERY_ATTEMPTS,
@@ -25,6 +26,7 @@ from phoenix_heartbeat import (
     HeartbeatValidation,
     inspect_heartbeat,
 )
+from phoenix_core.production_rakuten_rss_transport import ProductionRakutenRssTransport
 
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -37,6 +39,9 @@ RECOVERY_STATE_PATH = ROOT_DIR / "runtime" / "guardian" / "recovery_state.json"
 MODE = "PAPER"
 ORDERS_SUBMITTED = 0
 MAX_RESTARTS_HARD_LIMIT = 10
+FILE_READY_HEARTBEAT_SECONDS = 30.0
+STEP44_READY_MAX_AGE_SECONDS = 90.0
+JST = ZoneInfo("Asia/Tokyo")
 
 EXIT_OK = 0
 EXIT_RESTART_LIMIT = 1
@@ -312,6 +317,10 @@ class PhoenixWatchdog:
         config: MonitorConfig | None = None,
         heartbeat_path: Path | None = None,
         recovery_state_path: Path | None = None,
+        enable_file_ready_heartbeat: bool = False,
+        file_ready_transport: Any | None = None,
+        file_ready_heartbeat_seconds: float = FILE_READY_HEARTBEAT_SECONDS,
+        step44_audit_path: Path | None = None,
     ) -> None:
         self.target_script = Path(target_script).resolve()
         self.root_dir = Path(root_dir).resolve()
@@ -326,16 +335,32 @@ class PhoenixWatchdog:
             recovery_state_path
             or (self.root_dir / "runtime" / "guardian" / "recovery_state.json")
         )
+        self.enable_file_ready_heartbeat = bool(enable_file_ready_heartbeat)
+        self.file_ready_heartbeat_seconds = float(file_ready_heartbeat_seconds)
+        if self.file_ready_heartbeat_seconds <= 0:
+            raise ValueError("file_ready_heartbeat_seconds must be positive")
+        self._step44_audit_path = Path(
+            step44_audit_path
+            or (self.root_dir / "reports" / "v7_vba_bridge_step44_audit.jsonl")
+        )
+        self._file_ready_transport = file_ready_transport
+        if self.enable_file_ready_heartbeat and self._file_ready_transport is None:
+            self._file_ready_transport = ProductionRakutenRssTransport()
         self.lock = ProcessLock(
             Path(lock_file),
             self.logger,
             self.config.stale_lock_seconds,
         )
         self.stop_event = threading.Event()
+        self._heartbeat_stop_event = threading.Event()
+        self._heartbeat_thread: threading.Thread | None = None
+        # Child readiness is kept separate from FILE_READY publish readiness.
+        self._file_ready_publish_ready = threading.Event()
         self.stop_reason = "requested"
         self._process: subprocess.Popen[Any] | None = None
         self._process_lock = threading.Lock()
         self._last_heartbeat_failure: HeartbeatValidation | None = None
+        self._launch_block_reason: str | None = None
 
     @property
     def child_pid(self) -> int | None:
@@ -345,6 +370,218 @@ class PhoenixWatchdog:
     def request_stop(self, reason: str = "requested") -> None:
         self.stop_reason = reason
         self.stop_event.set()
+        self._heartbeat_stop_event.set()
+        self._file_ready_publish_ready.clear()
+
+    def _child_process_alive(self) -> tuple[bool, str]:
+        with self._process_lock:
+            process = self._process
+        if process is None:
+            return False, "child_not_running"
+
+        exit_code = process.poll()
+        if exit_code is not None:
+            return False, f"child_exit_code={exit_code}"
+
+        return True, f"child_pid={process.pid}"
+
+    def _finalize_child_exit(
+        self,
+        process: subprocess.Popen[Any],
+        exit_code: int,
+    ) -> int | None:
+        self._clear_process(process)
+        if exit_code == 0:
+            self.logger.emit("PROCESS_EXITED", exit_code=0)
+            self.logger.emit(
+                "PROCESS_IDLE",
+                exit_code=0,
+                pid=process.pid,
+                reason="child_exit_code_0",
+            )
+            return None
+        return int(exit_code)
+
+    def _prepare_heartbeat_path_for_launch(self) -> tuple[bool, str]:
+        if self.target_script.name.casefold() != "run_phoenix.py":
+            return True, "heartbeat_preflight_skipped"
+        if not self.heartbeat_path.is_file():
+            return True, "heartbeat_missing"
+
+        try:
+            with self.heartbeat_path.open("r", encoding="utf-8") as file:
+                payload = json.load(file)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            try:
+                self.heartbeat_path.unlink()
+            except FileNotFoundError:
+                pass
+            return True, "heartbeat_corrupt_cleared"
+
+        raw_pid = payload.get("pid") if isinstance(payload, dict) else None
+        if isinstance(raw_pid, bool) or not isinstance(raw_pid, int) or raw_pid <= 0:
+            try:
+                self.heartbeat_path.unlink()
+            except FileNotFoundError:
+                pass
+            return True, "heartbeat_pid_invalid_cleared"
+
+        if _pid_is_alive(raw_pid):
+            return False, f"existing_heartbeat_owner_pid={raw_pid}"
+
+        try:
+            self.heartbeat_path.unlink()
+        except FileNotFoundError:
+            pass
+        return True, f"stale_heartbeat_cleared pid={raw_pid}"
+
+    def _file_ready_publish_gate(self) -> tuple[bool, str]:
+        return self._step44_consumer_ready()
+
+    def _trading_ready_gate(self) -> tuple[bool, str]:
+        if not self._file_ready_publish_ready.is_set():
+            return False, "child_not_startup_ready"
+        return self._child_process_alive()
+
+    @staticmethod
+    def _parse_step44_timestamp(value: str) -> datetime | None:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=JST)
+        return parsed.astimezone(JST)
+
+    def _step44_consumer_ready(self) -> tuple[bool, str]:
+        path = self._step44_audit_path
+        if not path.is_file():
+            return False, f"Step44 audit missing: {path}"
+
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError as error:
+            return False, f"Step44 audit unreadable: {error}"
+
+        for raw_line in reversed(lines):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if str(record.get("kind", "")).strip().lower() != "summary":
+                continue
+
+            result = str(record.get("result", "")).strip().upper()
+            if result != "READY":
+                return False, f"Step44 summary not READY: {result or 'missing'}"
+
+            recorded_at_text = str(record.get("recorded_at", "")).strip()
+            recorded_at = self._parse_step44_timestamp(recorded_at_text)
+            if recorded_at is None:
+                return False, (
+                    "Step44 summary has invalid recorded_at: "
+                    f"{recorded_at_text!r}"
+                )
+
+            now = datetime.now(JST)
+            age_seconds = (now - recorded_at).total_seconds()
+            if age_seconds < -5:
+                return False, (
+                    "Step44 summary timestamp is in the future: "
+                    f"{recorded_at_text!r}"
+                )
+            if age_seconds > STEP44_READY_MAX_AGE_SECONDS:
+                return False, (
+                    "Step44 summary is stale "
+                    f"({int(age_seconds)}s > {int(STEP44_READY_MAX_AGE_SECONDS)}s)"
+                )
+            return True, f"Step44 READY summary fresh ({int(age_seconds)}s)"
+
+        return False, f"Step44 READY summary not found: {path}"
+
+    def _publish_file_ready_heartbeat_once(self) -> bool:
+        if not self.enable_file_ready_heartbeat:
+            return False
+        if self._file_ready_transport is None:
+            self.logger.emit(
+                "FILE_READY_HEARTBEAT_SKIPPED",
+                reason="file_ready_transport_unavailable",
+            )
+            return False
+
+        consumer_ready, consumer_message = self._file_ready_publish_gate()
+        if not consumer_ready:
+            self.logger.emit(
+                "FILE_READY_HEARTBEAT_SKIPPED",
+                consumer_ready=False,
+                reason=consumer_message,
+            )
+            return False
+
+        try:
+            health = self._file_ready_transport.publish_file_ready_heartbeat()
+        except Exception as error:
+            self.logger.emit(
+                "FILE_READY_HEARTBEAT_BLOCKED",
+                consumer_message=consumer_message,
+                reason=str(error),
+            )
+            return False
+
+        if health.connected:
+            self.logger.emit(
+                "FILE_READY_HEARTBEAT_PUBLISHED",
+                consumer_message=consumer_message,
+                transport_message=health.message,
+                transport_source=health.transport_source,
+            )
+            return True
+
+        self.logger.emit(
+            "FILE_READY_HEARTBEAT_BLOCKED",
+            consumer_message=consumer_message,
+            reason=health.message,
+            transport_source=health.transport_source,
+        )
+        return False
+
+    def _start_file_ready_heartbeat_thread(self) -> None:
+        if not self.enable_file_ready_heartbeat:
+            return
+        if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
+            return
+        self._heartbeat_stop_event.clear()
+        self._heartbeat_thread = threading.Thread(
+            target=self._run_file_ready_heartbeat_loop,
+            name="phoenix-file-ready-heartbeat",
+            daemon=True,
+        )
+        self._heartbeat_thread.start()
+        self.logger.emit(
+            "FILE_READY_HEARTBEAT_OWNER_STARTED",
+            interval_seconds=self.file_ready_heartbeat_seconds,
+        )
+
+    def _stop_file_ready_heartbeat_thread(self) -> None:
+        self._heartbeat_stop_event.set()
+        thread = self._heartbeat_thread
+        if thread is None:
+            return
+        if thread.is_alive():
+            thread.join(timeout=min(1.0, self.file_ready_heartbeat_seconds))
+        self._heartbeat_thread = None
+
+    def _run_file_ready_heartbeat_loop(self) -> None:
+        while not self._heartbeat_stop_event.is_set():
+            self._publish_file_ready_heartbeat_once()
+            if self._heartbeat_stop_event.wait(self.file_ready_heartbeat_seconds):
+                break
 
     def run(self) -> int:
         if not self.target_script.is_file():
@@ -374,9 +611,11 @@ class PhoenixWatchdog:
 
         exit_code = EXIT_OK
         try:
+            self._start_file_ready_heartbeat_thread()
             exit_code = self._monitor()
             return exit_code
         finally:
+            self._stop_file_ready_heartbeat_thread()
             self._safe_stop_child()
             self.lock.release()
             self.logger.emit(
@@ -388,10 +627,20 @@ class PhoenixWatchdog:
 
     def _monitor(self) -> int:
         restart_count = 0
+        child_idle = False
         while not self.stop_event.is_set():
+            if child_idle:
+                if self.stop_event.wait(self.config.poll_seconds):
+                    self.logger.emit("SAFE_STOP", reason=self.stop_reason)
+                    return EXIT_OK
+                continue
+
             exit_code = self._launch_and_monitor(
                 restart_attempt=restart_count,
             )
+            if self._launch_block_reason is not None:
+                self._launch_block_reason = None
+                return EXIT_HEARTBEAT_FAILURE
             if self.stop_event.is_set():
                 self.logger.emit("SAFE_STOP", reason=self.stop_reason)
                 return EXIT_OK
@@ -406,15 +655,17 @@ class PhoenixWatchdog:
                     restart_suppressed=True,
                 )
                 return EXIT_CONFIGURATION_ERROR
-            if exit_code == 0:
-                self.logger.emit("PROCESS_EXITED", exit_code=0)
-                return EXIT_OK
+            if exit_code is None:
+                child_idle = True
+                continue
             if exit_code == EXIT_CONFIGURATION_ERROR:
                 self.logger.emit(
                     "REPOSITORY_GUARDIAN_BLOCKED",
                     exit_code=exit_code,
                     reason="startup_safety_gate_exit_2",
                     restart_suppressed=True,
+                    blocked_attempt=restart_count + 1,
+                    backoff_seconds=0.0,
                 )
                 self.heartbeat_logger.emit(
                     "STARTUP_GATE_BLOCKED",
@@ -425,7 +676,7 @@ class PhoenixWatchdog:
                     heartbeat_age_seconds=None,
                     repository_root=str(self.root_dir),
                     action="SAFE_STOP",
-                    restart_attempt=restart_count,
+                    restart_attempt=restart_count + 1,
                 )
                 return EXIT_CONFIGURATION_ERROR
 
@@ -512,8 +763,26 @@ class PhoenixWatchdog:
         self.logger.emit("SAFE_STOP", reason=self.stop_reason)
         return EXIT_OK
 
-    def _launch_and_monitor(self, restart_attempt: int = 0) -> int:
+    def _launch_and_monitor(self, restart_attempt: int = 0) -> int | None:
         self._last_heartbeat_failure = None
+        self._launch_block_reason = None
+        heartbeat_ready, heartbeat_message = self._prepare_heartbeat_path_for_launch()
+        if not heartbeat_ready:
+            self._launch_block_reason = heartbeat_message
+            self.logger.emit(
+                "HEARTBEAT_OWNER_ACTIVE",
+                reason=heartbeat_message,
+                heartbeat_path=str(self.heartbeat_path),
+                restart_attempt=restart_attempt,
+            )
+            return EXIT_OK
+        if heartbeat_message != "heartbeat_missing" and heartbeat_message != "heartbeat_preflight_skipped":
+            self.logger.emit(
+                "HEARTBEAT_STALE_CLEARED",
+                reason=heartbeat_message,
+                heartbeat_path=str(self.heartbeat_path),
+                restart_attempt=restart_attempt,
+            )
         command = [
             sys.executable,
             "-X",
@@ -553,14 +822,14 @@ class PhoenixWatchdog:
 
         with self._process_lock:
             self._process = process
+        self._file_ready_publish_ready.clear()
         self.logger.emit("PROCESS_LAUNCHED", pid=process.pid)
 
         startup_deadline = time.monotonic() + self.config.startup_grace_seconds
         while time.monotonic() < startup_deadline:
             exit_code = process.poll()
             if exit_code is not None:
-                self._clear_process(process)
-                return int(exit_code)
+                return self._finalize_child_exit(process, int(exit_code))
             remaining = max(0.0, startup_deadline - time.monotonic())
             if self.stop_event.wait(min(self.config.poll_seconds, remaining)):
                 self._safe_stop_child()
@@ -568,8 +837,7 @@ class PhoenixWatchdog:
 
         exit_code = process.poll()
         if exit_code is not None:
-            self._clear_process(process)
-            return int(exit_code)
+            return self._finalize_child_exit(process, int(exit_code))
 
         self.logger.emit(
             "PROCESS_STARTED",
@@ -585,8 +853,7 @@ class PhoenixWatchdog:
         while not self.stop_event.wait(self.config.poll_seconds):
             exit_code = process.poll()
             if exit_code is not None:
-                self._clear_process(process)
-                return int(exit_code)
+                return self._finalize_child_exit(process, int(exit_code))
 
             heartbeat = inspect_heartbeat(
                 self.heartbeat_path,
@@ -598,6 +865,8 @@ class PhoenixWatchdog:
             )
             if heartbeat.healthy:
                 heartbeat_seen = True
+                if not self._file_ready_publish_ready.is_set():
+                    self._file_ready_publish_ready.set()
                 if heartbeat.sequence != previous_sequence:
                     self.heartbeat_logger.emit(
                         "HEARTBEAT_HEALTHY",
@@ -624,6 +893,7 @@ class PhoenixWatchdog:
                 continue
 
             self._last_heartbeat_failure = heartbeat
+            self._file_ready_publish_ready.clear()
             safety_stop = heartbeat.restart_suppressed
             event = (
                 "HEARTBEAT_LOST"
@@ -657,6 +927,7 @@ class PhoenixWatchdog:
         with self._process_lock:
             if self._process is process:
                 self._process = None
+                self._file_ready_publish_ready.clear()
 
     def _safe_stop_child(self) -> None:
         with self._process_lock:
@@ -811,6 +1082,7 @@ def main(argv: list[str] | None = None) -> int:
         log_dir=LOG_DIR,
         lock_file=LOCK_FILE,
         config=config,
+        enable_file_ready_heartbeat=True,
     )
     previous = _install_signal_handlers(watchdog)
     try:

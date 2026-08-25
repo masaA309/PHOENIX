@@ -601,6 +601,22 @@ class WatchdogHeartbeatIntegrationTest(unittest.TestCase):
             for line in path.read_text(encoding="utf-8").splitlines()
         ]
 
+    def wait_for_watchdog_event(
+        self,
+        event_name: str,
+        *,
+        timeout: float = 3.0,
+    ) -> list[dict[str, object]]:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            files = list(self.log_dir.glob("phoenix_watchdog_*.jsonl"))
+            if files:
+                events = self.read_watchdog_events()
+                if any(event["event"] == event_name for event in events):
+                    return events
+            time.sleep(0.01)
+        self.fail(f"timed out waiting for {event_name}")
+
     def write_heartbeat(
         self,
         pid: int,
@@ -663,9 +679,20 @@ class WatchdogHeartbeatIntegrationTest(unittest.TestCase):
         )
         watchdog = self.make_watchdog(target)
         writer = self.start_heartbeat_writer(watchdog, updates=12)
+        results: list[int] = []
+        thread = threading.Thread(target=lambda: results.append(watchdog.run()))
+        thread.start()
 
-        self.assertEqual(EXIT_OK, watchdog.run())
+        events = self.wait_for_watchdog_event("PROCESS_IDLE")
+        self.assertIsNone(watchdog.child_pid)
+        self.assertTrue(thread.is_alive())
+
         writer.join(timeout=1.0)
+        watchdog.request_stop("unit_test")
+        thread.join(timeout=5.0)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual([EXIT_OK], results)
 
         events = [
             json.loads(line)

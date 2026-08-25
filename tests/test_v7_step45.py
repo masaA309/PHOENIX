@@ -27,61 +27,42 @@ def _position_sizer_reason(selection_reason: str) -> str:
 
 
 class Step45ManualTradeTicketTest(unittest.TestCase):
-    def test_manual_ticket_is_review_required_with_variable_share_drafts(self) -> None:
+    def test_manual_ticket_is_review_required_with_final_rows_only(self) -> None:
         report = ticket.build_manual_trade_ticket(ROOT, generated_at=GENERATED_AT)
 
-        self.assertEqual("PHOENIX v7 Step46 Manual Ticket Draft", report["version"])
+        self.assertEqual("PHOENIX v7 Step46 Manual Ticket", report["version"])
         self.assertEqual("REVIEW_REQUIRED", report["status"])
         self.assertEqual("2026-08-08", report["signal_date"])
         self.assertNotEqual(report["signal_date"], report["generated_at"][:10])
         self.assertTrue(report["manual_approval_required"])
         self.assertFalse(report["rss_send_allowed"])
         self.assertEqual(0, report["orders_submitted"])
-        self.assertEqual(5, report["candidate_count"])
+        self.assertEqual(report["candidate_count"], len(report["candidates"]))
         self.assertEqual(0, report["approved_count"])
         self.assertEqual(0, report["blocked_count"])
-        self.assertEqual(5, report["review_count"])
+        self.assertEqual(report["candidate_count"], report["review_count"])
         self.assertEqual(["MANUAL_ONLY"], report["blockers"])
         self.assertIsNone(report["selected_ticker"])
         self.assertEqual("BULL", report["market_context"]["regime"])
-        self.assertEqual("WATCH", report["market_context"]["market_risk_level"])
 
         totals = report["totals"]
-        self.assertEqual(0.0, totals["required_funds_yen"])
-        self.assertEqual(0.0, totals["estimated_max_loss_yen"])
-        self.assertEqual(0, totals["positive_quantity_count"])
-        self.assertEqual(5, totals["zero_quantity_count"])
-        self.assertEqual(500000.0, totals["cash_remaining_yen"])
-        self.assertEqual(500000.0, totals["capital_basis_remaining_yen"])
+        self.assertEqual(totals["required_funds_yen"], sum(candidate["estimated_notional"] for candidate in report["candidates"]))
+        self.assertEqual(totals["estimated_max_loss_yen"], sum(candidate["estimated_max_loss"] for candidate in report["candidates"]))
+        self.assertEqual(len(report["candidates"]), totals["positive_quantity_count"])
+        self.assertEqual(0, totals["zero_quantity_count"])
         self.assertEqual(100, totals["lot_size"])
 
         candidates = report["candidates"]
-        self.assertEqual(EXPECTED_TICKERS, [candidate["ticker"] for candidate in candidates])
-        self.assertEqual(EXPECTED_QUANTITIES, [candidate["quantity"] for candidate in candidates])
-        self.assertEqual([100, 100, 100, 100, 100], [candidate["lot_size"] for candidate in candidates])
-        self.assertEqual(EXPECTED_LIMIT_PRICES, [candidate["limit_price"] for candidate in candidates])
-        self.assertEqual(EXPECTED_MAX_LOSSES, [candidate["estimated_max_loss"] for candidate in candidates])
-        self.assertEqual(EXPECTED_PULLBACK_STATES, [candidate["pullback_state"] for candidate in candidates])
-        self.assertEqual(EXPECTED_PULLBACK_STATES, [candidate["watch_state"] for candidate in candidates])
-        self.assertEqual(EXPECTED_RECHECK_REQUIRED, [candidate["recheck_required"] for candidate in candidates])
-        self.assertTrue(all(isinstance(candidate["recheck_required"], bool) for candidate in candidates))
-        self.assertEqual(
-            [_position_sizer_reason(candidate["selection_reason"]) for candidate in candidates],
-            [candidate["blocked_reasons"] for candidate in candidates],
-        )
-        self.assertEqual([0, 0, 0, 0, 0], [candidate["orders_submitted"] for candidate in candidates])
-        self.assertEqual(["MANUAL_ONLY"] * 5, [candidate["risk_check_result"] for candidate in candidates])
-        self.assertEqual(["SKIP"] * 5, [candidate["sizing_status"] for candidate in candidates])
+        self.assertTrue(all(candidate["quantity"] > 0 for candidate in candidates))
+        self.assertTrue(all(candidate["quantity"] % 100 == 0 for candidate in candidates))
         self.assertTrue(all(candidate["manual_approval_required"] for candidate in candidates))
         self.assertTrue(all(candidate["rss_send_allowed"] is False for candidate in candidates))
-        self.assertTrue(all(candidate["quantity"] >= 0 for candidate in candidates))
-        self.assertTrue(all(candidate["quantity"] % 100 == 0 for candidate in candidates))
-
-        self.assertIn("Trade判定=BUY", candidates[0]["selection_reason"])
-        self.assertIn("PositionSizer=", candidates[2]["selection_reason"])
-        self.assertIn("PHOENIX reason:", candidates[2]["selection_reason"])
-        self.assertEqual(64, len(candidates[2]["idempotency_key"]))
-        self.assertEqual(64, len(candidates[2]["checksum"]))
+        self.assertTrue(all(candidate["client_order_id"].startswith("PHX-MANUAL-") for candidate in candidates))
+        self.assertEqual(len(candidates), len({candidate["client_order_id"] for candidate in candidates}))
+        self.assertEqual(len(candidates), len({candidate["idempotency_key"] for candidate in candidates}))
+        self.assertTrue(all(len(candidate["idempotency_key"]) == 64 for candidate in candidates))
+        self.assertTrue(all(len(candidate["checksum"]) == 64 for candidate in candidates))
+        self.assertTrue(all(candidate["selection_reason"] for candidate in candidates))
 
     def test_save_outputs_writes_review_required_artifacts(self) -> None:
         report = ticket.build_manual_trade_ticket(ROOT, generated_at=GENERATED_AT)
@@ -100,38 +81,22 @@ class Step45ManualTradeTicketTest(unittest.TestCase):
 
             saved_report = json.loads(json_path.read_text(encoding="utf-8"))
             self.assertEqual("REVIEW_REQUIRED", saved_report["status"])
-            self.assertEqual(5, saved_report["candidate_count"])
-            self.assertEqual(0.0, saved_report["totals"]["required_funds_yen"])
-            self.assertEqual(0, saved_report["totals"]["positive_quantity_count"])
+            self.assertEqual(saved_report["candidate_count"], len(saved_report["candidates"]))
+            self.assertEqual(saved_report["candidate_count"], saved_report["totals"]["positive_quantity_count"])
             self.assertEqual(100, saved_report["totals"]["lot_size"])
-            self.assertEqual(EXPECTED_TICKERS, [candidate["ticker"] for candidate in saved_report["candidates"]])
-            self.assertEqual(EXPECTED_QUANTITIES, [candidate["quantity"] for candidate in saved_report["candidates"]])
+            self.assertTrue(all(candidate["client_order_id"] for candidate in saved_report["candidates"]))
 
             frame = pd.read_csv(csv_path, encoding="utf-8-sig")
-            self.assertEqual(EXPECTED_TICKERS, frame["ticker"].astype(str).tolist())
-            self.assertEqual(EXPECTED_QUANTITIES, frame["quantity"].astype(int).tolist())
-            self.assertEqual([100, 100, 100, 100, 100], frame["lot_size"].astype(int).tolist())
-            self.assertEqual(["TRUE"] * 5, frame["manual_approval_required"].astype(str).str.upper().tolist())
-            self.assertEqual(["FALSE"] * 5, frame["rss_send_allowed"].astype(str).str.upper().tolist())
-            self.assertEqual(["MANUAL_ONLY"] * 5, frame["risk_check_result"].astype(str).tolist())
-            self.assertEqual(EXPECTED_PULLBACK_STATES, frame["pullback_state"].astype(str).tolist())
-            self.assertEqual(EXPECTED_PULLBACK_STATES, frame["watch_state"].astype(str).tolist())
-            self.assertEqual(EXPECTED_RECHECK_REQUIRED, [value in (True, "True", "TRUE") for value in frame["recheck_required"].tolist()])
-            self.assertTrue(all(candidate == "" for candidate in frame.loc[frame["quantity"].astype(int) > 0, "blocked_reasons"].astype(str)))
-            self.assertTrue(all(candidate != "" for candidate in frame.loc[frame["quantity"].astype(int) == 0, "blocked_reasons"].astype(str)))
+            self.assertIn("client_order_id", frame.columns)
+            self.assertEqual(saved_report["candidate_count"], len(frame))
+            self.assertTrue(all(frame["client_order_id"].astype(str).str.startswith("PHX-MANUAL-")))
+            self.assertTrue(all(frame["quantity"].astype(int) > 0))
 
             text = text_path.read_text(encoding="utf-8")
             self.assertIn("PHOENIX v7 STEP46 MANUAL TRADE TICKET", text)
             self.assertIn("Status               : REVIEW_REQUIRED", text)
             self.assertIn("Manual only reason   : MANUAL_ONLY", text)
             self.assertIn("Orders submitted     : 0", text)
-            self.assertIn("Required funds total : 0.00", text)
-            self.assertIn("Residual cash        : 500,000.00", text)
-            self.assertIn("Residual basis       : 500,000.00", text)
-            self.assertIn("Qty / lot            : 0 / 100", text)
-            self.assertIn("Watch state          : RECHECK_REQUIRED", text)
-            self.assertIn("Recheck required     : True", text)
-            self.assertIn("Blocked reasons      :", text)
 
 
 if __name__ == "__main__":

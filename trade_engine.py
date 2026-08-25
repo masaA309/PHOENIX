@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 import json
 import sys
 from typing import Any
 
 import pandas as pd
+
+from phoenix_core.data_freshness import JST
 
 
 # =========================================================
@@ -20,11 +23,14 @@ REPORT_DIR = ROOT_DIR / "reports"
 DATA_DIR = ROOT_DIR / "data"
 
 AI_JUDGEMENT_FILE = REPORT_DIR / "ai_judgement.csv"
+NOTIFICATION_SOURCE_MANIFEST_FILE = REPORT_DIR / "notification_source_manifest.json"
+AI_JUDGEMENT_MANIFEST_FILE = REPORT_DIR / "ai_judgement_manifest.json"
 MARKET_RISK_FILE = DATA_DIR / "market_risk_latest.json"
 MARKET_REGIME_FILE = REPORT_DIR / "market_regime.json"
 
 WATCHLIST_FILE = REPORT_DIR / "price_watchlist.csv"
 TRADE_SIGNAL_FILE = REPORT_DIR / "trade_signals.csv"
+TRADE_SIGNAL_MANIFEST_FILE = REPORT_DIR / "trade_signals_manifest.json"
 TEXT_REPORT_FILE = REPORT_DIR / "trade_engine_report.txt"
 
 MAX_WATCHLIST_COUNT = 30
@@ -268,6 +274,53 @@ def apply_market_regime(regime_data: dict[str, Any]) -> None:
     DEFAULT_TARGET_RATE = 0.05 * safe_float(settings.get("target_multiplier", 1.0), 1.0)
     DEFAULT_STOP_RATE = 0.03 * safe_float(settings.get("stop_multiplier", 1.0), 1.0)
     DEFAULT_PULLBACK_RATE = 0.02
+
+
+def _read_json_file(file_path: Path) -> dict[str, Any]:
+    if not file_path.is_file():
+        raise FileNotFoundError(f"ファイルがありません: {file_path}")
+    value = json.loads(file_path.read_text(encoding="utf-8-sig"))
+    if not isinstance(value, dict):
+        raise ValueError(f"JSON root is not an object: {file_path}")
+    return value
+
+
+def _file_sha256(file_path: Path) -> str:
+    return sha256(file_path.read_bytes()).hexdigest()
+
+
+def load_trade_signal_provenance() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    source_manifest = _read_json_file(NOTIFICATION_SOURCE_MANIFEST_FILE)
+    ai_manifest = _read_json_file(AI_JUDGEMENT_MANIFEST_FILE)
+    market_regime = _read_json_file(MARKET_REGIME_FILE)
+
+    if int(source_manifest.get("schema_version", 0)) != 1:
+        raise ValueError("notification_source_manifest.jsonのschema_versionが不正です")
+    if int(ai_manifest.get("schema_version", 0)) != 1:
+        raise ValueError("ai_judgement_manifest.jsonのschema_versionが不正です")
+    if int(market_regime.get("schema_version", 0)) != 2:
+        raise ValueError("market_regime.jsonのschema_versionが不正です")
+
+    source_run_id = str(source_manifest.get("run_id", "")).strip()
+    source_report_sha256 = str(source_manifest.get("report_sha256", "")).strip()
+    ai_run_id = str(ai_manifest.get("run_id", "")).strip()
+    ai_input_sha256 = str(ai_manifest.get("input_report_sha256", "")).strip()
+    market_run_id = str(market_regime.get("source_run_id", "")).strip()
+    market_report_sha256 = str(market_regime.get("source_report_sha256", "")).strip()
+
+    if not source_run_id or not source_report_sha256:
+        raise ValueError("notification_source_manifest.jsonのrun_id/report_sha256が空です")
+    if ai_run_id != source_run_id or ai_input_sha256 != source_report_sha256:
+        raise ValueError("ai_judgement_manifest.jsonがnotification_source_manifest.jsonと一致しません")
+    if market_run_id != source_run_id or market_report_sha256 != source_report_sha256:
+        raise ValueError("market_regime.jsonがnotification_source_manifest.jsonと一致しません")
+
+    source_ticker_count = int(source_manifest.get("ticker_count", 0))
+    market_ticker_count = int(market_regime.get("source_ticker_count", 0))
+    if source_ticker_count != 225 or market_ticker_count != 225:
+        raise ValueError("ticker_countが225ではありません")
+
+    return source_manifest, ai_manifest, market_regime
 
 # =========================================================
 # Market Risk
@@ -1077,6 +1130,9 @@ def save_outputs(
     signals: pd.DataFrame,
     watchlist: pd.DataFrame,
     market_risk: dict[str, Any],
+    source_manifest: dict[str, Any],
+    ai_manifest: dict[str, Any],
+    market_regime: dict[str, Any],
 ) -> None:
     signals.to_csv(
         TRADE_SIGNAL_FILE,
@@ -1089,6 +1145,24 @@ def save_outputs(
         index=False,
         encoding="utf-8-sig",
     )
+
+    signal_manifest = {
+        "schema_version": 1,
+        "generated_at": datetime.now(JST).isoformat(),
+        "source_run_id": source_manifest["run_id"],
+        "source_report_sha256": source_manifest["report_sha256"],
+        "source_ticker_count": int(source_manifest.get("ticker_count", 0)),
+        "ai_judgement_sha256": ai_manifest["ai_judgement_sha256"],
+        "market_regime_sha256": _file_sha256(MARKET_REGIME_FILE),
+        "trade_signals_sha256": _file_sha256(TRADE_SIGNAL_FILE),
+        "trade_signals_row_count": int(len(signals)),
+    }
+    manifest_temp = TRADE_SIGNAL_MANIFEST_FILE.with_suffix(TRADE_SIGNAL_MANIFEST_FILE.suffix + ".tmp")
+    manifest_temp.write_text(
+        json.dumps(signal_manifest, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    manifest_temp.replace(TRADE_SIGNAL_MANIFEST_FILE)
 
     buy_count = int(
         (
@@ -1317,7 +1391,7 @@ def main() -> None:
         )
 
         market_risk = load_market_risk()
-        market_regime = load_market_regime()
+        source_manifest, ai_manifest, market_regime = load_trade_signal_provenance()
         apply_market_regime(market_regime)
 
         print(f"Market Regime: {market_regime.get('regime', 'SIDEWAYS')}")
@@ -1341,6 +1415,9 @@ def main() -> None:
             signals=signals,
             watchlist=watchlist,
             market_risk=market_risk,
+            source_manifest=source_manifest,
+            ai_manifest=ai_manifest,
+            market_regime=market_regime,
         )
 
         print_result(

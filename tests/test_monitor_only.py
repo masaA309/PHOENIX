@@ -65,6 +65,19 @@ class MonitorOnlyGateTest(unittest.TestCase):
             )
         )
 
+    def test_stale_paper_warning_state_is_monitor_only(self) -> None:
+        checked = datetime(2026, 8, 3, 9, 0, 0, tzinfo=JST)
+        self.assertTrue(
+            run_phoenix._is_monitor_only_reconciliation(
+                monitor_result(
+                    source_timestamp=(
+                        checked - timedelta(hours=25)
+                    ).isoformat(timespec="seconds")
+                ),
+                guardian_status="READY",
+            )
+        )
+
     def test_every_monitor_only_safety_condition_fails_closed(self) -> None:
         checked = datetime(2026, 8, 3, 9, 0, 0, tzinfo=JST)
         invalid_cases = {
@@ -84,7 +97,8 @@ class MonitorOnlyGateTest(unittest.TestCase):
             "future source time": {
                 "source_timestamp": (checked + timedelta(seconds=1)).isoformat()
             },
-            "stale source time": {
+            "live stale source time": {
+                "mode": "LIVE",
                 "source_timestamp": (checked - timedelta(hours=25)).isoformat()
             },
         }

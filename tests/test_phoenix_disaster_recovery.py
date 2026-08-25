@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -242,6 +244,18 @@ class DisasterRecoveryStep40Test(unittest.TestCase):
         self.assertIn("PREVIOUS_PID_NOT_RUNNING", result.recovery_reasons)
         self.assertEqual(1, result.recovery_attempt)
 
+        self.write_state(
+            previous_status="RUNNING",
+            previous_finished_at=None,
+            previous_heartbeat_status="RUNNING",
+            previous_git_commit="b" * 40,
+        )
+
+        mismatched = self.run_recovery()
+
+        self.assertEqual(STATUS_BLOCKED, mismatched.recovery_status)
+        self.assertIn("GIT_COMMIT_MISMATCH", mismatched.recovery_reasons)
+
     def test_failed_previous_run_requires_recovery(self) -> None:
         self.write_state(
             previous_status="FAILED",
@@ -388,12 +402,16 @@ class DisasterRecoveryStep40Test(unittest.TestCase):
 
         self.assertIn("TIMESTAMP_FUTURE", result.recovery_reasons)
 
-    def test_git_commit_mismatch_is_blocked(self) -> None:
-        self.write_state(previous_git_commit="b" * 40)
+    def test_completed_previous_run_with_stale_blocked_state_bootstraps(self) -> None:
+        self.write_state(
+            previous_git_commit="b" * 40,
+            recovery_status="BLOCKED",
+        )
 
         result = self.run_recovery()
 
-        self.assertIn("GIT_COMMIT_MISMATCH", result.recovery_reasons)
+        self.assertEqual(STATUS_READY, result.recovery_status)
+        self.assertEqual([], result.recovery_reasons)
 
     def test_recovery_attempt_limits_are_bounded(self) -> None:
         self.write_state(
@@ -732,6 +750,26 @@ class WatchdogDisasterRecoveryIntegrationTest(unittest.TestCase):
             ),
         )
 
+    def wait_for_watchdog_event(
+        self,
+        event_name: str,
+        *,
+        timeout: float = 3.0,
+    ) -> list[dict[str, object]]:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            files = list(self.log_dir.glob("phoenix_watchdog_*.jsonl"))
+            if files:
+                path = files[0]
+                events = [
+                    json.loads(line)
+                    for line in path.read_text(encoding="utf-8").splitlines()
+                ]
+                if any(event["event"] == event_name for event in events):
+                    return events
+            time.sleep(0.01)
+        self.fail(f"timed out waiting for {event_name}")
+
     def recovery_payload(self, *, status: str = "RECOVERY_REQUIRED") -> dict[str, object]:
         now = datetime.now(JST)
         return {
@@ -773,11 +811,23 @@ class WatchdogDisasterRecoveryIntegrationTest(unittest.TestCase):
         self.state_path.write_text(
             json.dumps(self.recovery_payload()), encoding="utf-8"
         )
+        watchdog = self.make_watchdog(target, max_restarts=2)
+        results: list[int] = []
+        thread = threading.Thread(target=lambda: results.append(watchdog.run()))
+        thread.start()
 
-        result = self.make_watchdog(target, max_restarts=2).run()
+        events = self.wait_for_watchdog_event("PROCESS_IDLE")
+        self.assertIsNone(watchdog.child_pid)
+        self.assertTrue(thread.is_alive())
 
-        self.assertEqual(EXIT_OK, result)
+        watchdog.request_stop("unit_test")
+        thread.join(timeout=5.0)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual([EXIT_OK], results)
         self.assertEqual("2", counter.read_text(encoding="utf-8"))
+        self.assertIn("PROCESS_EXITED", [event["event"] for event in events])
+        self.assertIn("PROCESS_IDLE", [event["event"] for event in events])
 
     def test_disaster_recovery_exit_two_is_not_retried(self) -> None:
         counter = self.root / "count.txt"

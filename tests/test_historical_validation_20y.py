@@ -2064,3 +2064,254 @@ def test_risk_v1_fixed_share_ceiling_is_not_a_strategy_constraint():
     # maximum_quantity_per_ticker remains parseable for backwards
     # compatibility but does not constrain PHOENIX risk-v1 sizing.
     assert quantity >= 100
+
+
+def test_risk_v2_research_is_separated_from_equity_curve_and_omitted_when_disabled():
+    history_dates = [
+        "2024-01-02",
+        "2024-01-03",
+        "2024-01-04",
+        "2024-01-05",
+        "2024-01-08",
+    ]
+    history = make_history_frame(history_dates)
+    fetch_outcome = hv.FetchOutcome(
+        history=history,
+        cache_used=True,
+        download_used=False,
+        network_attempts=0,
+        download_error=None,
+    )
+
+    def fake_fetch(*args, **kwargs):
+        return fetch_outcome
+
+    def run_case(
+        case_root: Path,
+        *,
+        market_breadth_filter_enabled: bool,
+        breadth_ratio: float | None,
+    ) -> tuple[dict[str, object], list[pd.Timestamp], Path, Path]:
+        config_path = case_root / "config" / "v7_historical_validation_20y.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            json.dumps(
+                {
+                    "historical_validation_20y": make_config(
+                        requested_start="2024-01-02",
+                        requested_end="2024-01-08",
+                        allow_network_fetch=False,
+                        benchmark_enabled=False,
+                        minimum_history_sessions=1,
+                        market_breadth_filter_enabled=market_breadth_filter_enabled,
+                    )
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        breadth_calls: list[pd.Timestamp] = []
+        with patch.object(hv, "fetch_ticker_history", side_effect=fake_fetch), patch.object(
+            hv,
+            "is_entry_signal",
+            return_value=False,
+        ):
+            if market_breadth_filter_enabled:
+                def fake_breadth(
+                    *,
+                    prepared_histories,
+                    membership_lookup,
+                    current_date,
+                    uses_membership,
+                ):
+                    breadth_calls.append(pd.Timestamp(current_date))
+                    return breadth_ratio
+
+                with patch.object(hv, "_market_breadth_above_ma_long_ratio", side_effect=fake_breadth):
+                    report = hv.run_historical_validation_20y(
+                        root=case_root,
+                        config_path=Path("config/v7_historical_validation_20y.json"),
+                        tickers=["7203.T"],
+                        cache_dir=case_root / "data" / "market_cache",
+                        output_csv=case_root / "reports" / "historical_validation_20y" / "data_coverage.csv",
+                        as_of=datetime(2024, 1, 8, 16, 0, tzinfo=JST),
+                    )
+            else:
+                with patch.object(
+                    hv,
+                    "_market_breadth_above_ma_long_ratio",
+                    side_effect=AssertionError("Risk v2 breadth helper should not be called"),
+                ):
+                    report = hv.run_historical_validation_20y(
+                        root=case_root,
+                        config_path=Path("config/v7_historical_validation_20y.json"),
+                        tickers=["7203.T"],
+                        cache_dir=case_root / "data" / "market_cache",
+                        output_csv=case_root / "reports" / "historical_validation_20y" / "data_coverage.csv",
+                        as_of=datetime(2024, 1, 8, 16, 0, tzinfo=JST),
+                    )
+
+        report_dir = case_root / "reports" / "historical_validation_20y"
+        return report, breadth_calls, report_dir / "equity_curve.csv", report_dir / "risk_v2_research.csv"
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+
+        off_report, off_calls, off_equity_path, off_research_path = run_case(
+            root / "off",
+            market_breadth_filter_enabled=False,
+            breadth_ratio=None,
+        )
+        assert off_calls == []
+        assert "risk_v2_research_csv" not in off_report["output_files"]
+        assert off_equity_path.is_file()
+        assert not off_research_path.exists()
+        off_equity = pd.read_csv(off_equity_path)
+        assert off_equity.columns.tolist() == [
+            "date",
+            "cash_yen",
+            "reserved_cash_yen",
+            "available_cash_yen",
+            "market_value_yen",
+            "equity_yen",
+            "peak_equity_yen",
+            "drawdown_yen",
+            "drawdown_pct",
+            "open_positions",
+            "pending_orders",
+        ]
+
+        on_report, on_calls, on_equity_path, on_research_path = run_case(
+            root / "on",
+            market_breadth_filter_enabled=True,
+            breadth_ratio=0.39,
+        )
+        assert on_calls == [pd.Timestamp(date) for date in history_dates]
+        assert str(on_research_path) == on_report["output_files"]["risk_v2_research_csv"]
+        assert on_equity_path.is_file()
+        assert on_research_path.is_file()
+        on_equity = pd.read_csv(on_equity_path)
+        assert on_equity.columns.tolist() == [
+            "date",
+            "cash_yen",
+            "reserved_cash_yen",
+            "available_cash_yen",
+            "market_value_yen",
+            "equity_yen",
+            "peak_equity_yen",
+            "drawdown_yen",
+            "drawdown_pct",
+            "open_positions",
+            "pending_orders",
+        ]
+        research = pd.read_csv(on_research_path)
+        assert research.columns.tolist() == [
+            "date",
+            "market_regime",
+            "market_breadth_above_ma_long_pct",
+            "effective_max_total_invested_pct",
+        ]
+        assert research["market_regime"].tolist() == ["BEAR"] * len(history_dates)
+        assert (research["market_breadth_above_ma_long_pct"] == 39.0).all()
+        assert (research["effective_max_total_invested_pct"] == 0.7).all()
+
+
+def test_future_poison_risk_v2_three_cutoffs_preserves_pre_cutoff_trace():
+    dates = pd.bdate_range("2024-01-02", periods=320)
+    cutoff_dates = [pd.Timestamp(dates[index]).normalize() for index in (79, 159, 239)]
+    signal_dates = {pd.Timestamp(dates[index]).normalize() for index in range(10, len(dates), 40)}
+
+    config = replace(
+        make_pending_order_config(500_000.0, risk_per_trade_pct=0.01),
+        max_position_pct=0.30,
+        max_position_hard_pct=0.30,
+        max_total_invested_pct=0.95,
+        max_hold_sessions=20,
+        market_breadth_filter_enabled=True,
+    )
+    universe = pd.DataFrame(
+        [
+            {"ticker": "1111.T", "company_name": "LOW"},
+            {"ticker": "9999.T", "company_name": "HIGH"},
+        ]
+    )
+
+    def build_history(start_price: float, step: float) -> pd.DataFrame:
+        rows: list[dict[str, float]] = []
+        for position, _ in enumerate(dates):
+            close_price = start_price + step * position
+            rows.append(
+                {
+                    "Open": close_price - 0.1,
+                    "High": close_price + 0.5,
+                    "Low": close_price - 0.5,
+                    "Close": close_price,
+                    "Volume": 1000.0 + position * 10.0,
+                }
+            )
+        frame = pd.DataFrame(rows, index=dates)
+        frame.index = pd.DatetimeIndex(frame.index).normalize()
+        return frame
+
+    base_histories = {
+        "1111.T": build_history(100.0, 0.20),
+        "9999.T": build_history(3000.0, 0.80),
+    }
+    baseline_prepared = hv.prepare_histories(base_histories, config)
+
+    def poison_histories(cutoff: pd.Timestamp) -> dict[str, pd.DataFrame]:
+        poisoned = {ticker: frame.copy() for ticker, frame in base_histories.items()}
+        for ticker_offset, (_, frame) in enumerate(poisoned.items()):
+            future_dates = frame.index[frame.index > cutoff]
+            for future_offset, future_date in enumerate(future_dates):
+                base_price = 7000.0 + (ticker_offset * 2500.0) + (future_offset * 17.0)
+                frame.loc[future_date, "Open"] = base_price
+                frame.loc[future_date, "High"] = base_price + 3.0
+                frame.loc[future_date, "Low"] = base_price - 3.0
+                frame.loc[future_date, "Close"] = base_price + 1.0
+                frame.loc[future_date, "Volume"] = 900000.0 + (ticker_offset * 1000.0) + future_offset
+        return poisoned
+
+    def run_case(prepared_histories: dict[str, pd.DataFrame], cutoff: pd.Timestamp) -> hv.HistoricalValidationResult:
+        with patch.object(
+            hv,
+            "is_entry_signal",
+            side_effect=lambda row, strategy: pd.Timestamp(row.name).normalize() in signal_dates,
+        ), patch.object(
+            hv,
+            "signal_score",
+            side_effect=lambda row, strategy: float(row["Close"]),
+        ):
+            return hv.simulate_validation(prepared_histories, universe, config, dates[0], cutoff)
+
+    compared_counts: list[tuple[str, int, int, int, int]] = []
+    for cutoff in cutoff_dates:
+        baseline = run_case(baseline_prepared, cutoff)
+        poisoned = run_case(hv.prepare_histories(poison_histories(cutoff), config), cutoff)
+
+        pd.testing.assert_frame_equal(baseline.equity_curve, poisoned.equity_curve)
+        pd.testing.assert_frame_equal(baseline.trades, poisoned.trades)
+        pd.testing.assert_frame_equal(baseline.diagnostics, poisoned.diagnostics)
+        pd.testing.assert_frame_equal(baseline.risk_v2_research, poisoned.risk_v2_research)
+
+        compared_counts.append(
+            (
+                cutoff.date().isoformat(),
+                len(baseline.equity_curve),
+                len(baseline.trades),
+                len(baseline.diagnostics),
+                len(baseline.risk_v2_research),
+            )
+        )
+
+    for cutoff, equity_rows, trade_rows, diagnostic_rows, research_rows in compared_counts:
+        print(
+            "FUTURE_POISON",
+            cutoff,
+            f"equity={equity_rows}",
+            f"trades={trade_rows}",
+            f"diagnostics={diagnostic_rows}",
+            f"research={research_rows}",
+        )

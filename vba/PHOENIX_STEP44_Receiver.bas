@@ -17,26 +17,98 @@ Option Explicit
 
 Private Const MOVEFILE_REPLACE_EXISTING As Long = &H1
 Private Const MOVEFILE_WRITE_THROUGH As Long = &H8
+Private Const STEP44_ONEDRIVE_WEB_PREFIX As String = "https://d.docs.live.net/"
+Private Const STEP44_ONTIME_INTERVAL_SECONDS As Long = 30
+Private Const STEP44_CANONICAL_FALLBACK_ROOT As String = "C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX"
+
+Private gStep44SchedulerArmed As Boolean
+Private gStep44NextRunAt As Date
+Private gStep44NextRunScheduled As Boolean
+Private gStep44ConsumerRunning As Boolean
+
+Public Sub StartPhoenixStep44ReceiverScheduler()
+    PhoenixStep44StartScheduler
+End Sub
+
+Public Sub StopPhoenixStep44ReceiverScheduler()
+    PhoenixStep44StopScheduler
+End Sub
+
+Private Function Step44OnTimeProcedureName() As String
+    Step44OnTimeProcedureName = "'" & ThisWorkbook.Name & "'!RunPhoenixStep44LocalReceiver"
+End Function
+
+Private Sub PhoenixStep44StartScheduler()
+    If gStep44SchedulerArmed Then Exit Sub
+    gStep44SchedulerArmed = True
+    PhoenixStep44ScheduleNextRun
+End Sub
+
+Private Sub PhoenixStep44StopScheduler()
+    gStep44SchedulerArmed = False
+    PhoenixStep44CancelScheduledRun
+End Sub
+
+Private Sub PhoenixStep44ScheduleNextRun()
+    If Not gStep44SchedulerArmed Then Exit Sub
+    PhoenixStep44CancelScheduledRun
+    gStep44NextRunAt = DateAdd("s", STEP44_ONTIME_INTERVAL_SECONDS, Now)
+    Application.OnTime EarliestTime:=gStep44NextRunAt, Procedure:=Step44OnTimeProcedureName(), Schedule:=True
+    gStep44NextRunScheduled = True
+End Sub
+
+Private Sub PhoenixStep44CancelScheduledRun()
+    If Not gStep44NextRunScheduled Then Exit Sub
+    On Error Resume Next
+    Application.OnTime EarliestTime:=gStep44NextRunAt, Procedure:=Step44OnTimeProcedureName(), Schedule:=False
+    On Error GoTo 0
+    gStep44NextRunAt = 0
+    gStep44NextRunScheduled = False
+End Sub
+
+Private Sub Step44WriteTransportHeartbeat(ByVal heartbeatText As String)
+    ThisWorkbook.Worksheets("PHOENIX_RSS_TRANSPORT").Range("J6").Value2 = heartbeatText
+End Sub
 
 Public Sub RunPhoenixStep44LocalReceiver()
     Dim rootPath As String
+    Dim heartbeatText As String
     Dim currentStage As String
     Dim errorNumber As Long
     Dim errorSource As String
     Dim errorDescription As String
     Dim errorLine As Long
+    Dim shouldReraise As Boolean
 
     On Error GoTo CleanFail
+    If gStep44ConsumerRunning Then Exit Sub
+    gStep44ConsumerRunning = True
+    PhoenixStep44CancelScheduledRun
     currentStage = "RESOLVE_ROOT"
-    rootPath = FindRepositoryRoot(ThisWorkbook.Path)
+    rootPath = NormalizeRepositoryStartPath(ThisWorkbook.Path)
+    rootPath = FindRepositoryRoot(rootPath)
+    currentStage = "WRITE_HEARTBEAT"
+    heartbeatText = FormatJstTimestamp(CurrentJst())
+    Step44WriteTransportHeartbeat heartbeatText
     currentStage = "ENSURE_DIRECTORIES"
     EnsureBridgeDirectories rootPath
     currentStage = "ACQUIRE_LOCK"
     AcquireStep44Lock rootPath
+    currentStage = "RECONCILE_FINAL"
+    ReconcileFinalOutboxFiles rootPath
+    currentStage = "RECONCILE_PROCESSING"
+    ReconcileProcessingOutboxFiles rootPath
     currentStage = "PROCESS_PENDING"
     ProcessPendingOutboxFiles rootPath
 CleanExit:
     ReleaseStep44Lock
+    gStep44ConsumerRunning = False
+    If gStep44SchedulerArmed Then
+        PhoenixStep44ScheduleNextRun
+    End If
+    If shouldReraise Then
+        Err.Raise errorNumber, errorSource, errorDescription
+    End If
     Exit Sub
 CleanFail:
     errorNumber = Err.Number
@@ -66,6 +138,9 @@ CleanFail:
             errorDescription, _
             CStr(errorLine))
     End If
+    If Len(rootPath) = 0 Then
+        shouldReraise = True
+    End If
     On Error GoTo 0
     Resume CleanExit
 End Sub
@@ -80,7 +155,7 @@ Private Function FindRepositoryRoot(ByVal startPath As String) As String
     End If
 
     Set fso = CreateObject("Scripting.FileSystemObject")
-    currentPath = startPath
+    currentPath = NormalizeRepositoryStartPath(startPath)
     Do
         If RepositoryLooksValid(currentPath) Then
             FindRepositoryRoot = currentPath
@@ -91,7 +166,72 @@ Private Function FindRepositoryRoot(ByVal startPath As String) As String
         currentPath = parentPath
     Loop
 
+    If RepositoryLooksValid(STEP44_CANONICAL_FALLBACK_ROOT) Then
+        FindRepositoryRoot = STEP44_CANONICAL_FALLBACK_ROOT
+        Exit Function
+    End If
+
     Err.Raise vbObjectError + 4431, CONTRACT_ID, "Unable to resolve the PHOENIX repository root"
+End Function
+
+Private Function NormalizeRepositoryStartPath(ByVal startPath As String) As String
+    Dim relativePath As String
+    Dim webPath As String
+    Dim firstSlash As Long
+
+    webPath = NormalizeText(startPath)
+    If Len(webPath) = 0 Then Exit Function
+    If StrComp(Left$(webPath, Len(STEP44_ONEDRIVE_WEB_PREFIX)), STEP44_ONEDRIVE_WEB_PREFIX, vbTextCompare) <> 0 Then
+        NormalizeRepositoryStartPath = webPath
+        Exit Function
+    End If
+
+    firstSlash = InStr(Len(STEP44_ONEDRIVE_WEB_PREFIX) + 1, webPath, "/", vbBinaryCompare)
+    If firstSlash = 0 Then
+        Err.Raise vbObjectError + 4432, CONTRACT_ID, "Unable to map OneDrive web path to a local folder"
+    End If
+
+    relativePath = Mid$(webPath, firstSlash + 1)
+    If Len(relativePath) = 0 Then
+        Err.Raise vbObjectError + 4432, CONTRACT_ID, "Unable to map OneDrive web path to a local folder"
+    End If
+
+    NormalizeRepositoryStartPath = OneDriveLocalRoot() & "\" & Replace$(relativePath, "/", "\")
+End Function
+
+Private Function OneDriveLocalRoot() As String
+    Dim candidate As String
+    Dim fso As Object
+
+    candidate = NormalizeText(Environ$("OneDrive"))
+    If Len(candidate) > 0 Then
+        OneDriveLocalRoot = candidate
+        Exit Function
+    End If
+
+    candidate = NormalizeText(Environ$("OneDriveConsumer"))
+    If Len(candidate) > 0 Then
+        OneDriveLocalRoot = candidate
+        Exit Function
+    End If
+
+    candidate = NormalizeText(Environ$("OneDriveCommercial"))
+    If Len(candidate) > 0 Then
+        OneDriveLocalRoot = candidate
+        Exit Function
+    End If
+
+    candidate = NormalizeText(Environ$("USERPROFILE"))
+    If Len(candidate) > 0 Then
+        candidate = candidate & "\OneDrive"
+        Set fso = CreateObject("Scripting.FileSystemObject")
+        If fso.FolderExists(candidate) Then
+            OneDriveLocalRoot = candidate
+            Exit Function
+        End If
+    End If
+
+    Err.Raise vbObjectError + 4433, CONTRACT_ID, "Unable to resolve the local OneDrive root"
 End Function
 
 Private Function RepositoryLooksValid(ByVal rootPath As String) As Boolean
@@ -100,6 +240,103 @@ Private Function RepositoryLooksValid(ByVal rootPath As String) As Boolean
         FileExists(RepositoryPath(rootPath, "AGENTS.md")) And _
         FileExists(RepositoryPath(rootPath, "phoenix_core\__init__.py"))
 End Function
+
+Private Sub ReconcileFinalOutboxFiles(ByVal rootPath As String)
+    Dim stateRows As Collection
+    Dim completeFiles As Collection
+    Dim rejectedFiles As Collection
+    Dim filePath As Variant
+
+    Set stateRows = LoadStateRows(rootPath)
+
+    Set completeFiles = PendingCsvFiles(RepositoryPath(rootPath, COMPLETE_DIR))
+    For Each filePath In completeFiles
+        ReconcileFinalOutboxFile rootPath, stateRows, CStr(filePath), "ACCEPTED", "complete"
+        Set stateRows = LoadStateRows(rootPath)
+    Next filePath
+
+    Set rejectedFiles = PendingCsvFiles(RepositoryPath(rootPath, REJECTED_DIR))
+    For Each filePath In rejectedFiles
+        ReconcileFinalOutboxFile rootPath, stateRows, CStr(filePath), "REJECTED", "rejected"
+        Set stateRows = LoadStateRows(rootPath)
+    Next filePath
+End Sub
+
+Private Sub ReconcileFinalOutboxFile( _
+    ByVal rootPath As String, _
+    ByVal stateRows As Collection, _
+    ByVal finalFilePath As String, _
+    ByVal fallbackResult As String, _
+    ByVal finalFolderName As String)
+
+    Dim intentId As String
+    Dim requestRow As Variant
+    Dim receiptPath As String
+    Dim receiptRow As Variant
+    Dim finalStateIndex As Long
+    Dim sourceChecksum As String
+    Dim idempotencyKey As String
+    Dim resultValue As String
+    Dim reasonCodes As String
+    Dim note As String
+
+    intentId = FileStem(finalFilePath)
+    If Len(intentId) = 0 Then Exit Sub
+
+    finalStateIndex = FindLatestFinalStateRowIndex(stateRows, ST_INTENT_ID, intentId)
+    If finalStateIndex > 0 Then Exit Sub
+
+    requestRow = ReadSingleCsvRecord(finalFilePath, OutboxColumns())
+    idempotencyKey = NormalizeText(requestRow(OB_IDEMPOTENCY_KEY))
+    sourceChecksum = NormalizeText(requestRow(OB_CHECKSUM))
+    receiptPath = RepositoryPath(rootPath, INBOX_DIR) & "\" & intentId & ".csv"
+
+    resultValue = fallbackResult
+    reasonCodes = "RECOVERED_FROM_FINAL_FOLDER"
+    note = "recovered_from_final_folder=" & finalFolderName
+
+    If FileExists(receiptPath) Then
+        receiptRow = ReadSingleCsvRecord(receiptPath, ReceiptColumns())
+        If StrComp(NormalizeText(receiptRow(RC_INTENT_ID)), intentId, vbTextCompare) = 0 Then
+            resultValue = UCase$(NormalizeText(receiptRow(RC_RESULT)))
+            If Len(resultValue) = 0 Then resultValue = fallbackResult
+            reasonCodes = NormalizeText(receiptRow(RC_REASON_CODES))
+            sourceChecksum = NormalizeText(receiptRow(RC_SOURCE_CHECKSUM))
+            If Len(sourceChecksum) = 0 Then sourceChecksum = NormalizeText(requestRow(OB_CHECKSUM))
+            note = note & ";receipt_recovered=TRUE"
+        Else
+            Err.Raise vbObjectError + 4434, CONTRACT_ID, "Receipt intent mismatch during Step44 recovery: " & receiptPath
+        End If
+    Else
+        note = note & ";receipt_missing=TRUE"
+    End If
+
+    AppendStateRow rootPath, BuildStateRow( _
+        FormatJstTimestamp(CurrentJst()), _
+        intentId, _
+        idempotencyKey, _
+        sourceChecksum, _
+        resultValue, _
+        resultValue, _
+        reasonCodes, _
+        finalFilePath, _
+        receiptPath, _
+        note)
+End Sub
+
+Private Sub ReconcileProcessingOutboxFiles(ByVal rootPath As String)
+    Dim processingFolder As String
+    Dim processingFiles As Collection
+    Dim filePath As Variant
+    Dim pendingPath As String
+
+    processingFolder = RepositoryPath(rootPath, PROCESSING_DIR)
+    Set processingFiles = PendingCsvFiles(processingFolder)
+    For Each filePath In processingFiles
+        pendingPath = RepositoryPath(rootPath, PENDING_DIR) & "\" & FileStem(CStr(filePath)) & ".csv"
+        MoveFileAtomic CStr(filePath), pendingPath
+    Next filePath
+End Sub
 
 Private Function PendingCsvFiles(ByVal folderPath As String) As Collection
     Dim fso As Object

@@ -6,10 +6,10 @@ from phoenix_core import OrderRequest, OrderSide, OrderType, PaperBroker
 from phoenix_core.risk_controller import RiskConfig, RiskState, evaluate_orders
 
 
-def make_order(ticker: str, price: float, cid: str) -> OrderRequest:
+def make_order(ticker: str, price: float, cid: str, side: OrderSide = OrderSide.BUY) -> OrderRequest:
     return OrderRequest(
         ticker=ticker,
-        side=OrderSide.BUY,
+        side=side,
         quantity=100,
         order_type=OrderType.LIMIT,
         limit_price=price,
@@ -20,16 +20,48 @@ def make_order(ticker: str, price: float, cid: str) -> OrderRequest:
 class RiskControllerV7Test(unittest.TestCase):
     def setUp(self) -> None:
         self.broker = PaperBroker(initial_cash_yen=300000)
-        self.config = RiskConfig(
+        self.config = self._risk_config()
+
+    def _risk_config(
+        self,
+        *,
+        max_positions: int | None = 3,
+        max_orders_per_run: int = 2,
+        max_total_invested_pct: float = 0.80,
+        bear_max_total_invested_pct: float = 0.70,
+        max_single_position_pct: float = 0.30,
+        risk_v2_enabled: bool = False,
+    ) -> RiskConfig:
+        return RiskConfig(
             max_daily_loss_pct=0.03,
             max_drawdown_pct=0.10,
-            max_positions=3,
-            max_total_invested_pct=0.80,
-            max_single_position_pct=0.30,
-            max_orders_per_run=2,
+            max_positions=max_positions,
+            max_total_invested_pct=max_total_invested_pct,
+            max_single_position_pct=max_single_position_pct,
+            max_orders_per_run=max_orders_per_run,
             max_consecutive_losses=3,
             minimum_cash_reserve_pct=0.10,
+            risk_v2_enabled=risk_v2_enabled,
+            breadth_threshold=0.40,
+            bear_max_total_invested_pct=bear_max_total_invested_pct,
+            market_regime_file="reports/market_regime.json",
         )
+
+    def _market_context(
+        self,
+        *,
+        breadth_ratio: float,
+        threshold: float = 0.40,
+        regime: str = "BULL",
+    ) -> dict[str, object]:
+        return {
+            "breadth_ratio": breadth_ratio,
+            "breadth_threshold": threshold,
+            "regime": regime,
+            "source_run_id": "RUN-001",
+            "source_report_sha256": "a" * 64,
+            "source_ticker_count": 225,
+        }
 
     def test_approves_safe_order(self) -> None:
         report = evaluate_orders(
@@ -76,6 +108,86 @@ class RiskControllerV7Test(unittest.TestCase):
         )
         self.assertEqual(0, len(report.accepted_orders))
         self.assertIn("1銘柄", report.decisions[0].reason)
+
+    def test_accepts_sell_risk_reduction_even_when_buy_limits_are_hit(self) -> None:
+        config = self._risk_config(risk_v2_enabled=True)
+        state = RiskState.new(300000)
+        state.start_of_day_equity_yen = 400000
+        report = evaluate_orders(
+            self.broker,
+            [make_order("9501.T", 500, "SELL-1", side=OrderSide.SELL)],
+            config,
+            state,
+            market_context=self._market_context(breadth_ratio=0.50, regime="BULL"),
+        )
+        self.assertEqual(1, len(report.accepted_orders))
+        self.assertTrue(report.decisions[0].accepted)
+
+    def test_max_positions_none_skips_position_count_reject(self) -> None:
+        config = self._risk_config(
+            max_positions=None,
+            max_orders_per_run=10,
+            risk_v2_enabled=True,
+        )
+        report = evaluate_orders(
+            self.broker,
+            [
+                make_order("9501.T", 500, "NONE-1"),
+                make_order("4902.T", 600, "NONE-2"),
+                make_order("3697.T", 700, "NONE-3"),
+            ],
+            config,
+            RiskState.new(300000),
+            market_context=self._market_context(breadth_ratio=0.55, regime="BULL"),
+        )
+        self.assertEqual(3, len(report.accepted_orders))
+        self.assertTrue(all(decision.accepted for decision in report.decisions))
+
+    def test_bear_cap_and_base_cap_are_applied_by_regime(self) -> None:
+        config = self._risk_config(
+            max_positions=None,
+            max_orders_per_run=5,
+            max_single_position_pct=1.0,
+            risk_v2_enabled=True,
+        )
+        bear_report = evaluate_orders(
+            self.broker,
+            [make_order("9501.T", 2200, "BEAR-1")],
+            config,
+            RiskState.new(300000),
+            market_context=self._market_context(breadth_ratio=0.39, regime="BEAR"),
+        )
+        self.assertEqual(0, len(bear_report.accepted_orders))
+        self.assertIn("総投資率上限", bear_report.decisions[0].reason)
+
+        bull_report = evaluate_orders(
+            self.broker,
+            [make_order("9501.T", 2200, "BULL-1")],
+            config,
+            RiskState.new(300000),
+            market_context=self._market_context(breadth_ratio=0.55, regime="BULL"),
+        )
+        self.assertEqual(1, len(bull_report.accepted_orders))
+        self.assertTrue(bull_report.decisions[0].accepted)
+
+    def test_market_context_missing_or_inconsistent_fails_closed(self) -> None:
+        config = self._risk_config(risk_v2_enabled=True)
+        with self.assertRaises(ValueError):
+            evaluate_orders(
+                self.broker,
+                [make_order("9501.T", 500, "CTX-1")],
+                config,
+                RiskState.new(300000),
+            )
+
+        with self.assertRaises(ValueError):
+            evaluate_orders(
+                self.broker,
+                [make_order("9501.T", 500, "CTX-2")],
+                config,
+                RiskState.new(300000),
+                market_context=self._market_context(breadth_ratio=0.39, regime="BULL"),
+            )
 
 
 if __name__ == "__main__":

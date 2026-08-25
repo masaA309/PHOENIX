@@ -18,9 +18,13 @@ class OrderType(str, Enum):
 
 
 class OrderStatus(str, Enum):
+    PENDING = "PENDING"
     ACCEPTED = "ACCEPTED"
+    PARTIALLY_FILLED = "PARTIALLY_FILLED"
     FILLED = "FILLED"
     REJECTED = "REJECTED"
+    CANCELED = "CANCELED"
+    TIMED_OUT = "TIMED_OUT"
 
 
 @dataclass(frozen=True, slots=True)

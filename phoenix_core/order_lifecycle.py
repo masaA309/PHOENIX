@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import csv
 from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from phoenix_core.broker import PaperBroker
+from phoenix_core.models import OrderRequest, OrderSide, OrderType
 from phoenix_core.performance_tracker import atomic_write, load_history, resolve_path
 from phoenix_core.portfolio_guard import as_float, load_state, position_items
+
+
+MANUAL_TRADE_TICKET_REPORT = "reports/v7_manual_trade_ticket.json"
+MANUAL_FILL_INBOX = "state/v7_manual_fill_inbox.csv"
+MANUAL_FILL_INGEST_REPORT_JSON = "reports/v7_manual_fill_ingest.json"
+MANUAL_FILL_INGEST_REPORT_TEXT = "reports/v7_manual_fill_ingest.txt"
 
 
 def broker_snapshot(state: Mapping[str, Any], observed_at: datetime) -> dict[str, Any]:
@@ -61,6 +70,222 @@ def load_snapshot(path: Path) -> tuple[dict[str, Any], str | None]:
     if not isinstance(value, dict):
         return {}, "Previous snapshot root is not an object"
     return value, None
+
+
+def _load_manual_trade_ticket(root: Path) -> dict[str, dict[str, Any]]:
+    report_path = resolve_path(root, MANUAL_TRADE_TICKET_REPORT)
+    if not report_path.is_file():
+        raise ValueError(f"manual trade ticket is missing: {report_path}")
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("manual trade ticket report is invalid")
+    candidates = payload.get("candidates", [])
+    if not isinstance(candidates, list):
+        raise ValueError("manual trade ticket candidates is invalid")
+    lookup: dict[str, dict[str, Any]] = {}
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, Mapping):
+            raise ValueError(f"manual trade ticket candidate[{index}] is invalid")
+        client_order_id = str(candidate.get("client_order_id", "")).strip()
+        if not client_order_id:
+            raise ValueError(f"manual trade ticket candidate[{index}] lacks client_order_id")
+        lookup[client_order_id] = dict(candidate)
+    return lookup
+
+
+def _load_manual_fill_rows(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
+        return []
+    with path.open("r", encoding="utf-8-sig", newline="") as file:
+        reader = csv.DictReader(file)
+        rows = []
+        for index, row in enumerate(reader):
+            if row is None:
+                raise ValueError(f"manual fill inbox row[{index}] is invalid")
+            rows.append({str(key): str(value).strip() for key, value in row.items() if key is not None})
+    return rows
+
+
+def _manual_fill_text(report: Mapping[str, Any]) -> str:
+    lines = [
+        "PHOENIX v7 STEP15 MANUAL FILL INGEST",
+        "=" * 86,
+        f"Status              : {report.get('status', '')}",
+        f"Ingested count      : {report.get('ingested_count', 0)}",
+        f"Duplicate count     : {report.get('duplicate_count', 0)}",
+        f"Rejected count      : {report.get('rejected_count', 0)}",
+        f"Applied count       : {report.get('applied_count', 0)}",
+        f"Inbox path          : {report.get('inbox_path', '')}",
+        f"Broker state path   : {report.get('broker_state_path', '')}",
+        "-" * 86,
+    ]
+    for item in report.get("fills", []):
+        lines.extend([
+            f"{item.get('filled_at', '')} {item.get('client_order_id', ''):<24} {item.get('ticker', ''):<12} "
+            f"{item.get('side', ''):<4} qty={item.get('actual_fill_quantity')} price={item.get('actual_fill_price')}",
+        ])
+    return "\n".join(lines + ["=" * 86, ""])
+
+
+def ingest_manual_fills(
+    root: Path,
+    config: Mapping[str, Any],
+    observed_at: datetime | None = None,
+) -> dict[str, Any] | None:
+    settings = config.get("order_lifecycle", {})
+    broker_path = resolve_path(root, str(settings.get("broker_state", "state/v7_paper_broker.json")))
+    inbox_path = resolve_path(root, MANUAL_FILL_INBOX)
+    if not inbox_path.is_file():
+        return None
+
+    rows = _load_manual_fill_rows(inbox_path)
+    if not rows:
+        return None
+
+    state, warnings = load_state(broker_path)
+    if warnings:
+        raise ValueError("; ".join(warnings))
+    broker = PaperBroker(
+        initial_cash_yen=float(state.get("cash_yen", 0.0) or 0.0),
+        state_file=broker_path,
+    )
+    ticket_lookup = _load_manual_trade_ticket(root)
+    duplicate_count = 0
+    rejected_count = 0
+    applied_rows: list[dict[str, Any]] = []
+    processed_ids = set(str(item) for item in state.get("processed_client_order_ids", []))
+
+    for index, row in enumerate(rows):
+        client_order_id = str(row.get("client_order_id", "")).strip()
+        if not client_order_id:
+            raise ValueError(f"manual fill inbox row[{index}] lacks client_order_id")
+        if client_order_id in processed_ids:
+            duplicate_count += 1
+            continue
+        ticket_row = ticket_lookup.get(client_order_id)
+        if ticket_row is None:
+            raise ValueError(f"manual fill inbox row[{index}] has unknown client_order_id: {client_order_id}")
+        ticker = str(ticket_row.get("ticker", "")).strip().upper()
+        side = str(ticket_row.get("side", "BUY")).strip().upper()
+        if side not in ("BUY", "SELL"):
+            raise ValueError(f"manual fill inbox row[{index}] has invalid side: {side}")
+        try:
+            actual_fill_price = round(float(row.get("actual_fill_price", "")), 2)
+            actual_fill_quantity = int(float(row.get("actual_fill_quantity", "")))
+        except ValueError as error:
+            raise ValueError(f"manual fill inbox row[{index}] has invalid fill values") from error
+        if actual_fill_price <= 0 or actual_fill_quantity <= 0:
+            raise ValueError(f"manual fill inbox row[{index}] has non-positive fill values")
+        filled_at = str(row.get("filled_at", "")).strip()
+        if not filled_at:
+            raise ValueError(f"manual fill inbox row[{index}] lacks filled_at")
+
+        order = OrderRequest(
+            ticker=ticker,
+            side=OrderSide(side),
+            quantity=actual_fill_quantity,
+            order_type=OrderType.LIMIT,
+            limit_price=actual_fill_price,
+            client_order_id=client_order_id,
+            strategy_name="PHOENIX_MANUAL_FILL",
+            metadata={
+                "source": "manual_fill_inbox",
+                "filled_at": filled_at,
+            },
+        )
+        result = broker.submit_order(order)
+        status_text = str(getattr(result, "status", "")).upper()
+        if "FILLED" not in status_text:
+            raise ValueError(f"manual fill submit failed for {client_order_id}")
+        broker_order_id = str(
+            getattr(
+                result,
+                "broker_order_id",
+                getattr(result, "order_id", f"MANUAL|{client_order_id}"),
+            )
+        ).strip() or f"MANUAL|{client_order_id}"
+        post_state = json.loads(broker_path.read_text(encoding="utf-8"))
+        if not isinstance(post_state, dict):
+            raise ValueError("manual fill broker state is invalid")
+        fill_events = post_state.get("fill_events", [])
+        if fill_events is None:
+            fill_events = []
+        if not isinstance(fill_events, list):
+            raise ValueError("manual fill broker fill_events is invalid")
+        fill_event = {
+            "event_id": f"FILL|{broker_order_id}",
+            "broker_order_id": broker_order_id,
+            "client_order_id": client_order_id,
+            "ticker": ticker,
+            "side": side,
+            "filled_quantity": actual_fill_quantity,
+            "created_at": filled_at,
+        }
+        digest_source = json.dumps(
+            fill_event,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        fill_event["event_sha256"] = hashlib.sha256(digest_source).hexdigest()
+        if not any(
+            isinstance(existing, Mapping)
+            and str(existing.get("event_id", "")) == fill_event["event_id"]
+            for existing in fill_events
+        ):
+            fill_events.append(fill_event)
+        post_state["fill_events"] = fill_events
+        atomic_write(broker_path, json.dumps(post_state, ensure_ascii=False, indent=2) + "\n")
+        applied_rows.append(
+            {
+                "client_order_id": client_order_id,
+                "ticker": ticker,
+                "side": side,
+                "actual_fill_price": actual_fill_price,
+                "actual_fill_quantity": actual_fill_quantity,
+                "filled_at": filled_at,
+                "broker_status": str(getattr(result, "status", "")),
+            }
+        )
+        processed_ids.add(client_order_id)
+
+    if not applied_rows and duplicate_count == len(rows):
+        inbox_path.unlink(missing_ok=True)
+        return {
+            "schema_version": 1,
+            "version": "PHOENIX v7 Step15 Manual Fill Ingest",
+            "generated_at": (observed_at or datetime.now()).isoformat(timespec="seconds"),
+            "status": "READY",
+            "ingested_count": 0,
+            "duplicate_count": duplicate_count,
+            "rejected_count": rejected_count,
+            "applied_count": 0,
+            "inbox_path": str(inbox_path),
+            "broker_state_path": str(broker_path),
+            "fills": [],
+        }
+
+    report = {
+        "schema_version": 1,
+        "version": "PHOENIX v7 Step15 Manual Fill Ingest",
+        "generated_at": (observed_at or datetime.now()).isoformat(timespec="seconds"),
+        "status": "READY",
+        "ingested_count": len(applied_rows),
+        "duplicate_count": duplicate_count,
+        "rejected_count": rejected_count,
+        "applied_count": len(applied_rows),
+        "inbox_path": str(inbox_path),
+        "broker_state_path": str(broker_path),
+        "fills": applied_rows,
+    }
+    inbox_path.unlink(missing_ok=True)
+    json_path = resolve_path(root, MANUAL_FILL_INGEST_REPORT_JSON)
+    text_path = resolve_path(root, MANUAL_FILL_INGEST_REPORT_TEXT)
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    text_path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(json_path, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    atomic_write(text_path, _manual_fill_text(report))
+    return report
 
 
 def lifecycle_events(previous: Mapping[str, Any], current: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -211,7 +436,14 @@ def run_order_lifecycle(
     journal_path = resolve_path(root, str(settings.get("event_journal", "state/v7_order_lifecycle_events.jsonl")))
     report_json = resolve_path(root, str(settings.get("report_json", "reports/v7_order_lifecycle.json")))
     report_text = resolve_path(root, str(settings.get("report_text", "reports/v7_order_lifecycle.txt")))
+    ingest_manual_fills(root, config, observed_at=observed_at)
     state, warnings = load_state(broker_path)
+    try:
+        raw_state = json.loads(broker_path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raw_state = state
+    if isinstance(raw_state, dict):
+        state = raw_state
     current = broker_snapshot(state, observed_at)
     previous, snapshot_error = load_snapshot(snapshot_path)
     if snapshot_error:

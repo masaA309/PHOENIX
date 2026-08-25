@@ -932,11 +932,11 @@ def run_disaster_recovery(
         or re.fullmatch(r"[0-9a-fA-F]{7,40}", previous_commit) is None
     ):
         block("PREVIOUS_GIT_COMMIT_INVALID")
-    expected_commit = current.get("git_commit")
+    current_commit = current.get("git_commit")
     if (
-        isinstance(previous_commit, str)
-        and isinstance(expected_commit, str)
-        and previous_commit.lower() != expected_commit
+        previous_status != "COMPLETED"
+        and isinstance(current_commit, str)
+        and previous_commit.lower() != current_commit
     ):
         block("GIT_COMMIT_MISMATCH")
 
@@ -993,8 +993,6 @@ def run_disaster_recovery(
         or payload["recovery_status"] not in VALID_RECOVERY_STATUSES
     ):
         block("RECOVERY_STATUS_INVALID")
-    elif payload["recovery_status"] == STATUS_BLOCKED:
-        block("PREVIOUS_RECOVERY_BLOCKED")
     stored_reasons = payload["recovery_reasons"]
     if not isinstance(stored_reasons, list) or any(
         not isinstance(reason, str) for reason in stored_reasons

@@ -1,6 +1,6 @@
 # PHOENIX Prompt Library
 
-Last updated: 2026-08-03
+Last updated: 2026-08-17
 Status: approved
 
 `AGENTS.md` を唯一の標準書として使う承認済み短縮テンプレート。現在のユーザー指示を最優先し、必要なテンプレートだけを選ぶ。角括弧の項目だけを差し替え、保存済みルールを長文で複製しない。
@@ -43,4 +43,9 @@ Pythonは正本の .venv\Scripts\python.exe を最優先してください。代
 ## T-008 クレジット節約
 ```text
 1タスク1目的を守り、必要なknowledgeと最小範囲の確認だけを使ってください。新情報のない操作、同条件の再試行、無関係な調査、不要な全体テスト、保存済み前提の再記載を行わず、クレジット、時間、ユーザー操作を最小化してください。
+```
+
+## T-009 RSS Workbook固定
+```text
+目的は「[目的]」です。ProductionRakutenRssTransportのWorkbookは runtime/v7_rss_production/PHOENIX_RSS_PRODUCTION.xlsm に固定し、.invalid_backup・backup・old・tmp を候補にせず、正規Workbookが存在しない場合は明示FAILにしてください。既にExcelで同じWorkbookが開かれている場合のみそのlive Workbookを再利用し、それ以外は正規 .xlsm のみをOpenしてください。
 ```

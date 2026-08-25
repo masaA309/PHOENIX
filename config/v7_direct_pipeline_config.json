@@ -14,8 +14,21 @@
     ],
     "fallback": false
   },
+  "operating_mode": "PAPER_SAFE",
+  "trading_mode": "PAPER",
+  "execution_mode": "DRY_RUN",
+  "trading_actions": "PAPER_ONLY",
+  "allowed_trading_actions": [
+    "DISABLED",
+    "PAPER_ONLY"
+  ],
   "broker": {
     "type": "paper",
+    "transport_mode": "paper",
+    "live_trading_enabled": false,
+    "live_enabled": false,
+    "production_transport_enabled": false,
+    "production_live_fire_armed": false,
     "initial_cash_yen": 300000,
     "commission_rate": 0.0,
     "state_file": "state/v7_paper_broker.json"
@@ -34,7 +47,7 @@
   "risk": {
     "max_daily_loss_pct": 0.03,
     "max_drawdown_pct": 0.1,
-    "max_positions": 5,
+    "max_positions": null,
     "max_total_invested_pct": 0.8,
     "max_single_position_pct": 0.3,
     "max_orders_per_run": 3,

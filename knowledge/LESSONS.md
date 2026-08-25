@@ -32,3 +32,10 @@
 
 - Symptom: repeated full suites or market downloads consume time, energy, and model context without increasing evidence.
 - Response: use focused tests during editing, one full suite at a release boundary, cache market data, and never ask the user to rerun a successful full verification without a new reason.
+
+## Canonical production workbook path
+
+- Symptom: production RSS transport tried to open a noncanonical workbook such as `.invalid_backup`.
+- Cause: external workbook selection leaked into the production transport instead of the single approved `.xlsm`.
+- Response: pin the production transport to `runtime/v7_rss_production/PHOENIX_RSS_PRODUCTION.xlsm`, reuse the already-open live workbook when its `FullName` matches exactly, and fail explicitly if the canonical file is absent.
+- Do not: glob similar names, broaden discovery, or fall back to `backup`, `old`, or `tmp` files.
