@@ -88,6 +88,19 @@ CALIBRATION_RESULT:
 - AGENTS実体をreadせず `AGENTS_READ:YES` と自己申告
 - ChatGPTから参照可能な GitHub main 版を読まずに、ローカル AGENTS だけで自己停止
 - AGENTSローカル/GitHub不一致を放置
+- Codexが `AGENTS_READ:YES` 後に、ChatGPT指示にない「安全のため」「より良い」「念のため」「観測しやすい」等の自主判断で assertion / state / field / test / observation / logging / validation / fallback / command / acceptance condition を追加実行する
+- WRITE許可されたファイル内であっても、ChatGPTが指定した function / behavior / call path / input / proof target / assertion の範囲を越えて変更する
+- test PASSや安全性向上を理由に、ChatGPTが固定していない acceptance condition / observable state / validation condition を後付けする
+- `AGENTS_READ:YES` を、当該runの実行範囲全体への包括的許可と誤認する
+- 指示外actionが必要・有益・安全とCodexが判断した場合に、実行前に停止せず自主実行する
+- Codexが指示外actionを実行したにもかかわらず `SCOPE_VIOLATION:NO` または `AGENTS_COMPLIANCE:PASS` と報告する
+
+上記failure classについて次の規則も§3へ続けて追記する:
+
+- 上記のいずれかに該当したrunは、test結果や実装品質に関係なく自動FAILとする。
+- 「安全性向上」「品質向上」「追加確認」はscope拡張の正当化理由にならない。
+- 指示外actionを必要と判断した場合、Codexはそのactionを一切実行せず `SCOPE_VIOLATION_PROPOSED:YES` と報告して停止する。
+- 同run内でChatGPTの追加指示を待たずに別案・代替策・追加test・追加観測へ進んではならない。
 
 同じfailure classを未対策で再使用する指示は自動FAIL。
 - 新しい `UNVERIFIED_RUNTIME_ASSUMPTIONS` は毎回、該当する過去 failure class と照合する。類似 failure class を別 API・別手段へ置き換えただけでは対策済みとみなさない。重複がある場合は非実機工程で閉じるか方式選定へ戻し、同型前提の再使用は自動 FAIL とする。
@@ -155,12 +168,69 @@ ALLOWED
 FORBIDDEN
 SAFETY
 OUTPUT
+EXECUTION_MANIFEST
 を含む。
 
 差分指示禁止。
 open-ended横断調査禁止。
 「必要なら調べる」「潜在defectを広く探す」禁止。
 途中実況禁止。
+
+### EXECUTION SCOPE LOCK
+
+全Codex指示は、実行範囲を固定するため次の `EXECUTION_MANIFEST` を持つ。
+
+EXECUTION_MANIFEST:
+READ_FILES:
+WRITE_FILES:
+ALLOWED_FUNCTIONS:
+ALLOWED_BEHAVIORS:
+ALLOWED_COMMANDS:
+ALLOWED_TESTS:
+ALLOWED_ASSERTIONS:
+PROOF_TARGETS:
+FORBIDDEN_ADDITIONS:
+
+規則:
+- Codexが実行できるのは `EXECUTION_MANIFEST` に明示されたactionだけ。
+- `AGENTS_READ:YES` は実行許可を意味しない。実行許可は当該runの `EXECUTION_MANIFEST` だけで決まる。
+- `WRITE_FILES` は、そのファイル内を自由に変更してよいという意味ではない。
+- 変更可能範囲は `WRITE_FILES × ALLOWED_FUNCTIONS × ALLOWED_BEHAVIORS` の交差部分だけとする。
+- `ALLOWED_FUNCTIONS` が指定されている場合、同一ファイル内の別function変更は禁止。
+- `ALLOWED_BEHAVIORS` にないstate追加、field追加、fallback追加、validation追加、logging追加、observation追加は禁止。
+- `ALLOWED_TESTS` にないtest実行は禁止。
+- `ALLOWED_ASSERTIONS` にないassertion追加は禁止。
+- ChatGPTが固定していないproof target、acceptance condition、observable completionをCodexが追加してはならない。
+- 「安全のため」「より良い」「念のため」「分かりやすい」「将来必要」等の理由によるscope拡張は禁止。
+- 指示外actionが必要・有益と判断した場合、実行してはならない。
+- 指示外actionを実行する前に `SCOPE_VIOLATION_PROPOSED:YES` と報告して停止する。
+- `SCOPE_VIOLATION_PROPOSED:YES` は違反ではない。実行せず停止した場合は正しいfail-closeとする。
+- 指示外actionを1件でも実行した場合は `SCOPE_VIOLATION:YES` とし、test PASSでも当該runを自動FAILとする。
+- `SCOPE_VIOLATION:YES` のrunで生成・変更された成果物は、ChatGPTによる再監査完了まで未承認扱いとする。
+- Codexはscope違反を自分で修正して続行してはならない。違反を検知した時点で停止する。
+- CodexはChatGPTが指定していない別source、別file、別command、別testへ切り替えてはならない。
+- command実行回数と実行内容を隠してはならない。
+
+全Codex run終了時に以下を必須出力とする:
+
+COMMAND_COUNT:
+COMMAND_LOG:
+FILES_READ:
+FILES_WRITTEN:
+TESTS_RUN:
+UNREQUESTED_ACTIONS:
+SCOPE_VIOLATION_PROPOSED:
+SCOPE_VIOLATION:
+AGENTS_COMPLIANCE:
+
+判定規則:
+- `UNREQUESTED_ACTIONS` が1件以上 → `SCOPE_VIOLATION:YES`
+- `SCOPE_VIOLATION:YES` → `AGENTS_COMPLIANCE:FAIL`
+- `SCOPE_VIOLATION:YES` → run全体FAIL
+- test PASSは `AGENTS_COMPLIANCE:FAIL` を上書きできない
+- `COMMAND_LOG` が欠落し実行内容を監査できない場合、AGENTS_COMPLIANCEをPASSにしてはならない
+- `FILES_WRITTEN` に `WRITE_FILES` 外が1件でも含まれる場合、自動FAIL
+- 指定されたfunction/behavior外の変更が1件でもあれば、自動FAIL
 
 ## 7. FAIL / NOT_PROVEN
 
