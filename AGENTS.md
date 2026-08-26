@@ -171,6 +171,22 @@ OUTPUT
 EXECUTION_MANIFEST
 を含む。
 
+CODEX_PROMPT_RULE:
+個別Codex指示は、AGENTS.mdの恒久原則を再掲・言い換えしない。
+今回固有のTASK・変更対象・ALLOWED/FORBIDDEN差分・proof targetだけを書く。
+同じ内容を繰り返さず、Codexに重要条件の取捨選択をさせない。
+proof targetは互いに独立した検証単位だけにする。
+ALLOWED:
+- AGENTS.md read/write
+- 変更箇所確認
+FORBIDDEN:
+- 指定箇所以外の変更
+- 他file変更
+- test
+- git add/commit/push
+SAFETY:
+実注文・LIVE設定変更なし。
+
 差分指示禁止。
 open-ended横断調査禁止。
 「必要なら調べる」「潜在defectを広く探す」禁止。
