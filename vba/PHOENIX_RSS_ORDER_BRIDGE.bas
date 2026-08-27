@@ -745,6 +745,10 @@ Private Sub OBR_ProcessCancelRequestRow(ByVal bridgeRoot As String, ByVal reques
         OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, "related submit not found", "RELATED_SUBMIT_NOT_FOUND", "related submit not found"
         Exit Sub
     End If
+    If Len(NormalizeText(submitFields(5))) = 0 Then
+        OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, "related submit order number missing", "RELATED_SUBMIT_ORDER_NUMBER_MISSING", "related submit order number missing"
+        Exit Sub
+    End If
 
     mergedRow = OBR_MergeCancelRequestRow(requestRow, submitFields)
     receiptValues = OBR_BuildReceiptValues( _
@@ -753,7 +757,7 @@ Private Sub OBR_ProcessCancelRequestRow(ByVal bridgeRoot As String, ByVal reques
         "ACCEPTED", _
         "CANCELED", _
         OBR_InvalidStatusText(), _
-        NormalizeText(mergedRow(OBR_REQ_BROKER_ORDER_ID)), _
+        NormalizeText(submitFields(5)), _
         OBR_CANCEL_ACCEPTED_MESSAGE, _
         "", _
         OBR_CANCEL_ACCEPTED_MESSAGE)
@@ -1481,6 +1485,7 @@ Private Function OBR_ReceiptRowIsSuccessfulSubmit(ByVal receiptRow As Variant, B
     If StrComp(NormalizeText(receiptRow(OBR_REC_BRIDGE_STATUS)), "ACCEPTED", vbTextCompare) <> 0 Then Exit Function
     If StrComp(NormalizeText(receiptRow(OBR_REC_RESULT)), "ACCEPTED", vbTextCompare) <> 0 Then Exit Function
     If StrComp(NormalizeText(receiptRow(OBR_REC_RSS_ORDER_STATUS)), OBR_ValidStatusText(), vbTextCompare) <> 0 Then Exit Function
+    If Len(NormalizeText(receiptRow(OBR_REC_RSS_ORDER_NUMBER))) = 0 Then Exit Function
     If Len(NormalizeText(receiptRow(OBR_REC_ERROR_CODE))) > 0 Then Exit Function
     If Len(NormalizeText(receiptRow(OBR_REC_REQUEST_CHECKSUM))) = 0 Then Exit Function
     OBR_ReceiptRowIsSuccessfulSubmit = True
@@ -1496,7 +1501,7 @@ Private Function OBR_LoadSubmitHistoryFields( _
     Dim candidatePaths As Variant
     Dim candidatePath As Variant
     Dim rowValues As Variant
-    Dim loaded(0 To 4) As String
+    Dim loaded(0 To 5) As String
 
     candidateIds = Array("SUBMIT__" & brokerOrderId, "SUBMIT__" & clientOrderId)
     For Each candidateId In candidateIds
@@ -1512,6 +1517,7 @@ Private Function OBR_LoadSubmitHistoryFields( _
                         loaded(2) = NormalizeText(rowValues(OBR_REC_TARGET_PRICE))
                         loaded(3) = NormalizeText(rowValues(OBR_REC_STOP_PRICE))
                         loaded(4) = NormalizeText(rowValues(OBR_REC_EXPIRATION))
+                        loaded(5) = NormalizeText(rowValues(OBR_REC_RSS_ORDER_NUMBER))
                         OBR_LoadSubmitHistoryFields = loaded
                         On Error GoTo 0
                         Exit Function

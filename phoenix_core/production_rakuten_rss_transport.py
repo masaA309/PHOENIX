@@ -25,6 +25,8 @@ from phoenix_core.rakuten_rss_adapter import (
 JST = ZoneInfo("Asia/Tokyo")
 ORDER_MACRO_NAME = "RssStockOrder_V"
 CANCEL_MACRO_NAME = "RssCancelOrder_V"
+ORDER_ID_LIST_MACRO_NAME = "RssOrderIDList"
+ORDER_STATUS_MACRO_NAME = "RssOrderStatus"
 DEFAULT_WORKBOOK_NAME = "PHOENIX_RSS_PRODUCTION.xlsm"
 PHOENIX_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WORKBOOK_PATH = (PHOENIX_ROOT / "runtime" / "v7_rss_production" / DEFAULT_WORKBOOK_NAME).resolve()
@@ -169,6 +171,69 @@ def _expiration_yyyymmdd(value: Any) -> str:
     return parsed.strftime("%Y%m%d")
 
 
+def _stable_rss_order_id(client_order_id: str, broker_order_id: str) -> int:
+    digest = hashlib.sha256(f"{client_order_id}|{broker_order_id}".encode("utf-8")).hexdigest()
+    value = int(digest[:16], 16) % 2147483647
+    return value + 1
+
+
+def _normalize_rss_order_id_entry(value: Any) -> RakutenRssOrderIdEntry | None:
+    if value is None:
+        return None
+
+    if isinstance(value, Mapping):
+        raw_id = value.get("rss_order_id", value.get("order_id", value.get("発注ID", "")))
+        raw_function = value.get("function_name", value.get("関数名", ""))
+        raw_order_date = value.get("order_date", value.get("発注日", ""))
+        raw_order_time = value.get("order_time", value.get("発注時刻", ""))
+        raw_order_number = value.get("order_number", value.get("注文番号", ""))
+        raw_result = value.get("result", value.get("発注結果", ""))
+    elif isinstance(value, (list, tuple)):
+        if len(value) < 6:
+            return None
+        raw_id, raw_function, raw_order_date, raw_order_time, raw_order_number, raw_result = value[:6]
+    else:
+        return None
+
+    try:
+        rss_order_id = int(str(raw_id).strip())
+    except Exception:
+        return None
+    if rss_order_id < 1 or rss_order_id > 2147483647:
+        return None
+
+    return RakutenRssOrderIdEntry(
+        rss_order_id=rss_order_id,
+        function_name=str(raw_function or "").strip(),
+        order_date=str(raw_order_date or "").strip(),
+        order_time=str(raw_order_time or "").strip(),
+        order_number=str(raw_order_number or "").strip(),
+        result=str(raw_result or "").strip(),
+    )
+
+
+def _normalize_rss_order_id_entries(value: Any) -> tuple[RakutenRssOrderIdEntry, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, Mapping):
+        entry = _normalize_rss_order_id_entry(value)
+        return () if entry is None else (entry,)
+    if isinstance(value, (list, tuple)):
+        if len(value) == 0:
+            return ()
+        first_entry = _normalize_rss_order_id_entry(value)
+        if first_entry is not None:
+            return (first_entry,)
+        entries: list[RakutenRssOrderIdEntry] = []
+        for row in value:
+            entry = _normalize_rss_order_id_entry(row)
+            if entry is not None:
+                entries.append(entry)
+        return tuple(entries)
+    entry = _normalize_rss_order_id_entry(value)
+    return () if entry is None else (entry,)
+
+
 def _sheet_value(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.isoformat(timespec="seconds")
@@ -269,6 +334,16 @@ class WorkbookRuntimeState:
     heartbeat_age_seconds: float | None
     ready: bool
     message: str
+
+
+@dataclass(frozen=True, slots=True)
+class RakutenRssOrderIdEntry:
+    rss_order_id: int
+    function_name: str
+    order_date: str
+    order_time: str
+    order_number: str
+    result: str
 
 
 def _runtime_truthy_cell(value: Any) -> bool:
@@ -392,7 +467,7 @@ class ExcelComBackend(Protocol):
     ) -> None:
         raise NotImplementedError
 
-    def invoke_submit_macro(self, session: ExcelTransportSession, macro_name: str) -> None:
+    def invoke_submit_macro(self, session: ExcelTransportSession, macro_name: str, *args: Any) -> None:
         raise NotImplementedError
 
     def read_order_updates(
@@ -402,6 +477,15 @@ class ExcelComBackend(Protocol):
     ) -> tuple[RakutenRssOrderUpdate, ...]:
         raise NotImplementedError
 
+    def read_rss_order_ledger(
+        self,
+        session: ExcelTransportSession,
+    ) -> tuple[RakutenRssOrderIdEntry, ...]:
+        raise NotImplementedError
+
+    def read_rss_order_status(self, session: ExcelTransportSession, rss_order_id: int) -> int:
+        raise NotImplementedError
+
     def stage_cancel_payload(
         self,
         session: ExcelTransportSession,
@@ -409,7 +493,7 @@ class ExcelComBackend(Protocol):
     ) -> None:
         raise NotImplementedError
 
-    def invoke_cancel_macro(self, session: ExcelTransportSession, macro_name: str) -> None:
+    def invoke_cancel_macro(self, session: ExcelTransportSession, macro_name: str, *args: Any) -> None:
         raise NotImplementedError
 
     def close(self, session: ExcelTransportSession) -> None:
@@ -445,14 +529,20 @@ class MockExcelComBackend:
         self.health_calls = 0
         self.submit_stage_calls = 0
         self.submit_macro_calls = 0
+        self.submit_macro_args: list[tuple[Any, ...]] = []
         self.poll_calls = 0
         self.cancel_stage_calls = 0
         self.cancel_macro_calls = 0
+        self.cancel_macro_args: list[tuple[Any, ...]] = []
         self.closed_calls = 0
         self.submitted_payloads: list[dict[str, Any]] = []
         self.cancel_payloads: list[dict[str, Any]] = []
         self.publish_calls = 0
         self._updates_by_broker_order_id: dict[str, list[RakutenRssOrderUpdate]] = {}
+        self._rss_order_ledger_entries: list[RakutenRssOrderIdEntry] = []
+        self._rss_order_status_by_id: dict[int, int] = {}
+        self.rss_order_ledger_calls = 0
+        self.rss_order_status_calls = 0
 
     def queue_updates(
         self,
@@ -460,6 +550,33 @@ class MockExcelComBackend:
         updates: list[RakutenRssOrderUpdate],
     ) -> None:
         self._updates_by_broker_order_id[broker_order_id] = list(updates)
+
+    def queue_rss_order_ledger_entry(
+        self,
+        rss_order_id: int,
+        *,
+        function_name: str = ORDER_MACRO_NAME,
+        order_number: str = "",
+        result: str = "",
+        order_date: str = "",
+        order_time: str = "",
+    ) -> None:
+        self._rss_order_ledger_entries = [
+            entry for entry in self._rss_order_ledger_entries if entry.rss_order_id != rss_order_id
+        ]
+        self._rss_order_ledger_entries.append(
+            RakutenRssOrderIdEntry(
+                rss_order_id=rss_order_id,
+                function_name=function_name,
+                order_date=order_date,
+                order_time=order_time,
+                order_number=order_number,
+                result=result,
+            )
+        )
+
+    def set_rss_order_status(self, rss_order_id: int, status: int) -> None:
+        self._rss_order_status_by_id[rss_order_id] = int(status)
 
     def connect(self, workbook_path: Path, workbook_name: str) -> ExcelTransportSession:
         self.connect_calls += 1
@@ -509,8 +626,9 @@ class MockExcelComBackend:
         self.submit_stage_calls += 1
         self.submitted_payloads.append(dict(payload))
 
-    def invoke_submit_macro(self, session: ExcelTransportSession, macro_name: str) -> None:
+    def invoke_submit_macro(self, session: ExcelTransportSession, macro_name: str, *args: Any) -> None:
         self.submit_macro_calls += 1
+        self.submit_macro_args.append(tuple(args))
 
     def read_order_updates(
         self,
@@ -524,6 +642,17 @@ class MockExcelComBackend:
         self._updates_by_broker_order_id[broker_order_id] = []
         return tuple(updates)
 
+    def read_rss_order_ledger(
+        self,
+        session: ExcelTransportSession,
+    ) -> tuple[RakutenRssOrderIdEntry, ...]:
+        self.rss_order_ledger_calls += 1
+        return tuple(self._rss_order_ledger_entries)
+
+    def read_rss_order_status(self, session: ExcelTransportSession, rss_order_id: int) -> int:
+        self.rss_order_status_calls += 1
+        return int(self._rss_order_status_by_id.get(int(rss_order_id), -1))
+
     def stage_cancel_payload(
         self,
         session: ExcelTransportSession,
@@ -532,8 +661,9 @@ class MockExcelComBackend:
         self.cancel_stage_calls += 1
         self.cancel_payloads.append(dict(payload))
 
-    def invoke_cancel_macro(self, session: ExcelTransportSession, macro_name: str) -> None:
+    def invoke_cancel_macro(self, session: ExcelTransportSession, macro_name: str, *args: Any) -> None:
         self.cancel_macro_calls += 1
+        self.cancel_macro_args.append(tuple(args))
 
     def close(self, session: ExcelTransportSession) -> None:
         self.closed_calls += 1
@@ -912,9 +1042,9 @@ class Win32ComExcelBackend:
     ) -> None:
         self._write_payload(session, SUBMIT_CELL_MAP, payload)
 
-    def invoke_submit_macro(self, session: ExcelTransportSession, macro_name: str) -> None:
+    def invoke_submit_macro(self, session: ExcelTransportSession, macro_name: str, *args: Any) -> None:
         try:
-            session.application.Run(f"'{session.workbook.Name}'!{macro_name}")
+            session.application.Run(f"'{session.workbook.Name}'!{macro_name}", *args)
         except Exception as error:
             raise ExcelComError(f"Submit macro failed: {error}") from error
 
@@ -957,6 +1087,29 @@ class Win32ComExcelBackend:
             ),
         )
 
+    def read_rss_order_ledger(
+        self,
+        session: ExcelTransportSession,
+    ) -> tuple[RakutenRssOrderIdEntry, ...]:
+        try:
+            result = session.application.Run(f"'{session.workbook.Name}'!{ORDER_ID_LIST_MACRO_NAME}")
+        except Exception as error:
+            raise ExcelComError(f"Failed to read RssOrderIDList: {error}") from error
+        return _normalize_rss_order_id_entries(result)
+
+    def read_rss_order_status(self, session: ExcelTransportSession, rss_order_id: int) -> int:
+        try:
+            result = session.application.Run(
+                f"'{session.workbook.Name}'!{ORDER_STATUS_MACRO_NAME}",
+                int(rss_order_id),
+            )
+        except Exception as error:
+            raise ExcelComError(f"Failed to read RssOrderStatus for {rss_order_id}: {error}") from error
+        try:
+            return int(str(result).strip())
+        except Exception as error:
+            raise ExcelComError(f"Invalid RssOrderStatus for {rss_order_id}: {result!r}") from error
+
     def stage_cancel_payload(
         self,
         session: ExcelTransportSession,
@@ -964,9 +1117,9 @@ class Win32ComExcelBackend:
     ) -> None:
         self._write_payload(session, CANCEL_CELL_MAP, payload)
 
-    def invoke_cancel_macro(self, session: ExcelTransportSession, macro_name: str) -> None:
+    def invoke_cancel_macro(self, session: ExcelTransportSession, macro_name: str, *args: Any) -> None:
         try:
-            session.application.Run(f"'{session.workbook.Name}'!{macro_name}")
+            session.application.Run(f"'{session.workbook.Name}'!{macro_name}", *args)
         except Exception as error:
             raise ExcelComError(f"Cancel macro failed: {error}") from error
 
@@ -981,12 +1134,18 @@ class Win32ComExcelBackend:
 class _TrackedOrder:
     order: OrderRequest
     broker_order_id: str
+    rss_order_id: int
     submitted_at: datetime
     submit_payload: dict[str, Any]
     stage_state: str = "STAGED"
     submit_request_id: str = ""
     cancel_request_id: str = ""
     cancel_payload: dict[str, Any] | None = None
+    rss_order_number: str = ""
+    rss_order_status_code: int = -1
+    broker_observation_state: str = ""
+    cancel_observation_state: str = ""
+    last_authoritative_rss_status: int = -1
     last_message: str = ""
     filled_quantity: int = 0
     filled_price: float = 0.0
@@ -1480,6 +1639,10 @@ class ProductionRakutenRssTransport:
             status = _parse_order_status(receipt.result)
         except Exception as error:
             raise ExcelComError(f"Invalid bridge receipt result: {error}") from error
+        try:
+            authoritative_rss_status = int(str(receipt.rss_order_status).strip())
+        except Exception:
+            authoritative_rss_status = -1
         return RakutenRssOrderUpdate(
             status=status,
             fill_quantity=receipt.fill_quantity,
@@ -1487,7 +1650,323 @@ class ProductionRakutenRssTransport:
             message=receipt.message or receipt.result,
             updated_at=receipt.received_at,
             rss_order_status=receipt.rss_order_status,
+            rss_order_number=receipt.rss_order_number,
+            authoritative_rss_status=authoritative_rss_status,
         )
+
+    @staticmethod
+    def _tracked_order_status(order: _TrackedOrder) -> OrderStatus:
+        try:
+            return OrderStatus(order.stage_state)
+        except Exception:
+            return OrderStatus.PENDING
+
+    def _tracked_order_ack(self, order: _TrackedOrder, *, message: str | None = None) -> RakutenRssSubmitAck:
+        status = self._tracked_order_status(order)
+        return RakutenRssSubmitAck(
+            status=status,
+            message=message or order.last_message or status.value,
+            submitted_at=order.submitted_at,
+            rss_order_id=order.rss_order_id,
+            rss_order_number=order.rss_order_number,
+            authoritative_rss_status=order.last_authoritative_rss_status,
+        )
+
+    def _tracked_cancel_ack(self, order: _TrackedOrder, *, message: str | None = None) -> RakutenRssCancelAck:
+        status = self._tracked_order_status(order)
+        return RakutenRssCancelAck(
+            status=status,
+            message=message or order.last_message or status.value,
+            canceled_at=order.submitted_at,
+            rss_order_id=order.rss_order_id,
+            rss_order_number=order.rss_order_number,
+            authoritative_rss_status=order.last_authoritative_rss_status,
+        )
+
+    def _stable_rss_order_id(self, order: OrderRequest, broker_order_id: str) -> int:
+        return _stable_rss_order_id(order.client_order_id, broker_order_id)
+
+    @staticmethod
+    def _rss_order_status_value(value: Any) -> int:
+        try:
+            status = int(str(value).strip())
+        except Exception as error:
+            raise ExcelComError(f"Invalid RssOrderStatus value: {value!r}") from error
+        if status not in {-1, 1, 2, 3}:
+            raise ExcelComError(f"Unsupported RssOrderStatus value: {status}")
+        return status
+
+    def _live_contract_metadata(self, order: OrderRequest) -> dict[str, Any]:
+        metadata = dict(order.metadata or {})
+        required_names = ("account_category", "sor_category", "execution_condition")
+        missing = [name for name in required_names if str(metadata.get(name, "")).strip() == ""]
+        if missing:
+            raise ExcelComError(
+                "LIVE contract fields missing: " + ", ".join(missing)
+            )
+        return metadata
+
+    @staticmethod
+    def _rss_code_from_alias(value: Any, mapping: Mapping[str, int], *, field_name: str) -> int:
+        text = str(value).strip()
+        if not text:
+            raise ExcelComError(f"{field_name} is missing for LIVE contract.")
+        if text.isdigit():
+            code = int(text)
+            if code in mapping.values():
+                return code
+        normalized = text.replace("（", "(").replace("）", ")")
+        if normalized in mapping:
+            return mapping[normalized]
+        if text in mapping:
+            return mapping[text]
+        raise ExcelComError(f"Unsupported {field_name}: {value!r}")
+
+    def _rss_account_category_code(self, value: Any) -> int:
+        return self._rss_code_from_alias(
+            value,
+            {
+                "0": 0,
+                "特定": 0,
+                "1": 1,
+                "一般": 1,
+                "2": 2,
+                "NISA": 2,
+                "NISA(NISA成長投資枠)": 2,
+                "3": 3,
+                "旧NISA": 3,
+            },
+            field_name="account_category",
+        )
+
+    def _rss_sor_code(self, value: Any) -> int:
+        return self._rss_code_from_alias(
+            value,
+            {
+                "0": 0,
+                "通常": 0,
+                "通常注文": 0,
+                "1": 1,
+                "SOR": 1,
+                "SOR注文": 1,
+            },
+            field_name="sor_category",
+        )
+
+    def _rss_execution_condition_code(self, value: Any) -> int:
+        return self._rss_code_from_alias(
+            value,
+            {
+                "1": 1,
+                "本日中": 1,
+                "2": 2,
+                "今週中": 2,
+                "3": 3,
+                "寄付": 3,
+                "4": 4,
+                "引け": 4,
+                "5": 5,
+                "期間指定": 5,
+                "6": 6,
+                "大引不成": 6,
+                "7": 7,
+                "不成": 7,
+            },
+            field_name="execution_condition",
+        )
+
+    def _rss_trigger_condition_code(self, value: Any) -> int | str:
+        text = str(value).strip()
+        if not text:
+            return ""
+        if text.isdigit() and int(text) in {1, 2}:
+            return int(text)
+        mapping = {
+            "1": 1,
+            "以上": 1,
+            "2": 2,
+            "以下": 2,
+        }
+        return self._rss_code_from_alias(value, mapping, field_name="trigger_condition")
+
+    def _rss_price_kind_code(self, value: Any, *, field_name: str) -> int:
+        text = str(value).strip()
+        if not text:
+            raise ExcelComError(f"{field_name} is missing for LIVE contract.")
+        if text.isdigit() and int(text) in {0, 1}:
+            return int(text)
+        mapping = {
+            "0": 0,
+            "成行": 0,
+            "1": 1,
+            "指値": 1,
+        }
+        return self._rss_code_from_alias(value, mapping, field_name=field_name)
+
+    def _rss_optional_price(self, value: Any, *, field_name: str) -> Any:
+        text = str(value).strip()
+        if not text:
+            return ""
+        try:
+            return round(float(text), 2)
+        except Exception as error:
+            raise ExcelComError(f"Unsupported {field_name}: {value!r}") from error
+
+    def _rss_stop_price_kind_code(self, value: Any) -> int | str:
+        text = str(value).strip()
+        if not text:
+            return ""
+        if text.isdigit() and int(text) in {0, 1}:
+            return int(text)
+        mapping = {
+            "0": 0,
+            "成行": 0,
+            "売り成行": 0,
+            "買い成行": 0,
+            "1": 1,
+            "指値": 1,
+            "売り指値": 1,
+            "買い指値": 1,
+        }
+        return self._rss_code_from_alias(value, mapping, field_name="stop_price_kind")
+
+    def _rss_set_order_kind_code(self, value: Any) -> int | str:
+        text = str(value).strip()
+        if not text:
+            return ""
+        if text.isdigit() and int(text) in {0, 1}:
+            return int(text)
+        mapping = {
+            "0": 0,
+            "成行": 0,
+            "売り成行": 0,
+            "買い成行": 0,
+            "1": 1,
+            "指値": 1,
+            "売り指値": 1,
+            "買い指値": 1,
+        }
+        return self._rss_code_from_alias(value, mapping, field_name="set_order_kind")
+
+    def _rss_order_kind_code(self, order: OrderRequest, metadata: Mapping[str, Any]) -> int:
+        order_category = str(
+            _metadata_value(order, "order_category", default=metadata.get("order_category", ""))
+        ).strip()
+        if order_category in {"0", "通常", "通常注文"}:
+            return 0
+        if order_category in {"1", "逆指値付通常注文"}:
+            return 1
+        if order_category in {"2", "逆指値注文"}:
+            return 2
+        if order.side is OrderSide.SELL and any(
+            key in metadata for key in ("target_price", "take_profit_price", "stop_price", "stop_loss_price")
+        ):
+            return 1
+        return 0
+
+    @staticmethod
+    def _rss_side_code(order: OrderRequest) -> int:
+        if order.side is OrderSide.BUY:
+            return 3
+        if order.side is OrderSide.SELL:
+            return 1
+        raise ExcelComError(f"Unsupported order side: {order.side}")
+
+    @staticmethod
+    def _rss_price_kind(order: OrderRequest) -> int:
+        order_type_text = str(getattr(order.order_type, "value", order.order_type)).strip().upper()
+        if order_type_text in {"MARKET", "成行"}:
+            return 0
+        if order_type_text in {"LIMIT", "指値"}:
+            return 1
+        raise ExcelComError(f"Unsupported order type: {order.order_type}")
+
+    def _rss_optional_text(self, value: Any) -> str:
+        text = str(value).strip()
+        return text
+
+    def _build_rss_stock_order_arguments(self, order: OrderRequest, rss_order_id: int) -> tuple[Any, ...]:
+        metadata = self._live_contract_metadata(order)
+        order_category = self._rss_order_kind_code(order, metadata)
+        price_kind = self._rss_price_kind(order)
+        account_category = self._rss_account_category_code(metadata.get("account_category", ""))
+        sor_category = self._rss_sor_code(metadata.get("sor_category", ""))
+        execution_condition = self._rss_execution_condition_code(metadata.get("execution_condition", ""))
+        expiration = _expiration_yyyymmdd(metadata.get("expiration", metadata.get("expires_at", "")))
+        quantity = int(order.quantity)
+        order_price: Any = round(float(order.limit_price), 2) if price_kind == 1 else ""
+        stop_condition_price = self._rss_optional_price(
+            _metadata_value(order, "stop_condition_price", "stop_price", default=""),
+            field_name="stop_condition_price",
+        )
+        stop_condition_kind = self._rss_trigger_condition_code(
+            _metadata_value(order, "stop_condition_kind", "trigger_condition", default="")
+        )
+        stop_price_kind = self._rss_stop_price_kind_code(
+            _metadata_value(order, "stop_price_kind", "post_trigger_order_type", default="")
+        )
+        stop_price = self._rss_optional_price(
+            _metadata_value(order, "stop_price", "stop_loss_price", default=""),
+            field_name="stop_price",
+        )
+        set_order_kind = self._rss_set_order_kind_code(_metadata_value(order, "set_order_kind", default=""))
+        set_order_price = self._rss_optional_price(
+            _metadata_value(order, "set_order_price", default=""),
+            field_name="set_order_price",
+        )
+        set_order_execution_condition = self._rss_execution_condition_code(
+            _metadata_value(order, "set_order_execution_condition", default="")
+        ) if str(_metadata_value(order, "set_order_execution_condition", default="")).strip() else ""
+        set_order_expiration = _expiration_yyyymmdd(_metadata_value(order, "set_order_expiration", default=""))
+        ticker = order.ticker.strip().upper()
+        return (
+            int(rss_order_id),
+            ticker,
+            self._rss_side_code(order),
+            order_category,
+            sor_category,
+            quantity,
+            price_kind,
+            order_price,
+            execution_condition,
+            expiration,
+            account_category,
+            stop_condition_price,
+            stop_condition_kind,
+            stop_price_kind,
+            stop_price,
+            set_order_kind,
+            set_order_price,
+            set_order_execution_condition,
+            set_order_expiration,
+        )
+
+    def _build_rss_cancel_order_arguments(self, rss_order_id: int, order_number: str) -> tuple[Any, ...]:
+        if not str(order_number).strip():
+            raise ExcelComError("RSS order number is missing for cancel.")
+        return (int(rss_order_id), str(order_number).strip())
+
+    def _find_rss_order_ledger_entry(
+        self,
+        session: ExcelTransportSession,
+        rss_order_id: int,
+        *,
+        function_name: str,
+    ) -> RakutenRssOrderIdEntry | None:
+        for entry in self._backend.read_rss_order_ledger(session):
+            if entry.rss_order_id != int(rss_order_id):
+                continue
+            if str(entry.function_name).strip() and str(entry.function_name).strip() != function_name:
+                continue
+            return entry
+        return None
+
+    def _observe_rss_order_status(
+        self,
+        session: ExcelTransportSession,
+        rss_order_id: int,
+    ) -> int:
+        return self._backend.read_rss_order_status(session, int(rss_order_id))
 
     def submit_order(self, order: OrderRequest, broker_order_id: str) -> RakutenRssSubmitAck:
         order.validate()
@@ -1496,36 +1975,45 @@ class ProductionRakutenRssTransport:
             return RakutenRssSubmitAck(
                 status=OrderStatus.REJECTED,
                 message=gate_message,
+                rss_order_id=self._stable_rss_order_id(order, broker_order_id),
             )
 
         submitted_at = self._clock()
         payload = self._build_submit_payload(order, broker_order_id, submitted_at)
         with self._lock:
             self._last_submit_payload = dict(payload)
+            existing = self._orders.get(broker_order_id)
+            if existing is not None:
+                return self._tracked_order_ack(existing)
+
+        rss_order_id = self._stable_rss_order_id(order, broker_order_id)
         record: _TrackedOrder | None = None
 
         try:
-            health = self.health_check()
-            if not health.connected:
-                return RakutenRssSubmitAck(
-                    status=OrderStatus.REJECTED,
-                    message=health.message,
-                )
-            if not self._armed:
-                return RakutenRssSubmitAck(
-                    status=OrderStatus.REJECTED,
-                    message="production_live_fire_armed=false; submit staging disabled.",
-                    submitted_at=submitted_at,
-                )
             with self._lock:
                 record = _TrackedOrder(
                     order=order,
                     broker_order_id=broker_order_id,
+                    rss_order_id=rss_order_id,
                     submitted_at=submitted_at,
                     submit_payload=dict(payload),
                     submit_request_id=self._file_bridge_request_id("SUBMIT", broker_order_id),
                 )
                 self._orders[broker_order_id] = record
+
+            health = self.health_check()
+            if not health.connected:
+                with self._lock:
+                    if record is not None:
+                        record.stage_state = OrderStatus.REJECTED.value
+                        record.last_message = health.message
+                        record.updated_at = self._clock()
+                return RakutenRssSubmitAck(
+                    status=OrderStatus.REJECTED,
+                    message=health.message,
+                    submitted_at=submitted_at,
+                    rss_order_id=rss_order_id,
+                )
             if health.transport_source == TRANSPORT_SOURCE_FILE_READY:
                 request_id = self._file_bridge_request_id("SUBMIT", broker_order_id)
                 try:
@@ -1544,6 +2032,7 @@ class ProductionRakutenRssTransport:
                         status=OrderStatus.REJECTED,
                         message=f"FILE_READY bridge staging failed: {error}",
                         submitted_at=submitted_at,
+                        rss_order_id=rss_order_id,
                     )
                 with self._lock:
                     record.submit_request_id = request_id
@@ -1558,31 +2047,118 @@ class ProductionRakutenRssTransport:
                         status=OrderStatus.PENDING,
                         message=record.last_message,
                         submitted_at=submitted_at,
+                        rss_order_id=record.rss_order_id,
+                        rss_order_number=record.rss_order_number,
+                        authoritative_rss_status=record.last_authoritative_rss_status,
                     )
             if health.transport_source != TRANSPORT_SOURCE_COM_LIVE:
+                with self._lock:
+                    if record is not None:
+                        record.stage_state = OrderStatus.REJECTED.value
+                        record.last_message = health.message
+                        record.updated_at = self._clock()
                 return RakutenRssSubmitAck(
                     status=OrderStatus.REJECTED,
                     message=health.message,
+                    submitted_at=submitted_at,
+                    rss_order_id=rss_order_id,
                 )
             session = self._ensure_session()
             self._com_call_count += 1
-            self._backend.stage_submit_payload(session, payload)
             if not self._armed:
+                with self._lock:
+                    if record is not None:
+                        record.stage_state = OrderStatus.REJECTED.value
+                        record.last_message = "production_live_fire_armed=false; submit staging disabled."
+                        record.updated_at = self._clock()
                 return RakutenRssSubmitAck(
                     status=OrderStatus.REJECTED,
                     message="armed=false; RssStockOrder_V not called.",
+                    submitted_at=submitted_at,
+                    rss_order_id=rss_order_id,
                 )
+            self._backend.stage_submit_payload(session, payload)
+            submit_args = self._build_rss_stock_order_arguments(order, rss_order_id)
             self._com_call_count += 1
             self._submit_macro_call_count += 1
-            self._backend.invoke_submit_macro(session, ORDER_MACRO_NAME)
+            self._backend.invoke_submit_macro(session, ORDER_MACRO_NAME, *submit_args)
+            ledger_entry = self._find_rss_order_ledger_entry(
+                session,
+                rss_order_id,
+                function_name=ORDER_MACRO_NAME,
+            )
+            try:
+                rss_order_status = self._observe_rss_order_status(session, rss_order_id)
+            except ExcelComError as error:
+                rss_order_status = -1
+                status_error = str(error)
+            else:
+                status_error = ""
             with self._lock:
-                record.stage_state = OrderStatus.ACCEPTED.value
-                record.last_message = "RssStockOrder_V invoked."
-                record.updated_at = self._clock()
+                    if record is not None:
+                        record.rss_order_status_code = rss_order_status
+                        if ledger_entry is not None:
+                            record.rss_order_number = ledger_entry.order_number
+                            if ledger_entry.result:
+                                record.last_message = ledger_entry.result
+                        record.last_authoritative_rss_status = rss_order_status
+                        if not record.last_message:
+                            record.last_message = status_error or "RssStockOrder_V invoked."
+                        if ledger_entry is None or not ledger_entry.order_number or not ledger_entry.result or rss_order_status == -1:
+                            record.stage_state = OrderStatus.PENDING.value
+                            record.broker_observation_state = OrderStatus.PENDING.value
+                            record.updated_at = self._clock()
+                            return RakutenRssSubmitAck(
+                                status=OrderStatus.PENDING,
+                                message=record.last_message or "RssOrderIDList not yet observed.",
+                                submitted_at=submitted_at,
+                                rss_order_id=record.rss_order_id,
+                                rss_order_number=record.rss_order_number,
+                                authoritative_rss_status=record.last_authoritative_rss_status,
+                            )
+                        if rss_order_status == 1:
+                            record.stage_state = OrderStatus.REJECTED.value
+                            record.broker_observation_state = OrderStatus.REJECTED.value
+                            record.updated_at = self._clock()
+                            return RakutenRssSubmitAck(
+                                status=OrderStatus.REJECTED,
+                                message=record.last_message or "RssOrderStatus=1",
+                                submitted_at=submitted_at,
+                                rss_order_id=record.rss_order_id,
+                                rss_order_number=record.rss_order_number,
+                                authoritative_rss_status=record.last_authoritative_rss_status,
+                            )
+                        if rss_order_status == 3:
+                            record.stage_state = OrderStatus.PENDING.value
+                            record.broker_observation_state = OrderStatus.PENDING.value
+                            record.last_message = record.last_message or "RssOrderStatus=3"
+                            record.updated_at = self._clock()
+                            return RakutenRssSubmitAck(
+                                status=OrderStatus.PENDING,
+                                message=record.last_message or "RssOrderStatus=3",
+                                submitted_at=submitted_at,
+                                rss_order_id=record.rss_order_id,
+                                rss_order_number=record.rss_order_number,
+                                authoritative_rss_status=record.last_authoritative_rss_status,
+                            )
+                        record.stage_state = OrderStatus.ACCEPTED.value
+                        record.broker_observation_state = OrderStatus.ACCEPTED.value
+                        record.updated_at = self._clock()
+                        return RakutenRssSubmitAck(
+                            status=OrderStatus.ACCEPTED,
+                            message=record.last_message or "RssOrderStatus=2",
+                            submitted_at=submitted_at,
+                            rss_order_id=record.rss_order_id,
+                            rss_order_number=record.rss_order_number,
+                            authoritative_rss_status=record.last_authoritative_rss_status,
+                        )
             return RakutenRssSubmitAck(
-                status=OrderStatus.ACCEPTED,
-                message="RssStockOrder_V invoked.",
+                status=OrderStatus.PENDING,
+                message=status_error or "RssOrderIDList not yet observed.",
                 submitted_at=submitted_at,
+                rss_order_id=rss_order_id,
+                rss_order_number=record.rss_order_number if record is not None else "",
+                authoritative_rss_status=-1,
             )
         except ExcelComError as error:
             if record is not None:
@@ -1594,6 +2170,9 @@ class ProductionRakutenRssTransport:
                 status=OrderStatus.REJECTED,
                 message=str(error),
                 submitted_at=submitted_at,
+                rss_order_id=rss_order_id,
+                rss_order_number=record.rss_order_number if record is not None else "",
+                authoritative_rss_status=record.last_authoritative_rss_status if record is not None else -1,
             )
         except Exception as error:  # pragma: no cover - defensive fail-close
             if record is not None:
@@ -1605,6 +2184,9 @@ class ProductionRakutenRssTransport:
                 status=OrderStatus.REJECTED,
                 message=f"Excel/RSS submit failed: {error}",
                 submitted_at=submitted_at,
+                rss_order_id=rss_order_id,
+                rss_order_number=record.rss_order_number if record is not None else "",
+                authoritative_rss_status=record.last_authoritative_rss_status if record is not None else -1,
             )
 
     def poll_order(self, broker_order_id: str) -> tuple[RakutenRssOrderUpdate, ...]:
@@ -1640,6 +2222,10 @@ class ProductionRakutenRssTransport:
                         record.updated_at = self._clock()
                         record.last_message = update.message
                         record.stage_state = update.status.value
+                        record.broker_observation_state = update.status.value
+                        record.last_authoritative_rss_status = update.authoritative_rss_status
+                        if update.rss_order_number:
+                            record.rss_order_number = update.rss_order_number
                         if update.status in {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED}:
                             record.filled_quantity = update.fill_quantity
                             record.filled_price = update.fill_price
@@ -1648,6 +2234,62 @@ class ProductionRakutenRssTransport:
                 session = self._ensure_session()
                 self._com_call_count += 1
                 updates = self._backend.read_order_updates(session, broker_order_id)
+                if not updates:
+                    ledger_entry = self._find_rss_order_ledger_entry(
+                        session,
+                        record.rss_order_id,
+                        function_name=ORDER_MACRO_NAME,
+                    )
+                    try:
+                        rss_order_status = self._observe_rss_order_status(session, record.rss_order_id)
+                    except ExcelComError:
+                        rss_order_status = -1
+                    if ledger_entry is not None and ledger_entry.order_number:
+                        with self._lock:
+                            record.rss_order_number = ledger_entry.order_number
+                            record.last_message = ledger_entry.result or record.last_message
+                            record.rss_order_status_code = rss_order_status
+                            record.last_authoritative_rss_status = rss_order_status
+                    normalized_order_result = self._rss_optional_text(
+                        ledger_entry.result if ledger_entry is not None else "",
+                    ).replace("(", "（").replace(")", "）")
+                    cancel_completed_results = {
+                        "取消済（出来有）",
+                        "取消済（出来無）",
+                        "取消済",
+                    }
+                    if rss_order_status in {1, 2, 3}:
+                        if record.cancel_request_id:
+                            if rss_order_status == 3:
+                                synthetic_status = OrderStatus.PENDING
+                            elif rss_order_status == 1 and normalized_order_result in cancel_completed_results:
+                                synthetic_status = OrderStatus.CANCELED
+                            else:
+                                synthetic_status = OrderStatus.PENDING
+                        else:
+                            if rss_order_status == 1:
+                                synthetic_status = OrderStatus.REJECTED
+                            elif rss_order_status == 3:
+                                synthetic_status = OrderStatus.PENDING
+                            else:
+                                synthetic_status = OrderStatus.ACCEPTED
+                        synthetic_update = RakutenRssOrderUpdate(
+                            status=synthetic_status,
+                            fill_quantity=record.filled_quantity if synthetic_status is OrderStatus.FILLED else 0,
+                            fill_price=record.filled_price if synthetic_status is OrderStatus.FILLED else 0.0,
+                            message=record.last_message or f"RssOrderStatus={rss_order_status}",
+                            updated_at=self._clock(),
+                            rss_order_status=str(rss_order_status),
+                            rss_order_id=record.rss_order_id,
+                            rss_order_number=record.rss_order_number,
+                            authoritative_rss_status=rss_order_status,
+                        )
+                        with self._lock:
+                            record.updated_at = synthetic_update.updated_at
+                            record.last_message = synthetic_update.message
+                            record.stage_state = synthetic_status.value
+                            record.broker_observation_state = synthetic_status.value
+                        return (synthetic_update,)
             else:
                 return ()
         except ExcelComError as error:
@@ -1661,10 +2303,18 @@ class ProductionRakutenRssTransport:
             with self._lock:
                 record.updated_at = self._clock()
                 final_update = updates[-1]
+                record.broker_observation_state = final_update.status.value
+                record.last_authoritative_rss_status = getattr(final_update, "authoritative_rss_status", -1)
+                if getattr(final_update, "rss_order_number", ""):
+                    record.rss_order_number = str(final_update.rss_order_number)
                 if final_update.status in {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED}:
                     record.filled_quantity = final_update.fill_quantity
                     record.filled_price = final_update.fill_price
-                if final_update.status in {OrderStatus.FILLED, OrderStatus.REJECTED, OrderStatus.CANCELED, OrderStatus.TIMED_OUT}:
+                if final_update.status is OrderStatus.TIMED_OUT:
+                    record.broker_observation_state = "RECONCILE_PENDING"
+                    record.last_message = final_update.message
+                    record.updated_at = self._clock()
+                elif final_update.status in {OrderStatus.FILLED, OrderStatus.REJECTED, OrderStatus.CANCELED}:
                     record.stage_state = final_update.status.value
                 else:
                     record.stage_state = final_update.status.value
@@ -1674,13 +2324,17 @@ class ProductionRakutenRssTransport:
         with self._lock:
             age = self._clock() - record.submitted_at
             if self._timeout_seconds == 0 or age >= timedelta(seconds=self._timeout_seconds):
+                current_status = self._tracked_order_status(record)
                 timeout_update = RakutenRssOrderUpdate(
-                    status=OrderStatus.TIMED_OUT,
-                    message="Order timed out waiting for Excel/RSS result.",
+                    status=current_status,
+                    message="Order timed out waiting for Excel/RSS result; reconciliation continues.",
                     updated_at=self._clock(),
                     rss_order_status="TIMED_OUT",
+                    rss_order_id=record.rss_order_id,
+                    rss_order_number=record.rss_order_number,
+                    authoritative_rss_status=record.last_authoritative_rss_status,
                 )
-                record.stage_state = OrderStatus.TIMED_OUT.value
+                record.broker_observation_state = "RECONCILE_PENDING"
                 record.last_message = timeout_update.message
                 record.updated_at = timeout_update.updated_at
                 return (timeout_update,)
@@ -1700,7 +2354,12 @@ class ProductionRakutenRssTransport:
             return RakutenRssCancelAck(
                 status=OrderStatus.REJECTED,
                 message=f"Unknown broker_order_id: {broker_order_id}",
+                rss_order_id=0,
+                rss_order_number="",
+                authoritative_rss_status=-1,
             )
+        if record.cancel_request_id:
+            return self._tracked_cancel_ack(record)
 
         submitted_at = self._clock()
         payload = self._build_cancel_payload(record, submitted_at)
@@ -1715,6 +2374,9 @@ class ProductionRakutenRssTransport:
                 return RakutenRssCancelAck(
                     status=OrderStatus.REJECTED,
                     message=health.message,
+                    rss_order_id=record.rss_order_id,
+                    rss_order_number=record.rss_order_number,
+                    authoritative_rss_status=record.last_authoritative_rss_status,
                 )
             if health.transport_source == TRANSPORT_SOURCE_FILE_READY:
                 request_id = self._file_bridge_request_id("CANCEL", broker_order_id)
@@ -1734,10 +2396,14 @@ class ProductionRakutenRssTransport:
                         status=OrderStatus.REJECTED,
                         message=f"FILE_READY cancel staging failed: {error}",
                         canceled_at=submitted_at,
+                        rss_order_id=record.rss_order_id,
+                        rss_order_number=record.rss_order_number,
+                        authoritative_rss_status=record.last_authoritative_rss_status,
                     )
                 with self._lock:
                     record.cancel_request_id = request_id
                     record.stage_state = OrderStatus.PENDING.value
+                    record.cancel_observation_state = OrderStatus.PENDING.value
                     record.last_message = (
                         "FILE_READY cancel request staged."
                         if not bridge_result.duplicate
@@ -1748,27 +2414,107 @@ class ProductionRakutenRssTransport:
                         status=OrderStatus.PENDING,
                         message=record.last_message,
                         canceled_at=submitted_at,
+                        rss_order_id=record.rss_order_id,
+                        rss_order_number=record.rss_order_number,
+                        authoritative_rss_status=record.last_authoritative_rss_status,
                     )
             if health.transport_source != TRANSPORT_SOURCE_COM_LIVE:
                 return RakutenRssCancelAck(
                     status=OrderStatus.REJECTED,
                     message=health.message,
+                    rss_order_id=record.rss_order_id,
+                    rss_order_number=record.rss_order_number,
+                    authoritative_rss_status=record.last_authoritative_rss_status,
                 )
             session = self._ensure_session()
             self._com_call_count += 1
+            if not self._armed:
+                with self._lock:
+                    record.stage_state = OrderStatus.REJECTED.value
+                    record.last_message = "production_live_fire_armed=false; cancel staging disabled."
+                    record.updated_at = self._clock()
+                return RakutenRssCancelAck(
+                    status=OrderStatus.REJECTED,
+                    message="production_live_fire_armed=false; cancel staging disabled.",
+                    canceled_at=submitted_at,
+                    rss_order_id=record.rss_order_id,
+                    rss_order_number=record.rss_order_number,
+                    authoritative_rss_status=record.last_authoritative_rss_status,
+                )
+            ledger_entry = self._find_rss_order_ledger_entry(
+                session,
+                record.rss_order_id,
+                function_name=ORDER_MACRO_NAME,
+            )
+            order_number = record.rss_order_number or (ledger_entry.order_number if ledger_entry is not None else "")
+            if not str(order_number).strip():
+                with self._lock:
+                    record.cancel_observation_state = "WAITING_FOR_ORDER_NUMBER"
+                    record.last_message = "RSS order number is missing for cancel."
+                    record.updated_at = self._clock()
+                return self._tracked_cancel_ack(record, message="RSS order number is missing for cancel.")
             self._backend.stage_cancel_payload(session, payload)
-            if self._armed:
-                self._com_call_count += 1
-                self._cancel_macro_call_count += 1
-                self._backend.invoke_cancel_macro(session, CANCEL_MACRO_NAME)
+            cancel_args = self._build_rss_cancel_order_arguments(record.rss_order_id, order_number)
+            self._com_call_count += 1
+            self._cancel_macro_call_count += 1
+            self._backend.invoke_cancel_macro(session, CANCEL_MACRO_NAME, *cancel_args)
+            try:
+                rss_order_status = self._observe_rss_order_status(session, record.rss_order_id)
+            except ExcelComError:
+                rss_order_status = -1
             with self._lock:
-                record.stage_state = OrderStatus.CANCELED.value
-                record.last_message = "Cancel staged."
+                record.rss_order_number = order_number
+                record.rss_order_status_code = rss_order_status
+                record.last_authoritative_rss_status = rss_order_status
+                if rss_order_status == 3:
+                    record.stage_state = OrderStatus.PENDING.value
+                    record.cancel_observation_state = OrderStatus.PENDING.value
+                    record.last_message = "RssOrderStatus=3"
+                    record.updated_at = self._clock()
+                    return RakutenRssCancelAck(
+                        status=OrderStatus.PENDING,
+                        message="RssOrderStatus=3",
+                        canceled_at=submitted_at,
+                        rss_order_id=record.rss_order_id,
+                        rss_order_number=record.rss_order_number,
+                        authoritative_rss_status=record.last_authoritative_rss_status,
+                    )
+                normalized_order_result = self._rss_optional_text(
+                    ledger_entry.result if ledger_entry is not None else "",
+                ).replace("(", "（").replace(")", "）")
+                cancel_completed_results = {
+                    "取消済（出来有）",
+                    "取消済（出来無）",
+                    "取消済",
+                }
+                if rss_order_status == 1 and normalized_order_result in cancel_completed_results:
+                    record.stage_state = OrderStatus.CANCELED.value
+                    record.cancel_observation_state = OrderStatus.CANCELED.value
+                    record.last_message = normalized_order_result
+                    record.updated_at = self._clock()
+                    return RakutenRssCancelAck(
+                        status=OrderStatus.CANCELED,
+                        message=normalized_order_result,
+                        canceled_at=submitted_at,
+                        rss_order_id=record.rss_order_id,
+                        rss_order_number=record.rss_order_number,
+                        authoritative_rss_status=record.last_authoritative_rss_status,
+                    )
+                record.stage_state = OrderStatus.PENDING.value
+                record.cancel_observation_state = OrderStatus.PENDING.value
+                record.last_message = (
+                    normalized_order_result
+                    if normalized_order_result in {"出来ず（出来有）", "出来ず（出来無）"}
+                    else "Cancel request observed but order status is still terminal-free."
+                )
                 record.updated_at = self._clock()
             return RakutenRssCancelAck(
-                status=OrderStatus.CANCELED,
-                message="Cancel staged." if not self._armed else "RssCancelOrder_V invoked.",
+                status=OrderStatus.PENDING,
+                message=record.last_message,
                 canceled_at=submitted_at,
+                rss_order_id=record.rss_order_id,
+                rss_order_number=record.rss_order_number,
+                authoritative_rss_status=record.last_authoritative_rss_status,
             )
         except ExcelComError as error:
             with self._lock:
@@ -1779,4 +2525,7 @@ class ProductionRakutenRssTransport:
                 status=OrderStatus.REJECTED,
                 message=str(error),
                 canceled_at=submitted_at,
+                rss_order_id=record.rss_order_id,
+                rss_order_number=record.rss_order_number,
+                authoritative_rss_status=record.last_authoritative_rss_status,
             )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
+import json
 import csv
 from pathlib import Path
 from datetime import datetime
@@ -12,10 +13,12 @@ from zoneinfo import ZoneInfo
 
 from phoenix_core import (
     MockExcelComBackend,
+    MockRakutenRssAdapter,
     OrderRequest,
     OrderSide,
     OrderStatus,
     OrderType,
+    RakutenRssBroker,
     ProductionRakutenRssAdapter,
     ProductionRakutenRssTransport,
     RakutenRssAdapterHealth,
@@ -24,6 +27,7 @@ from phoenix_core import (
     RakutenRssSubmitAck,
     RakutenRssTransportHealth,
 )
+import phoenix_core.order_bridge_gate as order_bridge_gate
 from phoenix_core.production_rakuten_rss_transport import (
     DEFAULT_WORKBOOK_PATH,
     ExcelComError,
@@ -32,6 +36,7 @@ from phoenix_core.production_rakuten_rss_transport import (
     WORKBOOK_STATE_HEARTBEAT_CELL,
     WORKBOOK_STATE_ORDER_TRANSPORT_READY_CELL,
     WORKBOOK_STATE_RSS_CONNECTED_CELL,
+    TRANSPORT_SOURCE_COM_LIVE,
     TRANSPORT_SOURCE_FILE_READY,
     TRANSPORT_SOURCE_FILE_FALLBACK,
     Win32ComExcelBackend,
@@ -91,6 +96,31 @@ def _protective_sell_order(client_order_id: str) -> OrderRequest:
             "execution_condition": "期間指定",
             "trigger_condition": "以下",
             "post_trigger_order_type": "売り成行",
+        },
+    )
+
+
+def _live_buy_order(
+    client_order_id: str,
+    *,
+    quantity: int = 100,
+    limit_price: float = 123.45,
+    account_category: str = "特定",
+    sor_category: str = "通常",
+    execution_condition: str = "本日中",
+) -> OrderRequest:
+    return OrderRequest(
+        ticker="1301.T",
+        side=OrderSide.BUY,
+        quantity=quantity,
+        order_type=OrderType.LIMIT,
+        limit_price=limit_price,
+        client_order_id=client_order_id,
+        strategy_name="PHOENIX_AUTO_LIVE",
+        metadata={
+            "account_category": account_category,
+            "sor_category": sor_category,
+            "execution_condition": execution_condition,
         },
     )
 
@@ -2106,13 +2136,227 @@ class ProductionRakutenRssTransportStep49Test(unittest.TestCase):
         result = transport.submit_order(_buy_order("ARMED-OFF"), "RSS-ARMED-OFF")
 
         self.assertEqual(OrderStatus.REJECTED, result.status)
-        self.assertIn("submit staging disabled", result.message)
+        self.assertIn("RssStockOrder_V not called", result.message)
         self.assertEqual(1, backend.connect_calls)
         self.assertEqual(1, backend.health_calls)
         self.assertEqual(0, backend.submit_stage_calls)
         self.assertEqual(0, backend.submit_macro_calls)
         self.assertEqual(0, transport.order_function_call_count)
         self.assertEqual(0, len(backend.submitted_payloads))
+
+    def test_live_submit_requires_order_number_and_status_observation(self) -> None:
+        pending_backend = MockExcelComBackend()
+        pending_transport = ProductionRakutenRssTransport(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            armed=True,
+            backend=pending_backend,
+        )
+        pending_order = _live_buy_order("LIVE-PENDING-001")
+        pending_health = RakutenRssTransportHealth(
+            connected=True,
+            message="Workbook transport READY.",
+            transport_source=TRANSPORT_SOURCE_COM_LIVE,
+        )
+
+        with mock.patch.object(pending_transport, "health_check", return_value=pending_health):
+            pending_ack = pending_transport.submit_order(pending_order, "RSS-LIVE-PENDING-001")
+
+        self.assertEqual(OrderStatus.PENDING, pending_ack.status)
+        self.assertEqual(
+            pending_transport._stable_rss_order_id(pending_order, "RSS-LIVE-PENDING-001"),
+            pending_ack.rss_order_id,
+        )
+        self.assertEqual("", pending_ack.rss_order_number)
+        self.assertEqual(-1, pending_ack.authoritative_rss_status)
+        self.assertEqual(1, pending_backend.submit_macro_calls)
+        self.assertEqual(1, pending_backend.rss_order_ledger_calls)
+        self.assertEqual(1, pending_backend.rss_order_status_calls)
+        self.assertEqual(19, len(pending_backend.submit_macro_args[0]))
+        self.assertEqual(
+            pending_transport._stable_rss_order_id(pending_order, "RSS-LIVE-PENDING-001"),
+            pending_backend.submit_macro_args[0][0],
+        )
+
+        accepted_backend = MockExcelComBackend()
+        accepted_transport = ProductionRakutenRssTransport(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            armed=True,
+            backend=accepted_backend,
+        )
+        accepted_order = _live_buy_order("LIVE-ACCEPTED-001")
+        accepted_rss_order_id = accepted_transport._stable_rss_order_id(accepted_order, "RSS-LIVE-ACCEPTED-001")
+        accepted_backend.queue_rss_order_ledger_entry(
+            accepted_rss_order_id,
+            function_name="RssStockOrder_V",
+            order_number="RSS-LIVE-ACCEPTED-001",
+            result="ACCEPTED",
+        )
+        accepted_backend.set_rss_order_status(accepted_rss_order_id, 2)
+
+        with mock.patch.object(accepted_transport, "health_check", return_value=pending_health):
+            accepted_ack = accepted_transport.submit_order(accepted_order, "RSS-LIVE-ACCEPTED-001")
+
+        self.assertEqual(OrderStatus.ACCEPTED, accepted_ack.status)
+        self.assertEqual("ACCEPTED", accepted_ack.message)
+        self.assertEqual(accepted_rss_order_id, accepted_ack.rss_order_id)
+        self.assertEqual("RSS-LIVE-ACCEPTED-001", accepted_ack.rss_order_number)
+        self.assertEqual(2, accepted_ack.authoritative_rss_status)
+        self.assertEqual(1, accepted_backend.submit_macro_calls)
+        self.assertEqual(1, accepted_backend.rss_order_ledger_calls)
+        self.assertEqual(1, accepted_backend.rss_order_status_calls)
+        self.assertEqual(
+            (
+                accepted_rss_order_id,
+                "1301.T",
+                3,
+                0,
+                0,
+                100,
+                1,
+                123.45,
+                1,
+                "",
+                0,
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ),
+            accepted_backend.submit_macro_args[0],
+        )
+
+    def test_timeout_blocks_duplicate_submit(self) -> None:
+        backend = MockExcelComBackend()
+        transport = ProductionRakutenRssTransport(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            armed=True,
+            timeout_seconds=0,
+            backend=backend,
+        )
+        order = _live_buy_order("TIMEOUT-001")
+        health = RakutenRssTransportHealth(
+            connected=True,
+            message="Workbook transport READY.",
+            transport_source=TRANSPORT_SOURCE_COM_LIVE,
+        )
+
+        with mock.patch.object(transport, "health_check", return_value=health):
+            first_ack = transport.submit_order(order, "RSS-TIMEOUT-001")
+            updates = transport.poll_order("RSS-TIMEOUT-001")
+            second_ack = transport.submit_order(order, "RSS-TIMEOUT-001")
+
+        self.assertEqual(OrderStatus.PENDING, first_ack.status)
+        self.assertEqual(1, len(updates))
+        self.assertEqual(OrderStatus.PENDING, updates[0].status)
+        self.assertIn("reconciliation continues", updates[0].message.lower())
+        self.assertEqual(OrderStatus.PENDING, second_ack.status)
+        self.assertEqual(1, backend.submit_macro_calls)
+        self.assertEqual(2, backend.rss_order_status_calls)
+
+    def test_broker_restart_reuses_persisted_rss_identity(self) -> None:
+        adapter = MockRakutenRssAdapter()
+        adapter.script_order(
+            "BROKER-RESTART-001",
+            submit_status=OrderStatus.PENDING,
+            submit_message="MOCK_PENDING",
+            cancel_status=OrderStatus.CANCELED,
+            cancel_message="MOCK_CANCELED",
+            rss_order_id=24680,
+            rss_order_number="",
+            submit_authoritative_rss_status=-1,
+            cancel_authoritative_rss_status=1,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = Path(tmpdir) / "rakuten_rss_broker_state.json"
+            order = _live_buy_order("BROKER-RESTART-001")
+
+            broker_a = RakutenRssBroker(
+                initial_cash_yen=300_000.0,
+                state_file=state_file,
+                adapter=adapter,
+                live_enabled=True,
+                timeout_seconds=0,
+            )
+            first_result = broker_a.submit_order(order)
+            first_record = dict(broker_a._orders[order.client_order_id])
+            broker_order_id = first_record["broker_order_id"]
+
+            del broker_a
+
+            broker_b = RakutenRssBroker(
+                initial_cash_yen=300_000.0,
+                state_file=state_file,
+                adapter=adapter,
+                live_enabled=True,
+                timeout_seconds=0,
+            )
+            second_result = broker_b.submit_order(order)
+            timeout_results = broker_b.refresh_pending_orders()
+            timeout_record = dict(broker_b._orders[order.client_order_id])
+
+            adapter.queue_update(
+                "BROKER-RESTART-001",
+                status=OrderStatus.ACCEPTED,
+                message="MOCK_ACCEPTED",
+                rss_order_status="2",
+                rss_order_id=24680,
+                rss_order_number="RSS-ORDER-777",
+                authoritative_rss_status=2,
+            )
+            reconciliation_results = broker_b.refresh_pending_orders()
+            accepted_record = dict(broker_b._orders[order.client_order_id])
+            cancel_result = broker_b.cancel_order(order.client_order_id)
+
+            second_record = broker_b._orders[order.client_order_id]
+
+        self.assertEqual(OrderStatus.PENDING, first_result.status)
+        self.assertEqual("PENDING", first_record["broker_observation_state"])
+        self.assertEqual(OrderStatus.PENDING, second_result.status)
+        self.assertEqual(1, adapter.submitted_count)
+        self.assertEqual(broker_order_id, second_record["broker_order_id"])
+        self.assertEqual(24680, second_record["rss_order_id"])
+        self.assertEqual("RSS-ORDER-777", second_record["rss_order_number"])
+        self.assertEqual(OrderStatus.PENDING, timeout_results[0].status)
+        self.assertIn("reconciliation continues", timeout_results[0].message.lower())
+        self.assertEqual("RECONCILE_PENDING", timeout_record["broker_observation_state"])
+        self.assertEqual(OrderStatus.ACCEPTED, reconciliation_results[-1].status)
+        self.assertEqual("RSS-ORDER-777", accepted_record["rss_order_number"])
+        self.assertEqual("ACCEPTED", accepted_record["broker_observation_state"])
+        self.assertEqual(OrderStatus.CANCELED, cancel_result.status)
+        self.assertEqual("CANCELED", second_record["cancel_observation_state"])
+        self.assertEqual("RSS-ORDER-777", second_record["rss_order_number"])
+
+    def test_cancel_requires_saved_order_number(self) -> None:
+        backend = MockExcelComBackend()
+        transport = ProductionRakutenRssTransport(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            armed=True,
+            backend=backend,
+        )
+        order = _live_buy_order("CANCEL-NO-ORDER")
+        health = RakutenRssTransportHealth(
+            connected=True,
+            message="Workbook transport READY.",
+            transport_source=TRANSPORT_SOURCE_COM_LIVE,
+        )
+
+        with mock.patch.object(transport, "health_check", return_value=health):
+            transport.submit_order(order, "RSS-CANCEL-NO-ORDER")
+            ack = transport.cancel_order("RSS-CANCEL-NO-ORDER")
+
+        self.assertEqual(OrderStatus.PENDING, ack.status)
+        self.assertIn("RSS order number is missing for cancel", ack.message)
+        self.assertEqual(1, backend.submit_macro_calls)
+        self.assertEqual(0, backend.cancel_macro_calls)
 
     def test_mock_com_payload_mapping(self) -> None:
         backend = MockExcelComBackend()
@@ -2186,6 +2430,7 @@ class ProductionRakutenRssTransportStep49Test(unittest.TestCase):
 
     def test_poll_mapping(self) -> None:
         backend = MockExcelComBackend()
+        order = _live_buy_order("POLL-001")
         backend.queue_updates(
             "RSS-POLL-001",
             [
@@ -2209,7 +2454,14 @@ class ProductionRakutenRssTransportStep49Test(unittest.TestCase):
             armed=True,
             backend=backend,
         )
-        transport.submit_order(_buy_order("POLL-001"), "RSS-POLL-001")
+        health = RakutenRssTransportHealth(
+            connected=True,
+            message="Workbook transport READY.",
+            transport_source=TRANSPORT_SOURCE_COM_LIVE,
+        )
+
+        with mock.patch.object(transport, "health_check", return_value=health):
+            transport.submit_order(order, "RSS-POLL-001")
 
         updates = transport.poll_order("RSS-POLL-001")
 
@@ -2229,11 +2481,28 @@ class ProductionRakutenRssTransportStep49Test(unittest.TestCase):
             armed=True,
             backend=backend,
         )
-        transport.submit_order(_buy_order("CANCEL-001"), "RSS-CANCEL-001")
+        order = _live_buy_order("CANCEL-001")
+        rss_order_id = transport._stable_rss_order_id(order, "RSS-CANCEL-001")
+        backend.queue_rss_order_ledger_entry(
+            rss_order_id,
+            function_name="RssStockOrder_V",
+            order_number="RSS-CANCEL-001",
+            result="取消済（出来無）",
+        )
+        backend.set_rss_order_status(rss_order_id, 3)
+        health = RakutenRssTransportHealth(
+            connected=True,
+            message="Workbook transport READY.",
+            transport_source=TRANSPORT_SOURCE_COM_LIVE,
+        )
 
-        ack = transport.cancel_order("RSS-CANCEL-001")
+        with mock.patch.object(transport, "health_check", return_value=health):
+            submit_ack = transport.submit_order(order, "RSS-CANCEL-001")
+            backend.set_rss_order_status(rss_order_id, 1)
+            ack = transport.cancel_order("RSS-CANCEL-001")
         payload = backend.cancel_payloads[0]
 
+        self.assertEqual(OrderStatus.ACCEPTED, submit_ack.status)
         self.assertEqual(OrderStatus.CANCELED, ack.status)
         self.assertEqual(1, backend.cancel_stage_calls)
         self.assertEqual(1, backend.cancel_macro_calls)
@@ -2241,6 +2510,221 @@ class ProductionRakutenRssTransportStep49Test(unittest.TestCase):
         self.assertEqual("RSS-CANCEL-001", payload["broker_order_id"])
         self.assertEqual("CANCEL-001", payload["client_order_id"])
         self.assertEqual("RssCancelOrder_V", payload["macro_name"])
+
+        failed_backend = MockExcelComBackend()
+        failed_transport = ProductionRakutenRssTransport(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            armed=True,
+            backend=failed_backend,
+        )
+        failed_order = _live_buy_order("CANCEL-FAIL-001")
+        failed_rss_order_id = failed_transport._stable_rss_order_id(failed_order, "RSS-CANCEL-FAIL-001")
+        failed_backend.queue_rss_order_ledger_entry(
+            failed_rss_order_id,
+            function_name="RssStockOrder_V",
+            order_number="RSS-CANCEL-FAIL-001",
+            result="出来ず（出来無）",
+        )
+        failed_backend.set_rss_order_status(failed_rss_order_id, 2)
+
+        with mock.patch.object(failed_transport, "health_check", return_value=health):
+            failed_submit_ack = failed_transport.submit_order(failed_order, "RSS-CANCEL-FAIL-001")
+            failed_backend.set_rss_order_status(failed_rss_order_id, 1)
+            failed_ack = failed_transport.cancel_order("RSS-CANCEL-FAIL-001")
+
+        self.assertEqual(OrderStatus.ACCEPTED, failed_submit_ack.status)
+        self.assertEqual(OrderStatus.PENDING, failed_ack.status)
+        self.assertEqual(1, failed_backend.cancel_macro_calls)
+        self.assertEqual("出来ず（出来無）", failed_ack.message)
+
+    def test_cancel_reports_pending_when_order_status_is_three_without_fill_economics(self) -> None:
+        backend = MockExcelComBackend()
+        transport = ProductionRakutenRssTransport(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            armed=True,
+            backend=backend,
+        )
+        order = _live_buy_order("CANCEL-FILLED-001")
+        rss_order_id = transport._stable_rss_order_id(order, "RSS-CANCEL-FILLED-001")
+        backend.queue_rss_order_ledger_entry(
+            rss_order_id,
+            function_name="RssStockOrder_V",
+            order_number="RSS-CANCEL-FILLED-001",
+            result="ACCEPTED",
+        )
+        backend.set_rss_order_status(rss_order_id, 2)
+        health = RakutenRssTransportHealth(
+            connected=True,
+            message="Workbook transport READY.",
+            transport_source=TRANSPORT_SOURCE_COM_LIVE,
+        )
+
+        with mock.patch.object(transport, "health_check", return_value=health):
+            submit_ack = transport.submit_order(order, "RSS-CANCEL-FILLED-001")
+            backend.set_rss_order_status(rss_order_id, 3)
+            ack = transport.cancel_order("RSS-CANCEL-FILLED-001")
+
+        self.assertEqual(OrderStatus.ACCEPTED, submit_ack.status)
+        self.assertEqual(OrderStatus.PENDING, ack.status)
+        self.assertEqual(3, ack.authoritative_rss_status)
+        self.assertEqual(1, backend.cancel_macro_calls)
+        self.assertEqual(2, backend.rss_order_status_calls)
+
+    def test_persist_live_reconcile_only_mode_updates_only_activation_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config = json.loads(
+                (Path(__file__).resolve().parents[1] / "config" / "v7_direct_pipeline_config.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            config["sentinel"] = {"keep": "me"}
+            config["operating_mode"] = "LIVE_ACTIVE"
+            config["trading_mode"] = "LIVE"
+            config["execution_mode"] = "LIVE"
+            config["trading_actions"] = "LIVE_ONLY"
+            config["allowed_trading_actions"] = ["LIVE_ONLY"]
+            config["broker"].update(
+                {
+                    "type": "rakuten_rss",
+                    "transport_mode": "production",
+                    "live_trading_enabled": True,
+                    "live_enabled": True,
+                    "production_transport_enabled": True,
+                    "production_live_fire_armed": True,
+                }
+            )
+
+            persisted = order_bridge_gate._persist_live_reconcile_only_mode(root, config)
+            written = json.loads(
+                (root / "config" / "v7_direct_pipeline_config.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual("LIVE_RECONCILE_ONLY", persisted["operating_mode"])
+        self.assertEqual("LIVE_RECONCILE_ONLY", written["operating_mode"])
+        self.assertEqual("LIVE", written["trading_mode"])
+        self.assertEqual("LIVE", written["execution_mode"])
+        self.assertEqual("RECONCILE_ONLY", written["trading_actions"])
+        self.assertEqual(["RECONCILE_ONLY"], written["allowed_trading_actions"])
+        self.assertEqual("rakuten_rss", written["broker"]["type"])
+        self.assertEqual("production", written["broker"]["transport_mode"])
+        self.assertTrue(written["broker"]["live_trading_enabled"])
+        self.assertTrue(written["broker"]["live_enabled"])
+        self.assertTrue(written["broker"]["production_transport_enabled"])
+        self.assertFalse(written["broker"]["production_live_fire_armed"])
+        self.assertEqual({"keep": "me"}, written["sentinel"])
+
+    def test_persist_live_reconcile_only_mode_is_idempotent_when_already_reconcile_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config = json.loads(
+                (Path(__file__).resolve().parents[1] / "config" / "v7_direct_pipeline_config.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            config["operating_mode"] = "LIVE_ACTIVE"
+            config["trading_mode"] = "LIVE"
+            config["execution_mode"] = "LIVE"
+            config["trading_actions"] = "LIVE_ONLY"
+            config["allowed_trading_actions"] = ["LIVE_ONLY"]
+            config["broker"].update(
+                {
+                    "type": "rakuten_rss",
+                    "transport_mode": "production",
+                    "live_trading_enabled": True,
+                    "live_enabled": True,
+                    "production_transport_enabled": True,
+                    "production_live_fire_armed": True,
+                }
+            )
+            config["sentinel"] = {"keep": "me"}
+
+            config["operating_mode"] = "LIVE_RECONCILE_ONLY"
+            config["trading_actions"] = "RECONCILE_ONLY"
+            config["allowed_trading_actions"] = ["RECONCILE_ONLY"]
+            config["broker"]["production_live_fire_armed"] = False
+
+            persisted = order_bridge_gate._persist_live_reconcile_only_mode(root, config)
+
+            written = json.loads(
+                (root / "config" / "v7_direct_pipeline_config.json").read_text(encoding="utf-8")
+            )
+
+        self.assertEqual("LIVE_RECONCILE_ONLY", persisted["operating_mode"])
+        self.assertEqual("LIVE_RECONCILE_ONLY", written["operating_mode"])
+        self.assertEqual("LIVE", written["trading_mode"])
+        self.assertEqual("LIVE", written["execution_mode"])
+        self.assertEqual("RECONCILE_ONLY", written["trading_actions"])
+        self.assertEqual(["RECONCILE_ONLY"], written["allowed_trading_actions"])
+        self.assertEqual("rakuten_rss", written["broker"]["type"])
+        self.assertEqual("production", written["broker"]["transport_mode"])
+        self.assertTrue(written["broker"]["live_trading_enabled"])
+        self.assertTrue(written["broker"]["live_enabled"])
+        self.assertTrue(written["broker"]["production_transport_enabled"])
+        self.assertFalse(written["broker"]["production_live_fire_armed"])
+        self.assertEqual({"keep": "me"}, written["sentinel"])
+
+    def test_dispatch_live_active_unhealthy_persists_reconcile_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            generated = order_bridge_gate._now_jst()
+            context = order_bridge_gate.PreorderDispatchContext(
+                report={
+                    "status": "APPROVED",
+                    "blockers": [],
+                    "approved_count": 0,
+                    "source": "dummy.json",
+                },
+                generated_at=generated,
+                expires_at=generated,
+                state_path=root / "state.json",
+                config={},
+                approved_idempotency_keys=frozenset(),
+                report_blockers=(),
+                trade_signals_context={"test": "context"},
+                executable_orders_by_client_order_id={},
+                accepted_orders_by_client_order_id={},
+                approved_payloads_by_client_order_id={},
+            )
+            broker = mock.Mock()
+            broker.health_check.return_value = mock.Mock(
+                healthy=False,
+                message="BROKER_HEALTH_FAILED",
+            )
+            broker.refresh_pending_orders.return_value = None
+
+            with (
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_activation_config",
+                    return_value=("LIVE_ACTIVE", "LIVE", "LIVE", "LIVE_ONLY", None),
+                ),
+                mock.patch.object(order_bridge_gate, "_parse_state", return_value=(set(), None)),
+                mock.patch.object(order_bridge_gate, "_read_json", return_value=({}, None)),
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_trade_signals_context",
+                    return_value=({"test": "context"}, ()),
+                ),
+                mock.patch.object(order_bridge_gate, "create_broker", return_value=broker),
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_resolve_live_dispatch_mode",
+                    return_value="LIVE_RECONCILE_ONLY",
+                ),
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_persist_live_reconcile_only_mode",
+                    side_effect=lambda _root, config: config,
+                ) as persist_mock,
+            ):
+                order_bridge_gate.dispatch_approved_orders(root, context)
+
+        persist_mock.assert_called_once()
+        broker.health_check.assert_called_once()
+        broker.refresh_pending_orders.assert_called_once()
 
     def test_timeout(self) -> None:
         backend = MockExcelComBackend()
@@ -2251,13 +2735,20 @@ class ProductionRakutenRssTransportStep49Test(unittest.TestCase):
             timeout_seconds=0,
             backend=backend,
         )
-        transport.submit_order(_buy_order("TIMEOUT-001"), "RSS-TIMEOUT-001")
+        order = _live_buy_order("TIMEOUT-001")
+        health = RakutenRssTransportHealth(
+            connected=True,
+            message="Workbook transport READY.",
+            transport_source=TRANSPORT_SOURCE_COM_LIVE,
+        )
 
-        updates = transport.poll_order("RSS-TIMEOUT-001")
+        with mock.patch.object(transport, "health_check", return_value=health):
+            transport.submit_order(order, "RSS-TIMEOUT-001")
+            updates = transport.poll_order("RSS-TIMEOUT-001")
 
         self.assertEqual(1, len(updates))
-        self.assertEqual(OrderStatus.TIMED_OUT, updates[0].status)
-        self.assertIn("timed out", updates[0].message.lower())
+        self.assertEqual(OrderStatus.PENDING, updates[0].status)
+        self.assertIn("reconciliation continues", updates[0].message.lower())
 
 
 class DeployV7RssProductionVbaTest(unittest.TestCase):
@@ -3125,6 +3616,139 @@ class DeployV7RssProductionVbaTest(unittest.TestCase):
             self.assertEqual(0, excel.quit_calls)
             pythoncom.CoInitialize.assert_called_once()
             pythoncom.CoUninitialize.assert_called_once()
+
+
+class RakutenRssSyncBlockerTest(unittest.TestCase):
+    def test_status3_submit_without_fill_economics_stays_pending(self) -> None:
+        backend = MockExcelComBackend()
+        transport = ProductionRakutenRssTransport(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            armed=True,
+            backend=backend,
+        )
+        order = _live_buy_order("SYNC-STATUS3-SUBMIT")
+        broker_order_id = "RSS-SYNC-STATUS3-SUBMIT"
+        rss_order_id = transport._stable_rss_order_id(order, broker_order_id)
+        order_number = "RSS-SYNC-STATUS3-SUBMIT-001"
+        backend.queue_rss_order_ledger_entry(
+            rss_order_id,
+            function_name="RssStockOrder_V",
+            order_number=order_number,
+            result="ACCEPTED",
+        )
+        backend.set_rss_order_status(rss_order_id, 3)
+        health = RakutenRssTransportHealth(
+            connected=True,
+            message="Workbook transport READY.",
+            transport_source=TRANSPORT_SOURCE_COM_LIVE,
+        )
+
+        with mock.patch.object(transport, "health_check", return_value=health):
+            submit_ack = transport.submit_order(order, broker_order_id)
+
+        self.assertEqual(OrderStatus.PENDING, submit_ack.status)
+        self.assertEqual(3, submit_ack.authoritative_rss_status)
+        self.assertGreater(submit_ack.rss_order_id, 0)
+        self.assertEqual(order_number, submit_ack.rss_order_number)
+
+    def test_status3_poll_without_fill_economics_does_not_emit_filled(self) -> None:
+        backend = MockExcelComBackend()
+        transport = ProductionRakutenRssTransport(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            armed=True,
+            backend=backend,
+        )
+        order = _live_buy_order("SYNC-STATUS3-POLL")
+        broker_order_id = "RSS-SYNC-STATUS3-POLL"
+        rss_order_id = transport._stable_rss_order_id(order, broker_order_id)
+        order_number = "RSS-SYNC-STATUS3-POLL-001"
+        backend.queue_rss_order_ledger_entry(
+            rss_order_id,
+            function_name="RssStockOrder_V",
+            order_number=order_number,
+            result="ACCEPTED",
+        )
+        backend.set_rss_order_status(rss_order_id, 3)
+        health = RakutenRssTransportHealth(
+            connected=True,
+            message="Workbook transport READY.",
+            transport_source=TRANSPORT_SOURCE_COM_LIVE,
+        )
+
+        with mock.patch.object(transport, "health_check", return_value=health):
+            submit_ack = transport.submit_order(order, broker_order_id)
+            updates = transport.poll_order(broker_order_id)
+
+        self.assertEqual(OrderStatus.PENDING, submit_ack.status)
+        self.assertEqual(1, len(updates))
+        update = updates[0]
+        self.assertEqual(OrderStatus.PENDING, update.status)
+        self.assertEqual(3, update.authoritative_rss_status)
+        self.assertEqual(0, update.fill_quantity)
+        self.assertIsNot(OrderStatus.FILLED, update.status)
+
+    def test_status3_cancel_without_fill_economics_does_not_finalize_filled(self) -> None:
+        backend = MockExcelComBackend()
+        transport = ProductionRakutenRssTransport(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            armed=True,
+            backend=backend,
+        )
+        order = _live_buy_order("SYNC-STATUS3-CANCEL")
+        broker_order_id = "RSS-SYNC-STATUS3-CANCEL"
+        rss_order_id = transport._stable_rss_order_id(order, broker_order_id)
+        order_number = "RSS-SYNC-STATUS3-CANCEL-001"
+        backend.queue_rss_order_ledger_entry(
+            rss_order_id,
+            function_name="RssStockOrder_V",
+            order_number=order_number,
+            result="ACCEPTED",
+        )
+        backend.set_rss_order_status(rss_order_id, 3)
+        health = RakutenRssTransportHealth(
+            connected=True,
+            message="Workbook transport READY.",
+            transport_source=TRANSPORT_SOURCE_COM_LIVE,
+        )
+
+        with mock.patch.object(transport, "health_check", return_value=health):
+            submit_ack = transport.submit_order(order, broker_order_id)
+            backend.set_rss_order_status(rss_order_id, 3)
+            cancel_ack = transport.cancel_order(broker_order_id)
+
+        self.assertEqual(OrderStatus.PENDING, submit_ack.status)
+        self.assertEqual(OrderStatus.PENDING, cancel_ack.status)
+        self.assertEqual(3, cancel_ack.authoritative_rss_status)
+        self.assertIsNot(OrderStatus.FILLED, cancel_ack.status)
+
+    def test_broker_uses_adapter_rss_order_id_without_synthesis(self) -> None:
+        adapter = MockRakutenRssAdapter()
+        adapter.script_order(
+            "SYNC-ID-OWNER",
+            submit_status=OrderStatus.PENDING,
+            submit_message="MOCK_PENDING",
+            cancel_status=OrderStatus.CANCELED,
+            cancel_message="MOCK_CANCELED",
+            rss_order_id=123456789,
+            rss_order_number="",
+            submit_authoritative_rss_status=-1,
+            cancel_authoritative_rss_status=1,
+        )
+        broker = RakutenRssBroker(
+            initial_cash_yen=300_000.0,
+            adapter=adapter,
+            live_enabled=True,
+        )
+        order = _buy_order("SYNC-ID-OWNER")
+
+        result = broker.submit_order(order)
+        record = broker._orders["SYNC-ID-OWNER"]
+
+        self.assertEqual(OrderStatus.PENDING, result.status)
+        self.assertEqual(123456789, record["rss_order_id"])
 
 
 if __name__ == "__main__":

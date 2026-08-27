@@ -1501,6 +1501,30 @@ def print_preorder_summary(report: Mapping[str, Any]) -> None:
     print("=" * 92)
 
 
+def _persist_live_reconcile_only_mode(root: Path, config: Mapping[str, Any]) -> dict[str, Any]:
+    persisted_config = dict(config)
+    broker_config = dict(persisted_config.get("broker", {}))
+    persisted_config["operating_mode"] = "LIVE_RECONCILE_ONLY"
+    persisted_config["trading_mode"] = "LIVE"
+    persisted_config["execution_mode"] = "LIVE"
+    persisted_config["trading_actions"] = "RECONCILE_ONLY"
+    persisted_config["allowed_trading_actions"] = ["RECONCILE_ONLY"]
+    broker_config["type"] = "rakuten_rss"
+    broker_config["transport_mode"] = "production"
+    broker_config["live_trading_enabled"] = True
+    broker_config["live_enabled"] = True
+    broker_config["production_transport_enabled"] = True
+    broker_config["production_live_fire_armed"] = False
+    persisted_config["broker"] = broker_config
+
+    config_path = (root / "config" / "v7_direct_pipeline_config.json").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = config_path.with_name(f"{config_path.name}.tmp")
+    temp_path.write_text(json.dumps(persisted_config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temp_path.replace(config_path)
+    return persisted_config
+
+
 def dispatch_approved_orders(root: Path, context: PreorderDispatchContext) -> list[Any]:
     report = context.report
     operating_mode, trading_mode, execution_mode, trading_actions, _ = _activation_config(context.config)
@@ -1539,9 +1563,11 @@ def dispatch_approved_orders(root: Path, context: PreorderDispatchContext) -> li
     if current_trade_signals_context != context.trade_signals_context:
         raise RuntimeError("TRADE_SIGNALS_CONTEXT_CHANGED")
 
-    broker = create_broker(dict(context.config), root)
+    dispatch_config = dict(context.config)
+    broker = create_broker(dict(dispatch_config), root)
     preflight_ran = False
     effective_mode = operating_mode
+    reconcile_persisted = False
     try:
         broker_health = broker.health_check()
     except Exception as error:
@@ -1551,6 +1577,16 @@ def dispatch_approved_orders(root: Path, context: PreorderDispatchContext) -> li
                 operating_mode,
                 broker_health_ok=False,
             )
+            if (
+                operating_mode == "LIVE_ACTIVE"
+                and effective_mode == "LIVE_RECONCILE_ONLY"
+                and not reconcile_persisted
+            ):
+                dispatch_config = _persist_live_reconcile_only_mode(
+                    root,
+                    dispatch_config,
+                )
+                reconcile_persisted = True
         else:
             effective_mode = _resolve_live_dispatch_mode(operating_mode)
     else:
@@ -1559,6 +1595,16 @@ def dispatch_approved_orders(root: Path, context: PreorderDispatchContext) -> li
                 operating_mode,
                 broker_health_ok=bool(broker_health.healthy),
             )
+            if (
+                operating_mode == "LIVE_ACTIVE"
+                and effective_mode == "LIVE_RECONCILE_ONLY"
+                and not reconcile_persisted
+            ):
+                dispatch_config = _persist_live_reconcile_only_mode(
+                    root,
+                    dispatch_config,
+                )
+                reconcile_persisted = True
 
     if effective_mode == "LIVE_ACTIVE" and operating_mode == "LIVE_ACTIVE":
         live_preflight_blockers = _live_submit_preflight(root, broker)
@@ -1568,6 +1614,16 @@ def dispatch_approved_orders(root: Path, context: PreorderDispatchContext) -> li
                 effective_mode,
                 queue_clear=False,
             )
+            if (
+                operating_mode == "LIVE_ACTIVE"
+                and effective_mode == "LIVE_RECONCILE_ONLY"
+                and not reconcile_persisted
+            ):
+                dispatch_config = _persist_live_reconcile_only_mode(
+                    root,
+                    dispatch_config,
+                )
+                reconcile_persisted = True
 
     if effective_mode == "LIVE_RECONCILE_ONLY":
         if not preflight_ran:
@@ -1593,6 +1649,16 @@ def dispatch_approved_orders(root: Path, context: PreorderDispatchContext) -> li
                 effective_mode,
                 queue_clear=False,
             )
+            if (
+                operating_mode == "LIVE_ACTIVE"
+                and effective_mode == "LIVE_RECONCILE_ONLY"
+                and not reconcile_persisted
+            ):
+                dispatch_config = _persist_live_reconcile_only_mode(
+                    root,
+                    dispatch_config,
+                )
+                reconcile_persisted = True
             break
 
         try:
@@ -1602,6 +1668,16 @@ def dispatch_approved_orders(root: Path, context: PreorderDispatchContext) -> li
                 effective_mode,
                 submit_error=True,
             )
+            if (
+                operating_mode == "LIVE_ACTIVE"
+                and effective_mode == "LIVE_RECONCILE_ONLY"
+                and not reconcile_persisted
+            ):
+                dispatch_config = _persist_live_reconcile_only_mode(
+                    root,
+                    dispatch_config,
+                )
+                reconcile_persisted = True
             raise RuntimeError(f"BROKER_SUBMIT_FAILED:{client_order_id}: {type(error).__name__}: {error}") from error
 
         submit_status = getattr(submit_result, "status", None)
@@ -1615,6 +1691,16 @@ def dispatch_approved_orders(root: Path, context: PreorderDispatchContext) -> li
                 effective_mode,
                 submit_status=submit_status_name,
             )
+            if (
+                operating_mode == "LIVE_ACTIVE"
+                and effective_mode == "LIVE_RECONCILE_ONLY"
+                and not reconcile_persisted
+            ):
+                dispatch_config = _persist_live_reconcile_only_mode(
+                    root,
+                    dispatch_config,
+                )
+                reconcile_persisted = True
             break
         if submit_status_name != "FILLED":
             raise RuntimeError(f"UNEXPECTED_BROKER_STATUS:{client_order_id}:{submit_status_name}")

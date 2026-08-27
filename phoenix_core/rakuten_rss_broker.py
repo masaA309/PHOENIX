@@ -36,7 +36,6 @@ FINAL_STATUSES = {
     OrderStatus.FILLED,
     OrderStatus.REJECTED,
     OrderStatus.CANCELED,
-    OrderStatus.TIMED_OUT,
 }
 
 
@@ -75,6 +74,23 @@ def _canonical_event_sha256(event: dict[str, Any]) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _optional_int(value: Any, default: int = -1) -> int:
+    try:
+        if value is None or value == "":
+            return default
+        result = int(value)
+        if result == 0 and default != 0:
+            return default
+        return result
+    except Exception:
+        return default
+
+
+def _optional_text(value: Any, default: str = "") -> str:
+    text = "" if value is None else str(value).strip()
+    return text if text else default
 
 
 @dataclass(slots=True)
@@ -267,6 +283,8 @@ class RakutenRssBroker(BrokerAdapter):
                     message=f"Rakuten RSS adapter submit failed: {error}",
                     broker_order_id=broker_order_id,
                     submitted_at=submitted_at,
+                    rss_order_id=0,
+                    authoritative_rss_status=-1,
                 )
 
             if ack.status is OrderStatus.REJECTED:
@@ -276,9 +294,22 @@ class RakutenRssBroker(BrokerAdapter):
                     message=ack.message or "Rakuten RSS adapter rejected the order",
                     broker_order_id=broker_order_id,
                     submitted_at=submitted_at,
+                    rss_order_id=_optional_int(getattr(ack, "rss_order_id", 0), 0),
+                    rss_order_number=_optional_text(getattr(ack, "rss_order_number", "")),
+                    authoritative_rss_status=_optional_int(
+                        getattr(ack, "authoritative_rss_status", getattr(ack, "rss_order_status", -1)),
+                        -1,
+                    ),
                 )
             if ack.status not in {OrderStatus.PENDING, OrderStatus.ACCEPTED}:
                 raise ValueError("Rakuten RSS submit ack must be PENDING, ACCEPTED or REJECTED")
+
+            rss_order_id = _optional_int(getattr(ack, "rss_order_id", 0), 0)
+            rss_order_number = _optional_text(getattr(ack, "rss_order_number", ""))
+            authoritative_rss_status = _optional_int(
+                getattr(ack, "authoritative_rss_status", getattr(ack, "rss_order_status", -1)),
+                -1,
+            )
 
             record = self._new_record(
                 order=order,
@@ -295,6 +326,11 @@ class RakutenRssBroker(BrokerAdapter):
                 ),
                 submitted_at=submitted_at,
                 updated_at=ack.submitted_at,
+                rss_order_id=rss_order_id,
+                rss_order_number=rss_order_number,
+                broker_observation_state=ack.status.value,
+                cancel_observation_state="",
+                last_authoritative_rss_status=authoritative_rss_status,
             )
             self._orders[order.client_order_id] = record
             self._save_state()
@@ -343,19 +379,18 @@ class RakutenRssBroker(BrokerAdapter):
                     continue
                 submitted_at = _parse_iso(str(record["submitted_at"]))
                 age = checked_at - submitted_at
+                observed_status = _optional_text(record.get("broker_observation_state"))
+                last_authoritative_status = _optional_int(record.get("last_authoritative_rss_status", -1), -1)
+                if observed_status == OrderStatus.ACCEPTED.value or last_authoritative_status == 2:
+                    continue
                 if self._timeout_seconds == 0 or age >= timedelta(seconds=self._timeout_seconds):
-                    if _phoenix_timeout_protective_order(self, record, checked_at):
-                        changed = True
-                    try:
-                        self._adapter.cancel_order(broker_order_id)
-                    except Exception:
-                        pass
-                    result = self._finalize_record(
-                        record,
-                        status=OrderStatus.TIMED_OUT,
-                        message=record.get("message", "Rakuten RSS order timed out"),
-                        updated_at=checked_at,
+                    if record.get("broker_observation_state") != "RECONCILE_PENDING":
+                        record["broker_observation_state"] = "RECONCILE_PENDING"
+                    record["message"] = (
+                        "Rakuten RSS order timed out waiting for observation; reconciliation continues."
                     )
+                    record["updated_at"] = _iso(checked_at)
+                    result = self._result_from_record(record)
                     results.append(result)
                     changed = True
 
@@ -378,23 +413,57 @@ class RakutenRssBroker(BrokerAdapter):
                 raise ValueError(f"client_order_idが見つかりません: {client_order_id}")
             if OrderStatus(record["status"]) in FINAL_STATUSES:
                 return self._result_from_record(record)
+            if not _optional_text(record.get("rss_order_number")):
+                record["cancel_observation_state"] = "WAITING_FOR_ORDER_NUMBER"
+                record["message"] = message or "RSS order number is missing for cancel."
+                record["updated_at"] = _iso(_now_jst())
+                self._save_state()
+                return self._result_from_record(record)
             try:
                 ack = self._adapter.cancel_order(str(record["broker_order_id"]))
             except Exception as error:  # pragma: no cover - adapter failure is fail-closed
                 self.engage_kill_switch(f"Rakuten RSS cancel failed: {error}")
                 return self._result_from_record(record)
+            candidate_rss_order_id = _optional_int(getattr(ack, "rss_order_id", 0), 0)
+            record["rss_order_id"] = candidate_rss_order_id
+            record["rss_order_number"] = _optional_text(
+                getattr(ack, "rss_order_number", record.get("rss_order_number", "")),
+                record.get("rss_order_number", ""),
+            )
+            authoritative_rss_status = _optional_int(
+                getattr(ack, "authoritative_rss_status", getattr(ack, "rss_order_status", -1)),
+                -1,
+            )
+            if authoritative_rss_status != -1:
+                record["last_authoritative_rss_status"] = authoritative_rss_status
             if ack.status is OrderStatus.PENDING:
                 record["status"] = OrderStatus.PENDING.value
                 record["message"] = message or ack.message or "Rakuten RSS cancel staged and awaiting VBA receipt"
                 record["updated_at"] = _iso(ack.canceled_at)
+                record["cancel_observation_state"] = OrderStatus.PENDING.value
                 self._save_state()
                 return self._result_from_record(record)
-            result = self._finalize_record(
-                record,
-                status=ack.status if ack.status in FINAL_STATUSES else OrderStatus.CANCELED,
-                message=message or ack.message or "Rakuten RSS order canceled",
-                updated_at=ack.canceled_at,
-            )
+            if ack.status is OrderStatus.CANCELED:
+                record["cancel_observation_state"] = OrderStatus.CANCELED.value
+                result = self._finalize_record(
+                    record,
+                    status=OrderStatus.CANCELED,
+                    message=message or ack.message or "Rakuten RSS order canceled",
+                    updated_at=ack.canceled_at,
+                )
+            elif ack.status is OrderStatus.FILLED:
+                record["cancel_observation_state"] = OrderStatus.FILLED.value
+                result = self._finalize_record(
+                    record,
+                    status=OrderStatus.FILLED,
+                    message=message or ack.message or "Rakuten RSS order filled before cancel",
+                    updated_at=ack.canceled_at,
+                )
+            else:
+                record["cancel_observation_state"] = "RECONCILE_PENDING"
+                record["message"] = message or ack.message or "Rakuten RSS cancel pending reconciliation"
+                record["updated_at"] = _iso(ack.canceled_at)
+                result = self._result_from_record(record)
             self._save_state()
             return result
 
@@ -463,6 +532,11 @@ class RakutenRssBroker(BrokerAdapter):
         message: str,
         submitted_at: datetime,
         updated_at: datetime,
+        rss_order_id: int = 0,
+        rss_order_number: str = "",
+        broker_observation_state: str | None = None,
+        cancel_observation_state: str = "",
+        last_authoritative_rss_status: int = -1,
     ) -> dict[str, Any]:
         return {
             "client_order_id": order.client_order_id,
@@ -475,6 +549,14 @@ class RakutenRssBroker(BrokerAdapter):
             "message": message,
             "submitted_at": _iso(submitted_at),
             "updated_at": _iso(updated_at),
+            "rss_order_id": int(rss_order_id),
+            "rss_order_number": _optional_text(rss_order_number),
+            "broker_observation_state": _optional_text(
+                broker_observation_state,
+                default=status.value,
+            ),
+            "cancel_observation_state": _optional_text(cancel_observation_state),
+            "last_authoritative_rss_status": int(last_authoritative_rss_status),
             "filled_quantity": 0,
             "filled_notional_yen": 0.0,
             "filled_price": 0.0,
@@ -498,6 +580,9 @@ class RakutenRssBroker(BrokerAdapter):
         message: str,
         broker_order_id: str | None = None,
         submitted_at: datetime | None = None,
+        rss_order_id: int = 0,
+        rss_order_number: str = "",
+        authoritative_rss_status: int = -1,
     ) -> OrderResult:
         now = submitted_at or _now_jst()
         record = self._new_record(
@@ -508,6 +593,11 @@ class RakutenRssBroker(BrokerAdapter):
             message=message,
             submitted_at=now,
             updated_at=now,
+            rss_order_id=rss_order_id,
+            rss_order_number=rss_order_number,
+            broker_observation_state=OrderStatus.REJECTED.value,
+            cancel_observation_state="",
+            last_authoritative_rss_status=authoritative_rss_status,
         )
         self._orders[order.client_order_id] = record
         self._save_state()
@@ -519,10 +609,24 @@ class RakutenRssBroker(BrokerAdapter):
         update: RakutenRssOrderUpdate,
     ) -> OrderResult:
         status = update.status
+        update_rss_order_id = _optional_int(getattr(update, "rss_order_id", 0), 0)
+        update_rss_order_number = _optional_text(getattr(update, "rss_order_number", ""))
+        update_authoritative_rss_status = _optional_int(
+            getattr(update, "authoritative_rss_status", getattr(update, "rss_order_status", -1)),
+            -1,
+        )
+        record["rss_order_id"] = update_rss_order_id
+        if update_rss_order_number:
+            record["rss_order_number"] = update_rss_order_number
+        if update_authoritative_rss_status != -1:
+            record["last_authoritative_rss_status"] = update_authoritative_rss_status
+        if _optional_text(getattr(update, "rss_order_status", "")):
+            record["broker_observation_state"] = _optional_text(getattr(update, "rss_order_status", ""))
         if status is OrderStatus.ACCEPTED:
             record["status"] = status.value
             record["message"] = update.message or record["message"]
             record["updated_at"] = _iso(update.updated_at)
+            record["broker_observation_state"] = status.value
             return self._result_from_record(record)
         if status in {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED}:
             if update.fill_quantity <= 0:
@@ -535,7 +639,12 @@ class RakutenRssBroker(BrokerAdapter):
                 message=update.message,
                 updated_at=update.updated_at,
             )
-        if status in {OrderStatus.REJECTED, OrderStatus.CANCELED, OrderStatus.TIMED_OUT}:
+        if status is OrderStatus.TIMED_OUT:
+            record["message"] = update.message or "Order timed out waiting for Excel/RSS result; reconciliation continues."
+            record["updated_at"] = _iso(update.updated_at)
+            record["broker_observation_state"] = "RECONCILE_PENDING"
+            return self._result_from_record(record)
+        if status in {OrderStatus.REJECTED, OrderStatus.CANCELED}:
             return self._finalize_record(
                 record,
                 status=status,
@@ -929,6 +1038,11 @@ class RakutenRssBroker(BrokerAdapter):
                 raise ValueError("order recordはJSONオブジェクトにしてください")
             record = dict(value)
             record.setdefault("client_order_id", client_order_id)
+            record.setdefault("rss_order_id", 0)
+            record.setdefault("rss_order_number", "")
+            record.setdefault("broker_observation_state", str(record.get("status", OrderStatus.PENDING.value)))
+            record.setdefault("cancel_observation_state", "")
+            record.setdefault("last_authoritative_rss_status", -1)
             self._orders[str(client_order_id)] = record
 
         fill_events = payload.get("fill_events", [])

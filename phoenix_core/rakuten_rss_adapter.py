@@ -28,6 +28,9 @@ class RakutenRssSubmitAck:
     status: OrderStatus
     message: str
     submitted_at: datetime = field(default_factory=_now_jst)
+    rss_order_id: int = 0
+    rss_order_number: str = ""
+    authoritative_rss_status: int = -1
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +41,9 @@ class RakutenRssOrderUpdate:
     message: str = ""
     updated_at: datetime = field(default_factory=_now_jst)
     rss_order_status: str = ""
+    rss_order_id: int = 0
+    rss_order_number: str = ""
+    authoritative_rss_status: int = -1
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +51,9 @@ class RakutenRssCancelAck:
     status: OrderStatus
     message: str
     canceled_at: datetime = field(default_factory=_now_jst)
+    rss_order_id: int = 0
+    rss_order_number: str = ""
+    authoritative_rss_status: int = -1
 
 
 class RakutenRssAdapter(Protocol):
@@ -74,6 +83,10 @@ class _MockScript:
     cancel_message: str = "MOCK_CANCELED"
     updates: list[RakutenRssOrderUpdate] = field(default_factory=list)
     broker_order_id: str = ""
+    rss_order_id: int = 0
+    rss_order_number: str = ""
+    submit_authoritative_rss_status: int = -1
+    cancel_authoritative_rss_status: int = -1
 
 
 class MockRakutenRssAdapter(RakutenRssAdapter):
@@ -122,6 +135,10 @@ class MockRakutenRssAdapter(RakutenRssAdapter):
         submit_message: str = "MOCK_ACCEPTED",
         cancel_status: OrderStatus = OrderStatus.CANCELED,
         cancel_message: str = "MOCK_CANCELED",
+        rss_order_id: int = 0,
+        rss_order_number: str = "",
+        submit_authoritative_rss_status: int = -1,
+        cancel_authoritative_rss_status: int = -1,
         updates: list[RakutenRssOrderUpdate] | None = None,
     ) -> None:
         script = self._scripts_by_client_order_id.get(client_order_id)
@@ -132,6 +149,10 @@ class MockRakutenRssAdapter(RakutenRssAdapter):
         script.submit_message = submit_message
         script.cancel_status = cancel_status
         script.cancel_message = cancel_message
+        script.rss_order_id = int(rss_order_id)
+        script.rss_order_number = str(rss_order_number)
+        script.submit_authoritative_rss_status = int(submit_authoritative_rss_status)
+        script.cancel_authoritative_rss_status = int(cancel_authoritative_rss_status)
         if updates is not None:
             script.updates = list(updates)
 
@@ -144,6 +165,9 @@ class MockRakutenRssAdapter(RakutenRssAdapter):
         fill_price: float = 0.0,
         message: str = "",
         rss_order_status: str = "",
+        rss_order_id: int = 0,
+        rss_order_number: str = "",
+        authoritative_rss_status: int = -1,
     ) -> None:
         script = self._scripts_by_client_order_id.get(client_order_id)
         if script is None:
@@ -156,6 +180,9 @@ class MockRakutenRssAdapter(RakutenRssAdapter):
                 fill_price=fill_price,
                 message=message,
                 rss_order_status=rss_order_status,
+                rss_order_id=int(rss_order_id),
+                rss_order_number=str(rss_order_number),
+                authoritative_rss_status=int(authoritative_rss_status),
             )
         )
 
@@ -185,12 +212,18 @@ class MockRakutenRssAdapter(RakutenRssAdapter):
                 "side": order.side.value,
                 "quantity": order.quantity,
                 "limit_price": order.limit_price,
+                "rss_order_id": script.rss_order_id,
+                "rss_order_number": script.rss_order_number,
+                "authoritative_rss_status": script.submit_authoritative_rss_status,
                 "submitted_at": _now_jst().isoformat(timespec="seconds"),
             }
         )
         return RakutenRssSubmitAck(
             status=script.submit_status,
             message=script.submit_message,
+            rss_order_id=script.rss_order_id,
+            rss_order_number=script.rss_order_number,
+            authoritative_rss_status=script.submit_authoritative_rss_status,
         )
 
     def poll_order(
@@ -215,4 +248,7 @@ class MockRakutenRssAdapter(RakutenRssAdapter):
         return RakutenRssCancelAck(
             status=script.cancel_status,
             message=script.cancel_message,
+            rss_order_id=script.rss_order_id,
+            rss_order_number=script.rss_order_number,
+            authoritative_rss_status=script.cancel_authoritative_rss_status,
         )
