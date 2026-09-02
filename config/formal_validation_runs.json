@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "base_config_path": "config/v7_historical_validation_20y.json",
+  "output_dir": "reports/formal_validation",
+  "cache_dir": "data/market_cache",
+  "universe_csv": "data/nikkei225_membership_20y.csv",
+  "allow_network_fetch": false,
+  "stop_on_fail": true,
+  "runs": [
+    {
+      "name": "P1_OFF",
+      "requested_start": "2017-08-01",
+      "requested_end": "2022-01-31",
+      "market_breadth_filter_enabled": false
+    },
+    {
+      "name": "P1_ON",
+      "requested_start": "2017-08-01",
+      "requested_end": "2022-01-31",
+      "market_breadth_filter_enabled": true
+    },
+    {
+      "name": "P2_OFF",
+      "requested_start": "2022-02-01",
+      "requested_end": "2026-08-14",
+      "market_breadth_filter_enabled": false
+    },
+    {
+      "name": "P2_ON",
+      "requested_start": "2022-02-01",
+      "requested_end": "2026-08-14",
+      "market_breadth_filter_enabled": true
+    }
+  ]
+}
