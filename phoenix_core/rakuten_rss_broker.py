@@ -301,8 +301,6 @@ class RakutenRssBroker(BrokerAdapter):
                         -1,
                     ),
                 )
-            if ack.status not in {OrderStatus.PENDING, OrderStatus.ACCEPTED}:
-                raise ValueError("Rakuten RSS submit ack must be PENDING, ACCEPTED or REJECTED")
 
             rss_order_id = _optional_int(getattr(ack, "rss_order_id", 0), 0)
             rss_order_number = _optional_text(getattr(ack, "rss_order_number", ""))
@@ -310,20 +308,20 @@ class RakutenRssBroker(BrokerAdapter):
                 getattr(ack, "authoritative_rss_status", getattr(ack, "rss_order_status", -1)),
                 -1,
             )
+            record_status = ack.status if ack.status in {OrderStatus.PENDING, OrderStatus.ACCEPTED} else OrderStatus.PENDING
+            if ack.status is OrderStatus.PENDING:
+                message = ack.message or "Rakuten RSS order staged and awaiting VBA receipt"
+            elif ack.status is OrderStatus.ACCEPTED:
+                message = ack.message or "Rakuten RSS order accepted into dry-run queue"
+            else:
+                message = ack.message or f"Rakuten RSS tracked order requires reconciliation: {ack.status.value}"
 
             record = self._new_record(
                 order=order,
                 ticker=ticker,
                 broker_order_id=broker_order_id,
-                status=ack.status,
-                message=(
-                    ack.message
-                    or (
-                        "Rakuten RSS order staged and awaiting VBA receipt"
-                        if ack.status is OrderStatus.PENDING
-                        else "Rakuten RSS order accepted into dry-run queue"
-                    )
-                ),
+                status=record_status,
+                message=message,
                 submitted_at=submitted_at,
                 updated_at=ack.submitted_at,
                 rss_order_id=rss_order_id,
@@ -1050,6 +1048,44 @@ class RakutenRssBroker(BrokerAdapter):
             raise ValueError("fill_eventsはJSON配列にしてください")
         self._fill_events = [dict(event) for event in fill_events if isinstance(event, dict)]
         self._loaded_state_version = self.STATE_VERSION
+
+
+def read_persisted_nonterminal_order_count(state_file: Path) -> int | None:
+    if not state_file.is_file():
+        return None
+
+    try:
+        payload = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    version = payload.get("state_version")
+    if type(version) is not int or version != RakutenRssBroker.STATE_VERSION:
+        return None
+
+    orders = payload.get("orders")
+    if not isinstance(orders, dict):
+        return None
+
+    nonterminal_count = 0
+    for record in orders.values():
+        if not isinstance(record, dict):
+            return None
+        status = record.get("status")
+        if not isinstance(status, str):
+            return None
+        try:
+            order_status = OrderStatus(status)
+        except ValueError:
+            return None
+        if order_status in PENDING_STATUSES:
+            nonterminal_count += 1
+    return nonterminal_count
+
+
 try:
     from .protective_orders import (
         INVALID_RSS_ORDER_STATUSES,

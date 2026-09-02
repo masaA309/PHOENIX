@@ -302,8 +302,9 @@ class RakutenRssBrokerStep47Test(unittest.TestCase):
             cancel_result = broker.cancel_order("CANCEL-001")
             snapshot = broker.get_account_snapshot()
 
-            self.assertEqual(OrderStatus.CANCELED, cancel_result.status)
+            self.assertEqual(OrderStatus.PARTIALLY_FILLED, cancel_result.status)
             self.assertEqual(30, cancel_result.filled_quantity)
+            self.assertIn("RSS order number is missing for cancel", cancel_result.message)
             self.assertEqual(30, snapshot.positions[0].quantity)
             self.assertEqual(99.5, snapshot.positions[0].average_price)
 
@@ -319,8 +320,7 @@ class RakutenRssBrokerStep47Test(unittest.TestCase):
             snapshot = broker.get_account_snapshot()
 
             self.assertEqual(OrderStatus.ACCEPTED, submit_result.status)
-            self.assertEqual(1, len(timeout_results))
-            self.assertEqual(OrderStatus.TIMED_OUT, timeout_results[0].status)
+            self.assertEqual(0, len(timeout_results))
             self.assertEqual(300_000, snapshot.cash_yen)
             self.assertEqual(0, len(snapshot.positions))
 

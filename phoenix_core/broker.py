@@ -49,6 +49,12 @@ class BrokerAdapter(ABC):
     def submit_order(self, order: OrderRequest) -> OrderResult:
         raise NotImplementedError
 
+    def refresh_pending_orders(self) -> list[OrderResult]:
+        raise NotImplementedError
+
+    def nonterminal_order_count(self) -> int:
+        raise NotImplementedError
+
 
 @dataclass(slots=True)
 class _MutablePosition:
@@ -218,6 +224,12 @@ class PaperBroker(BrokerAdapter):
                 self._save_state()
 
             return result
+
+    def refresh_pending_orders(self) -> list[OrderResult]:
+        return []
+
+    def nonterminal_order_count(self) -> int:
+        return 0
 
     def _buy(self, order: OrderRequest, ticker: str) -> OrderResult:
         gross = round(order.quantity * order.limit_price, 2)

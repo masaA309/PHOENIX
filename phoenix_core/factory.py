@@ -39,7 +39,7 @@ _OPERATING_MODE_BROKER_PROFILES: dict[str, dict[str, Any]] = {
 
 
 def _operating_mode_profile(config: dict[str, Any]) -> dict[str, Any]:
-    operating_mode = str(config.get("operating_mode", "")).strip().upper()
+    operating_mode = str(config.get("operating_mode", "PAPER_SAFE")).strip().upper()
     profile = _OPERATING_MODE_BROKER_PROFILES.get(operating_mode)
     if profile is None:
         raise ValueError(
@@ -55,22 +55,22 @@ def create_broker(
     broker_config = config.get("broker", {})
     profile = _operating_mode_profile(config)
     broker_type = str(
-        broker_config.get("type", "paper")
+        broker_config.get("type", profile["broker_type"])
     ).strip().lower()
     transport_mode = str(
-        broker_config.get("transport_mode", "mock")
+        broker_config.get("transport_mode", profile["transport_mode"])
     ).strip().lower()
     live_enabled = bool(
         broker_config.get(
             "live_trading_enabled",
-            broker_config.get("live_enabled", False),
+            broker_config.get("live_enabled", profile["live_trading_enabled"]),
         )
     )
     production_transport_enabled = bool(
-        broker_config.get("production_transport_enabled", False)
+        broker_config.get("production_transport_enabled", profile["production_transport_enabled"])
     )
     production_live_fire_armed = bool(
-        broker_config.get("production_live_fire_armed", False)
+        broker_config.get("production_live_fire_armed", profile["production_live_fire_armed"])
     )
 
     if broker_type != profile["broker_type"]:

@@ -275,6 +275,7 @@ class Step42PreOrderGateTest(unittest.TestCase):
             "execution_mode": "LIVE" if operating_mode != "PAPER_SAFE" else "DRY_RUN",
             "trading_actions": trading_actions,
             "allowed_trading_actions": [trading_actions] if operating_mode != "PAPER_SAFE" else ["DISABLED", "PAPER_ONLY"],
+            "live_authorization_enabled": operating_mode == "LIVE_ACTIVE",
             "broker": {
                 "type": "rakuten_rss" if operating_mode != "PAPER_SAFE" else "paper",
                 "transport_mode": "production" if operating_mode != "PAPER_SAFE" else "paper",

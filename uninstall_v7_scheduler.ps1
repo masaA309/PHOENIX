@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$TaskName = "PHOENIX-v7-Paper"
+    [string]$TaskName = "PHOENIX-v7-Watchdog"
 )
 
 Set-StrictMode -Version Latest

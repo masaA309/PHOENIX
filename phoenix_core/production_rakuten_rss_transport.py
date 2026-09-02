@@ -5,12 +5,14 @@ from datetime import datetime, timedelta
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Mapping, Protocol, runtime_checkable
 from zoneinfo import ZoneInfo
 import zipfile
 from xml.etree import ElementTree as ET
+from urllib.parse import unquote, urlsplit
 
 from phoenix_core.models import OrderRequest, OrderSide, OrderStatus, OrderType
 from phoenix_core.production_rakuten_rss_adapter import RakutenRssTransportHealth
@@ -30,6 +32,11 @@ ORDER_STATUS_MACRO_NAME = "RssOrderStatus"
 DEFAULT_WORKBOOK_NAME = "PHOENIX_RSS_PRODUCTION.xlsm"
 PHOENIX_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WORKBOOK_PATH = (PHOENIX_ROOT / "runtime" / "v7_rss_production" / DEFAULT_WORKBOOK_NAME).resolve()
+WORKBOOK_IDENTITY_SUFFIX = tuple(
+    part.lower()
+    for part in (PHOENIX_ROOT.name, "runtime", "v7_rss_production", DEFAULT_WORKBOOK_NAME)
+)
+TRUSTED_ONEDRIVE_ACCOUNT_ENV = "PHOENIX_TRUSTED_ONEDRIVE_ACCOUNT_ID"
 TRANSPORT_SHEET_NAME = "PHOENIX_RSS_TRANSPORT"
 TRANSPORT_SOURCE_COM_LIVE = "COM_LIVE"
 TRANSPORT_SOURCE_FILE_READY = "FILE_READY"
@@ -107,6 +114,105 @@ PKG_REL_NS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 
 def _now_jst() -> datetime:
     return datetime.now(JST)
+
+
+@dataclass(frozen=True, slots=True)
+class _WorkbookIdentity:
+    kind: str
+    local_path: Path | None = None
+    onedrive_account: str = ""
+    onedrive_relative_parts: tuple[str, ...] = ()
+
+
+def _normalized_identity_parts(parts: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    return tuple(str(part).strip().lower() for part in parts if str(part).strip())
+
+
+def _path_parts_from_text(path_text: str) -> tuple[str, ...]:
+    return tuple(part for part in path_text.replace("\\", "/").split("/") if part)
+
+
+def _local_onedrive_relative_parts(path: Path) -> tuple[str, ...] | None:
+    parts = path.resolve().parts
+    for index, part in enumerate(parts):
+        if str(part).lower().startswith("onedrive"):
+            relative = parts[index + 1 :]
+            if relative:
+                return _normalized_identity_parts(relative)
+    return None
+
+
+def _trusted_onedrive_account_id() -> str:
+    return str(os.environ.get(TRUSTED_ONEDRIVE_ACCOUNT_ENV, "")).strip().lower()
+
+
+def _canonical_workbook_identity(value: Any) -> _WorkbookIdentity | None:
+    try:
+        raw_value = getattr(value, "FullName", value)
+        raw_text = str(raw_value).strip()
+    except Exception:
+        return None
+    if not raw_text:
+        return None
+
+    normalized_text = raw_text.replace("\\", "/")
+    if normalized_text.lower().startswith(("http://", "https://", "file://")):
+        try:
+            parsed = urlsplit(normalized_text)
+        except Exception:
+            return None
+        if parsed.scheme.lower() not in {"http", "https"}:
+            return None
+        if parsed.netloc.lower() != "d.docs.live.net":
+            return None
+        path_parts = tuple(unquote(part) for part in _path_parts_from_text(parsed.path))
+        if len(path_parts) <= len(WORKBOOK_IDENTITY_SUFFIX):
+            return None
+        onedrive_account = path_parts[0].strip().lower()
+        relative_parts = _normalized_identity_parts(path_parts[1:])
+        if not onedrive_account or relative_parts[-len(WORKBOOK_IDENTITY_SUFFIX) :] != WORKBOOK_IDENTITY_SUFFIX:
+            return None
+        return _WorkbookIdentity(
+            kind="onedrive_url",
+            onedrive_account=onedrive_account,
+            onedrive_relative_parts=relative_parts,
+        )
+
+    try:
+        local_path = Path(raw_text).resolve()
+    except Exception:
+        return None
+    path_parts = _path_parts_from_text(str(local_path))
+    if len(path_parts) < len(WORKBOOK_IDENTITY_SUFFIX):
+        return None
+    suffix = _normalized_identity_parts(path_parts[-len(WORKBOOK_IDENTITY_SUFFIX) :])
+    if suffix != WORKBOOK_IDENTITY_SUFFIX:
+        return None
+    return _WorkbookIdentity(kind="local_path", local_path=local_path)
+
+
+def _workbook_identities_match(candidate: _WorkbookIdentity, target: _WorkbookIdentity) -> bool:
+    if candidate.kind == "local_path" and target.kind == "local_path":
+        return candidate.local_path == target.local_path
+    if candidate.kind == "onedrive_url" and target.kind == "onedrive_url":
+        return (
+            candidate.onedrive_account == target.onedrive_account
+            and candidate.onedrive_relative_parts == target.onedrive_relative_parts
+        )
+
+    url_identity = candidate if candidate.kind == "onedrive_url" else target
+    local_identity = target if candidate.kind == "onedrive_url" else candidate
+    if url_identity.kind != "onedrive_url" or local_identity.kind != "local_path":
+        return False
+    if local_identity.local_path is None:
+        return False
+    trusted_account = _trusted_onedrive_account_id()
+    if not trusted_account or url_identity.onedrive_account != trusted_account:
+        return False
+    local_relative_parts = _local_onedrive_relative_parts(local_identity.local_path)
+    if local_relative_parts is None:
+        return False
+    return url_identity.onedrive_relative_parts == local_relative_parts
 
 
 def _resolve_phoenix_root_path(path: Path | str) -> Path:
@@ -319,7 +425,7 @@ class ExcelTransportSession:
 class _ResolvedWorkbookOwner:
     application: Any
     workbook: Any
-    workbook_full_name: Path
+    workbook_full_name: _WorkbookIdentity
     display_name: str = ""
 
 
@@ -686,11 +792,8 @@ class Win32ComExcelBackend:
         return win32_client, pythoncom
 
     @staticmethod
-    def _workbook_full_name(value: Any) -> Path | None:
-        try:
-            return Path(str(value.FullName)).resolve()
-        except Exception:
-            return None
+    def _workbook_full_name(value: Any) -> _WorkbookIdentity | None:
+        return _canonical_workbook_identity(value)
 
     @staticmethod
     def _application_identity(application: Any, workbook: Any | None = None) -> str:
@@ -711,7 +814,7 @@ class Win32ComExcelBackend:
         self,
         obj: Any,
         *,
-        target_path: Path,
+        target_path: _WorkbookIdentity,
         display_name: str,
     ) -> list[_ResolvedWorkbookOwner]:
         candidates: list[_ResolvedWorkbookOwner] = []
@@ -727,7 +830,7 @@ class Win32ComExcelBackend:
                 workbook_iterable = []
             for workbook in workbook_iterable:
                 workbook_full_name = self._workbook_full_name(workbook)
-                if workbook_full_name != target_path:
+                if workbook_full_name is None or not _workbook_identities_match(workbook_full_name, target_path):
                     continue
                 application = obj
                 try:
@@ -747,7 +850,7 @@ class Win32ComExcelBackend:
             return candidates
 
         workbook_full_name = self._workbook_full_name(obj)
-        if workbook_full_name != target_path:
+        if workbook_full_name is None or not _workbook_identities_match(workbook_full_name, target_path):
             return candidates
         try:
             workbook_application = getattr(obj, "Application", None)
@@ -779,6 +882,9 @@ class Win32ComExcelBackend:
         workbook_path = workbook_path.resolve()
         if not workbook_path.is_file():
             raise WorkbookNotFoundError(f"Workbook not found: {workbook_path}")
+        target_path = self._workbook_full_name(workbook_path)
+        if target_path is None:
+            raise WorkbookNotFoundError(f"Workbook not found: {workbook_path}")
 
         try:
             rot = pythoncom.GetRunningObjectTable()
@@ -794,7 +900,7 @@ class Win32ComExcelBackend:
             raise ExcelComError(f"Excel ROT enumeration failed: {error}") from error
 
         matches: list[_ResolvedWorkbookOwner] = []
-        seen_candidates: set[tuple[Path, str]] = set()
+        seen_candidates: set[tuple[_WorkbookIdentity, str]] = set()
         moniker_logs: list[str] = []
 
         while True:
@@ -821,7 +927,7 @@ class Win32ComExcelBackend:
 
             for candidate in self._rot_candidates_from_object(
                 rot_object,
-                target_path=workbook_path,
+                target_path=target_path,
                 display_name=display_name,
             ):
                 candidate_key = (
@@ -1235,12 +1341,19 @@ class ProductionRakutenRssTransport:
 
     def _session_matches_workbook(self, session: ExcelTransportSession) -> bool:
         try:
-            workbook_full_name = Path(str(session.workbook.FullName)).resolve()
+            workbook_full_name = _canonical_workbook_identity(session.workbook)
         except Exception:
             if not hasattr(session.workbook, "FullName") and not hasattr(session.application, "Workbooks"):
                 return True
             return False
-        if workbook_full_name != self._workbook_path:
+        if workbook_full_name is None:
+            if not hasattr(session.workbook, "FullName") and not hasattr(session.application, "Workbooks"):
+                return True
+            return False
+        target_path = _canonical_workbook_identity(self._workbook_path)
+        if target_path is None:
+            return False
+        if not _workbook_identities_match(workbook_full_name, target_path):
             return False
 
         try:
@@ -1261,7 +1374,8 @@ class ProductionRakutenRssTransport:
         try:
             for candidate in session.application.Workbooks:
                 try:
-                    if Path(str(candidate.FullName)).resolve() == self._workbook_path:
+                    candidate_identity = _canonical_workbook_identity(candidate)
+                    if candidate_identity is not None and _workbook_identities_match(candidate_identity, target_path):
                         return True
                 except Exception:
                     continue
@@ -1446,6 +1560,12 @@ class ProductionRakutenRssTransport:
                 transport_source=runtime_state.transport_source,
             )
         except ExcelComError as error:
+            if self._armed or isinstance(error, WorkbookNotFoundError):
+                return RakutenRssTransportHealth(
+                    connected=False,
+                    message=str(error),
+                    transport_source=TRANSPORT_SOURCE_DISCONNECTED,
+                )
             runtime_state = self._read_runtime_state_from_file()
             if runtime_state.transport_source == TRANSPORT_SOURCE_DISCONNECTED:
                 return RakutenRssTransportHealth(

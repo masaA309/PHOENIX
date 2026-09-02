@@ -14,24 +14,23 @@
     ],
     "fallback": false
   },
-  "operating_mode": "PAPER_SAFE",
-  "trading_mode": "PAPER",
-  "execution_mode": "DRY_RUN",
-  "trading_actions": "PAPER_ONLY",
+  "operating_mode": "LIVE_RECONCILE_ONLY",
+  "trading_mode": "LIVE",
+  "execution_mode": "LIVE",
+  "trading_actions": "RECONCILE_ONLY",
   "allowed_trading_actions": [
-    "DISABLED",
-    "PAPER_ONLY"
+    "RECONCILE_ONLY"
   ],
   "broker": {
-    "type": "paper",
-    "transport_mode": "paper",
-    "live_trading_enabled": false,
-    "live_enabled": false,
-    "production_transport_enabled": false,
+    "type": "rakuten_rss",
+    "transport_mode": "production",
+    "live_trading_enabled": true,
+    "live_enabled": true,
+    "production_transport_enabled": true,
     "production_live_fire_armed": false,
     "initial_cash_yen": 300000,
     "commission_rate": 0.0,
-    "state_file": "state/v7_paper_broker.json"
+    "state_file": "state/v7_rakuten_rss_broker.json"
   },
   "position_sizing": {
     "risk_per_trade_pct": 0.01,

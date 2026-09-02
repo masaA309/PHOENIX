@@ -388,6 +388,49 @@ def _activation_config(payload: Mapping[str, Any]) -> tuple[str, str, str, str, 
     return operating_mode, trading_mode, execution_mode, trading_actions, allowed_trading_actions
 
 
+def _live_authorization_enabled(config: Mapping[str, Any]) -> bool:
+    try:
+        return config.get("live_authorization_enabled") is True
+    except AttributeError:
+        return False
+
+
+def _reconcile_safe_config(config: Mapping[str, Any]) -> dict[str, Any]:
+    persisted_config = dict(config)
+    broker_config = dict(persisted_config.get("broker", {}))
+    persisted_config["operating_mode"] = "LIVE_RECONCILE_ONLY"
+    persisted_config["trading_mode"] = "LIVE"
+    persisted_config["execution_mode"] = "LIVE"
+    persisted_config["trading_actions"] = "RECONCILE_ONLY"
+    persisted_config["allowed_trading_actions"] = ["RECONCILE_ONLY"]
+    broker_config["type"] = "rakuten_rss"
+    broker_config["transport_mode"] = "production"
+    broker_config["live_trading_enabled"] = True
+    broker_config["live_enabled"] = True
+    broker_config["production_transport_enabled"] = True
+    broker_config["production_live_fire_armed"] = False
+    persisted_config["broker"] = broker_config
+    return persisted_config
+
+
+def _live_active_config(config: Mapping[str, Any]) -> dict[str, Any]:
+    persisted_config = dict(config)
+    broker_config = dict(persisted_config.get("broker", {}))
+    persisted_config["operating_mode"] = "LIVE_ACTIVE"
+    persisted_config["trading_mode"] = "LIVE"
+    persisted_config["execution_mode"] = "LIVE"
+    persisted_config["trading_actions"] = "LIVE_ONLY"
+    persisted_config["allowed_trading_actions"] = ["LIVE_ONLY"]
+    broker_config["type"] = "rakuten_rss"
+    broker_config["transport_mode"] = "production"
+    broker_config["live_trading_enabled"] = True
+    broker_config["live_enabled"] = True
+    broker_config["production_transport_enabled"] = True
+    broker_config["production_live_fire_armed"] = True
+    persisted_config["broker"] = broker_config
+    return persisted_config
+
+
 def _stable_hash(payload: Any) -> str:
     encoded = json.dumps(
         payload,
@@ -1007,8 +1050,15 @@ def _build_preorder_report_artifacts(
     if risk_error:
         report_blockers.append(risk_error)
 
+    report_config: Mapping[str, Any] = direct_config
+    if (
+        _normalize_text(direct_config.get("operating_mode", "")).upper() == "LIVE_ACTIVE"
+        and not _live_authorization_enabled(direct_config)
+    ):
+        report_config = _reconcile_safe_config(direct_config)
+
     try:
-        _operating_mode, trading_mode, execution_mode, trading_actions, allowed_trading_actions = _activation_config(direct_config)
+        _operating_mode, trading_mode, execution_mode, trading_actions, allowed_trading_actions = _activation_config(report_config)
     except Exception as error:
         report_blockers.append(f"ACTIVATION_CONFIG_INVALID: {type(error).__name__}: {error}")
         _operating_mode = "PAPER_SAFE"
@@ -1147,7 +1197,7 @@ def _build_preorder_report_artifacts(
             allowed_trading_actions=allowed_trading_actions,
         )
     else:
-        broker, broker_error = _load_broker(root, direct_config)
+        broker, broker_error = _load_broker(root, report_config)
         if broker_error:
             report_blockers.append(broker_error)
             rows = _fallback_rows(
@@ -1502,20 +1552,18 @@ def print_preorder_summary(report: Mapping[str, Any]) -> None:
 
 
 def _persist_live_reconcile_only_mode(root: Path, config: Mapping[str, Any]) -> dict[str, Any]:
-    persisted_config = dict(config)
-    broker_config = dict(persisted_config.get("broker", {}))
-    persisted_config["operating_mode"] = "LIVE_RECONCILE_ONLY"
-    persisted_config["trading_mode"] = "LIVE"
-    persisted_config["execution_mode"] = "LIVE"
-    persisted_config["trading_actions"] = "RECONCILE_ONLY"
-    persisted_config["allowed_trading_actions"] = ["RECONCILE_ONLY"]
-    broker_config["type"] = "rakuten_rss"
-    broker_config["transport_mode"] = "production"
-    broker_config["live_trading_enabled"] = True
-    broker_config["live_enabled"] = True
-    broker_config["production_transport_enabled"] = True
-    broker_config["production_live_fire_armed"] = False
-    persisted_config["broker"] = broker_config
+    persisted_config = _reconcile_safe_config(config)
+
+    config_path = (root / "config" / "v7_direct_pipeline_config.json").resolve()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = config_path.with_name(f"{config_path.name}.tmp")
+    temp_path.write_text(json.dumps(persisted_config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temp_path.replace(config_path)
+    return persisted_config
+
+
+def _persist_live_active_mode(root: Path, config: Mapping[str, Any]) -> dict[str, Any]:
+    persisted_config = _live_active_config(config)
 
     config_path = (root / "config" / "v7_direct_pipeline_config.json").resolve()
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1528,12 +1576,21 @@ def _persist_live_reconcile_only_mode(root: Path, config: Mapping[str, Any]) -> 
 def dispatch_approved_orders(root: Path, context: PreorderDispatchContext) -> list[Any]:
     report = context.report
     operating_mode, trading_mode, execution_mode, trading_actions, _ = _activation_config(context.config)
+    live_authorized = _live_authorization_enabled(context.config)
+    operating_scope = _normalize_text(report.get("operating_scope", "")).upper()
 
     if operating_mode == "PAPER_SAFE":
         return []
 
+    if operating_mode == "LIVE_ACTIVE" and not live_authorized:
+        _persist_live_reconcile_only_mode(
+            root,
+            context.config,
+        )
+        return []
+
     report_blockers = tuple(dict.fromkeys(str(value) for value in report.get("blockers", [])))
-    if _normalize_text(report.get("status", "")).upper() != "APPROVED":
+    if operating_mode == "LIVE_ACTIVE" and _normalize_text(report.get("status", "")).upper() != "APPROVED":
         raise RuntimeError(f"Dispatch requires APPROVED preorder report: {report.get('status', '')}")
     if report_blockers != context.report_blockers:
         raise RuntimeError("Dispatch report blockers changed after report generation")
@@ -1626,6 +1683,23 @@ def dispatch_approved_orders(root: Path, context: PreorderDispatchContext) -> li
                 reconcile_persisted = True
 
     if effective_mode == "LIVE_RECONCILE_ONLY":
+        if operating_mode == "LIVE_RECONCILE_ONLY":
+            try:
+                live_preflight_blockers = _live_submit_preflight(root, broker)
+            except Exception as error:
+                raise RuntimeError(f"BROKER_REFRESH_FAILED: {type(error).__name__}: {error}") from error
+            if (
+                live_authorized
+                and operating_scope == "OPERATIONAL"
+                and broker_health is not None
+                and bool(getattr(broker_health, "healthy", False))
+                and not live_preflight_blockers
+            ):
+                dispatch_config = _persist_live_active_mode(
+                    root,
+                    dispatch_config,
+                )
+            return []
         if not preflight_ran:
             try:
                 broker.refresh_pending_orders()

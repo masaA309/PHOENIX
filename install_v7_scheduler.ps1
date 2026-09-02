@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$TaskName = "PHOENIX-v7-Paper",
+    [string]$TaskName = "PHOENIX-v7-Watchdog",
 
     [ValidatePattern("^\d{2}:\d{2}$")]
     [string]$At = "08:30",
@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 Import-Module ScheduledTasks -ErrorAction Stop
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$EntryScript = Join-Path $Root "scheduled_entry_v7.py"
+$EntryScript = Join-Path $Root "phoenix_watchdog.py"
 $VerifyScript = Join-Path $Root "verify_v7_step8.py"
 $VenvPython = Join-Path $Root ".venv\Scripts\python.exe"
 
@@ -75,10 +75,16 @@ $Trigger = New-ScheduledTaskTrigger `
     -Daily `
     -At $TriggerTime
 
+$UserId = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$Principal = New-ScheduledTaskPrincipal `
+    -UserId $UserId `
+    -LogonType Interactive `
+    -RunLevel Limited
+
 $Settings = New-ScheduledTaskSettingsSet `
     -MultipleInstances IgnoreNew `
     -StartWhenAvailable `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 2) `
+    -ExecutionTimeLimit (New-TimeSpan -Hours 12) `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries
 
@@ -86,8 +92,9 @@ Register-ScheduledTask `
     -TaskName $TaskName `
     -Action $Action `
     -Trigger $Trigger `
+    -Principal $Principal `
     -Settings $Settings `
-    -Description "PHOENIX v7 scheduler with environment safety gate" `
+    -Description "PHOENIX v7 interactive watchdog bootstrap" `
     -Force | Out-Null
 
 $RegisteredTask = Get-ScheduledTask `
@@ -99,4 +106,4 @@ Write-Output "TaskName: $($RegisteredTask.TaskName)"
 Write-Output "State: $($RegisteredTask.State)"
 Write-Output "RunTime: $At"
 Write-Output "Python: $PythonExe"
-Write-Output "Entry: $EntryScript"
+Write-Output "Watchdog: $EntryScript"

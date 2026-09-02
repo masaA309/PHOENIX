@@ -12,12 +12,14 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 from phoenix_core import (
+    BrokerAdapter,
     MockExcelComBackend,
     MockRakutenRssAdapter,
     OrderRequest,
     OrderSide,
     OrderStatus,
     OrderType,
+    PaperBroker,
     RakutenRssBroker,
     ProductionRakutenRssAdapter,
     ProductionRakutenRssTransport,
@@ -28,9 +30,12 @@ from phoenix_core import (
     RakutenRssTransportHealth,
 )
 import phoenix_core.order_bridge_gate as order_bridge_gate
+import phoenix_watchdog
 from phoenix_core.production_rakuten_rss_transport import (
     DEFAULT_WORKBOOK_PATH,
     ExcelComError,
+    ExcelTransportSession,
+    TRUSTED_ONEDRIVE_ACCOUNT_ENV,
     WORKBOOK_STATE_ADDIN_READY_CELL,
     WORKBOOK_STATE_EXCEL_ALIVE_CELL,
     WORKBOOK_STATE_HEARTBEAT_CELL,
@@ -77,6 +82,15 @@ def _bridge_processed_path(bridge_root: Path, request_id: str) -> Path:
 
 def _bridge_failed_path(bridge_root: Path, request_id: str) -> Path:
     return bridge_root / rss_order_bridge.FAILED_DIR / f"{request_id}.csv"
+
+
+def _onedrive_url_for_default_workbook(account_id: str) -> str:
+    parts = DEFAULT_WORKBOOK_PATH.resolve().parts
+    for index, part in enumerate(parts):
+        if part.lower().startswith("onedrive"):
+            relative_path = "/".join(parts[index + 1 :])
+            return f"https://d.docs.live.net/{account_id}/{relative_path}"
+    raise AssertionError(f"DEFAULT_WORKBOOK_PATH is not under OneDrive: {DEFAULT_WORKBOOK_PATH}")
 
 
 def _protective_sell_order(client_order_id: str) -> OrderRequest:
@@ -743,6 +757,112 @@ class ProductionRakutenRssTransportStep49Test(unittest.TestCase):
         self.assertIs(session.application, live_application)
         self.assertEqual([], live_application.Workbooks.open_calls)
         self.assertEqual([], decoy_application.Workbooks.open_calls)
+
+    def test_win32com_connect_uses_live_canonical_workbook_when_rot_reports_onedrive_url(self) -> None:
+        backend = Win32ComExcelBackend()
+        live_workbook = _FakeWorkbook(DEFAULT_WORKBOOK_PATH)
+        account_id = "0123456789ABCDEF"
+        live_workbook.FullName = _onedrive_url_for_default_workbook(account_id)
+        live_application = _FakeExcelApplication([live_workbook], hwnd=101)
+        decoy_application = _FakeExcelApplication(
+            [_FakeWorkbook(DEFAULT_WORKBOOK_PATH.with_name("PHOENIX_RSS_PRODUCTION.decoy.xlsm"))],
+            hwnd=202,
+        )
+        fake_rot = _FakeRot(
+            [
+                ("Excel.Application.101", live_application),
+                ("Workbook.PHOENIX_RSS_PRODUCTION.xlsm", live_workbook),
+                ("Excel.Application.202", decoy_application),
+            ]
+        )
+        win32_client = mock.Mock()
+        pythoncom = mock.Mock()
+        pythoncom.CoInitialize.return_value = None
+        pythoncom.GetRunningObjectTable.return_value = fake_rot
+        pythoncom.CreateBindCtx.return_value = object()
+        backend._require_win32 = lambda: (win32_client, pythoncom)  # type: ignore[method-assign]
+
+        with mock.patch.dict("os.environ", {TRUSTED_ONEDRIVE_ACCOUNT_ENV: account_id}):
+            session = backend.connect(DEFAULT_WORKBOOK_PATH, DEFAULT_WORKBOOK_PATH.name)
+
+        self.assertIs(session.workbook, live_workbook)
+        self.assertIs(session.application, live_application)
+        self.assertEqual([], live_application.Workbooks.open_calls)
+        self.assertEqual([], decoy_application.Workbooks.open_calls)
+
+    def test_win32com_connect_fails_when_onedrive_account_differs_with_same_suffix(self) -> None:
+        backend = Win32ComExcelBackend()
+        wrong_account_workbook = _FakeWorkbook(DEFAULT_WORKBOOK_PATH)
+        wrong_account_workbook.FullName = _onedrive_url_for_default_workbook("FEDCBA9876543210")
+        wrong_application = _FakeExcelApplication([wrong_account_workbook], hwnd=101)
+        fake_rot = _FakeRot(
+            [
+                ("Excel.Application.101", wrong_application),
+                ("Workbook.PHOENIX_RSS_PRODUCTION.xlsm", wrong_account_workbook),
+            ]
+        )
+        win32_client = mock.Mock()
+        pythoncom = mock.Mock()
+        pythoncom.CoInitialize.return_value = None
+        pythoncom.GetRunningObjectTable.return_value = fake_rot
+        pythoncom.CreateBindCtx.return_value = object()
+        backend._require_win32 = lambda: (win32_client, pythoncom)  # type: ignore[method-assign]
+
+        with mock.patch.dict("os.environ", {TRUSTED_ONEDRIVE_ACCOUNT_ENV: "0123456789ABCDEF"}):
+            with self.assertRaises(ExcelComError):
+                backend.connect(DEFAULT_WORKBOOK_PATH, DEFAULT_WORKBOOK_PATH.name)
+
+        self.assertEqual([], wrong_application.Workbooks.open_calls)
+
+    def test_win32com_connect_fails_when_same_filename_is_not_canonical_tail(self) -> None:
+        backend = Win32ComExcelBackend()
+        wrong_workbook = _FakeWorkbook(
+            Path(r"C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\ALT\PHOENIX_RSS_PRODUCTION.xlsm")
+        )
+        wrong_application = _FakeExcelApplication([wrong_workbook], hwnd=101)
+        fake_rot = _FakeRot(
+            [
+                ("Excel.Application.101", wrong_application),
+                ("Workbook.PHOENIX_RSS_PRODUCTION.xlsm", wrong_workbook),
+            ]
+        )
+        win32_client = mock.Mock()
+        pythoncom = mock.Mock()
+        pythoncom.CoInitialize.return_value = None
+        pythoncom.GetRunningObjectTable.return_value = fake_rot
+        pythoncom.CreateBindCtx.return_value = object()
+        backend._require_win32 = lambda: (win32_client, pythoncom)  # type: ignore[method-assign]
+
+        with self.assertRaises(ExcelComError):
+            backend.connect(DEFAULT_WORKBOOK_PATH, DEFAULT_WORKBOOK_PATH.name)
+
+        self.assertEqual([], wrong_application.Workbooks.open_calls)
+
+    def test_ensure_session_reuses_cached_onedrive_url_session(self) -> None:
+        backend = MockExcelComBackend()
+        transport = ProductionRakutenRssTransport(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            backend=backend,
+        )
+        live_workbook = _FakeWorkbook(DEFAULT_WORKBOOK_PATH)
+        account_id = "0123456789ABCDEF"
+        live_workbook.FullName = _onedrive_url_for_default_workbook(account_id)
+        live_application = _FakeExcelApplication([live_workbook], hwnd=101)
+        transport._session = ExcelTransportSession(
+            application=live_application,
+            workbook=live_workbook,
+            workbook_path=DEFAULT_WORKBOOK_PATH,
+            workbook_name=DEFAULT_WORKBOOK_PATH.name,
+        )
+
+        with mock.patch.dict("os.environ", {TRUSTED_ONEDRIVE_ACCOUNT_ENV: account_id}):
+            session = transport._ensure_session()
+
+        self.assertIs(session, transport._session)
+        self.assertIs(session.workbook, live_workbook)
+        self.assertIs(session.application, live_application)
+        self.assertEqual(0, backend.connect_calls)
 
     def test_win32com_connect_fails_when_canonical_workbook_is_missing(self) -> None:
         backend = Win32ComExcelBackend()
@@ -2502,7 +2622,7 @@ class ProductionRakutenRssTransportStep49Test(unittest.TestCase):
             ack = transport.cancel_order("RSS-CANCEL-001")
         payload = backend.cancel_payloads[0]
 
-        self.assertEqual(OrderStatus.ACCEPTED, submit_ack.status)
+        self.assertEqual(OrderStatus.PENDING, submit_ack.status)
         self.assertEqual(OrderStatus.CANCELED, ack.status)
         self.assertEqual(1, backend.cancel_stage_calls)
         self.assertEqual(1, backend.cancel_macro_calls)
@@ -2680,7 +2800,7 @@ class ProductionRakutenRssTransportStep49Test(unittest.TestCase):
                 generated_at=generated,
                 expires_at=generated,
                 state_path=root / "state.json",
-                config={},
+                config={"live_authorization_enabled": True},
                 approved_idempotency_keys=frozenset(),
                 report_blockers=(),
                 trade_signals_context={"test": "context"},
@@ -3749,6 +3869,1041 @@ class RakutenRssSyncBlockerTest(unittest.TestCase):
 
         self.assertEqual(OrderStatus.PENDING, result.status)
         self.assertEqual(123456789, record["rss_order_id"])
+
+    def test_broker_tracked_submit_ack_nonterminal_status_hands_off_to_reconciliation(self) -> None:
+        for submit_status in (OrderStatus.FILLED, OrderStatus.CANCELED):
+            with self.subTest(submit_status=submit_status):
+                client_order_id = f"SYNC-TRACKED-{submit_status.value}"
+                rss_order_id = 987654321 if submit_status is OrderStatus.FILLED else 987654322
+                rss_order_number = f"RSS-{submit_status.value}-001"
+                authoritative_rss_status = 7 if submit_status is OrderStatus.FILLED else 8
+                adapter = MockRakutenRssAdapter()
+                adapter.script_order(
+                    client_order_id,
+                    submit_status=submit_status,
+                    submit_message="",
+                    rss_order_id=rss_order_id,
+                    rss_order_number=rss_order_number,
+                    submit_authoritative_rss_status=authoritative_rss_status,
+                )
+                broker = RakutenRssBroker(
+                    initial_cash_yen=300_000.0,
+                    adapter=adapter,
+                    live_enabled=True,
+                )
+                order = _buy_order(client_order_id)
+
+                result = broker.submit_order(order)
+                record = broker._orders[client_order_id]
+
+                self.assertEqual(OrderStatus.PENDING, result.status)
+                self.assertEqual(OrderStatus.PENDING.value, record["status"])
+                self.assertEqual(rss_order_id, record["rss_order_id"])
+                self.assertEqual(rss_order_number, record["rss_order_number"])
+                self.assertEqual(authoritative_rss_status, record["last_authoritative_rss_status"])
+                self.assertEqual(0, record["filled_quantity"])
+                self.assertEqual(0.0, record["filled_notional_yen"])
+                self.assertEqual(0.0, record["filled_price"])
+                self.assertEqual(0, record["last_fill_quantity"])
+                self.assertEqual(0.0, record["last_fill_price"])
+                self.assertEqual(0.0, record["commission_yen"])
+                self.assertEqual(0.0, record["cash_delta_yen"])
+                self.assertEqual(0.0, record["cost_basis_released_yen"])
+                self.assertEqual(0.0, record["realized_pnl_before_commission_yen"])
+                self.assertEqual(0, record["economics_eligible_quantity"])
+                self.assertEqual(0.0, record["economics_eligible_commission_yen"])
+                self.assertEqual(0.0, record["economics_eligible_realized_pnl_before_commission_yen"])
+                self.assertEqual(0.0, record["adverse_slippage_yen"])
+
+    def test_dispatch_reconcile_only_all_clear_persists_live_active_without_same_cycle_submit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = root / "config" / "v7_direct_pipeline_config.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+
+            reconcile_profile = order_bridge_gate.OPERATING_MODE_PROFILES["LIVE_RECONCILE_ONLY"]
+            active_profile = order_bridge_gate.OPERATING_MODE_PROFILES["LIVE_ACTIVE"]
+            initial_config = {
+                "operating_mode": "LIVE_RECONCILE_ONLY",
+                "live_authorization_enabled": True,
+                "trading_mode": reconcile_profile["trading_mode"],
+                "execution_mode": reconcile_profile["execution_mode"],
+                "trading_actions": reconcile_profile["trading_actions"],
+                "allowed_trading_actions": sorted(reconcile_profile["allowed_trading_actions"]),
+                "broker": {
+                    "type": reconcile_profile["broker_type"],
+                    "transport_mode": reconcile_profile["transport_mode"],
+                    "live_trading_enabled": reconcile_profile["live_trading_enabled"],
+                    "live_enabled": True,
+                    "production_transport_enabled": reconcile_profile["production_transport_enabled"],
+                    "production_live_fire_armed": reconcile_profile["production_live_fire_armed"],
+                },
+            }
+            config_path.write_text(
+                json.dumps(initial_config, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            broker = mock.Mock()
+            broker.health_check.return_value = mock.Mock(healthy=True)
+
+            payload_key = "SYNC-RECONCILE-ALL-CLEAR"
+            context = mock.Mock()
+            context.report = {
+                "status": "APPROVED",
+                "blockers": [],
+                "approved_count": 1,
+                "source": "reports/trade_signals.csv",
+                "operating_scope": "OPERATIONAL",
+            }
+            context.config = initial_config
+            context.state_path = root / "state" / "v7_state.json"
+            context.report_blockers = ()
+            context.approved_idempotency_keys = {payload_key}
+            context.trade_signals_context = {"run_id": "RUN-001"}
+            context.approved_payloads_by_client_order_id = {
+                payload_key: {"client_order_id": payload_key},
+            }
+            context.accepted_orders_by_client_order_id = {
+                payload_key: _buy_order(payload_key),
+            }
+
+            with mock.patch.object(order_bridge_gate, "_read_json", return_value=({}, None)), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_parse_state",
+                    return_value=({payload_key}, None),
+                ), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_trade_signals_context",
+                    return_value=(context.trade_signals_context, []),
+                ) as trade_signals_context_mock, \
+                mock.patch.object(order_bridge_gate, "create_broker", return_value=broker), \
+                mock.patch.object(order_bridge_gate, "_live_submit_preflight", return_value=[]) as live_preflight_mock:
+                result = order_bridge_gate.dispatch_approved_orders(root, context)
+
+            persisted_config = json.loads(config_path.read_text(encoding="utf-8"))
+            expected_config = {
+                "operating_mode": "LIVE_ACTIVE",
+                "live_authorization_enabled": True,
+                "trading_mode": active_profile["trading_mode"],
+                "execution_mode": active_profile["execution_mode"],
+                "trading_actions": active_profile["trading_actions"],
+                "allowed_trading_actions": sorted(active_profile["allowed_trading_actions"]),
+                "broker": {
+                    "type": active_profile["broker_type"],
+                    "transport_mode": active_profile["transport_mode"],
+                    "live_trading_enabled": active_profile["live_trading_enabled"],
+                    "live_enabled": True,
+                    "production_transport_enabled": active_profile["production_transport_enabled"],
+                    "production_live_fire_armed": True,
+                },
+            }
+
+            self.assertEqual([], result)
+            self.assertEqual(expected_config, persisted_config)
+            broker.health_check.assert_called_once_with()
+            broker.submit_order.assert_not_called()
+            broker.refresh_pending_orders.assert_not_called()
+            live_preflight_mock.assert_called_once_with(root, broker)
+            trade_signals_context_mock.assert_called_once()
+
+    def test_dispatch_reconcile_only_nonterminal_keeps_reconcile_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = root / "config" / "v7_direct_pipeline_config.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+
+            reconcile_profile = order_bridge_gate.OPERATING_MODE_PROFILES["LIVE_RECONCILE_ONLY"]
+            initial_config = {
+                "operating_mode": "LIVE_RECONCILE_ONLY",
+                "trading_mode": reconcile_profile["trading_mode"],
+                "execution_mode": reconcile_profile["execution_mode"],
+                "trading_actions": reconcile_profile["trading_actions"],
+                "allowed_trading_actions": sorted(reconcile_profile["allowed_trading_actions"]),
+                "broker": {
+                    "type": reconcile_profile["broker_type"],
+                    "transport_mode": reconcile_profile["transport_mode"],
+                    "live_trading_enabled": reconcile_profile["live_trading_enabled"],
+                    "live_enabled": True,
+                    "production_transport_enabled": reconcile_profile["production_transport_enabled"],
+                    "production_live_fire_armed": reconcile_profile["production_live_fire_armed"],
+                },
+            }
+            config_path.write_text(
+                json.dumps(initial_config, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            broker = mock.Mock()
+            broker.health_check.return_value = mock.Mock(healthy=True)
+
+            payload_key = "SYNC-RECONCILE-NONTERMINAL"
+            context = mock.Mock()
+            context.report = {
+                "status": "APPROVED",
+                "blockers": [],
+                "approved_count": 1,
+                "source": "reports/trade_signals.csv",
+            }
+            context.config = initial_config
+            context.state_path = root / "state" / "v7_state.json"
+            context.report_blockers = ()
+            context.approved_idempotency_keys = {payload_key}
+            context.trade_signals_context = {"run_id": "RUN-002"}
+            context.approved_payloads_by_client_order_id = {
+                payload_key: {"client_order_id": payload_key},
+            }
+            context.accepted_orders_by_client_order_id = {
+                payload_key: _buy_order(payload_key),
+            }
+
+            with mock.patch.object(order_bridge_gate, "_read_json", return_value=({}, None)), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_parse_state",
+                    return_value=({payload_key}, None),
+                ), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_trade_signals_context",
+                    return_value=(context.trade_signals_context, []),
+                ) as trade_signals_context_mock, \
+                mock.patch.object(order_bridge_gate, "create_broker", return_value=broker), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_live_submit_preflight",
+                    return_value=["BROKER_NONTERMINAL_ORDER_COUNT:1"],
+                ) as live_preflight_mock:
+                result = order_bridge_gate.dispatch_approved_orders(root, context)
+
+            persisted_config = json.loads(config_path.read_text(encoding="utf-8"))
+
+            self.assertEqual([], result)
+            self.assertEqual(initial_config, persisted_config)
+            broker.health_check.assert_called_once_with()
+            broker.submit_order.assert_not_called()
+            broker.refresh_pending_orders.assert_not_called()
+            live_preflight_mock.assert_called_once_with(root, broker)
+            trade_signals_context_mock.assert_called_once()
+
+    def test_dispatch_reconcile_only_bridge_pending_keeps_reconcile_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = root / "config" / "v7_direct_pipeline_config.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+
+            reconcile_profile = order_bridge_gate.OPERATING_MODE_PROFILES["LIVE_RECONCILE_ONLY"]
+            initial_config = {
+                "operating_mode": "LIVE_RECONCILE_ONLY",
+                "trading_mode": reconcile_profile["trading_mode"],
+                "execution_mode": reconcile_profile["execution_mode"],
+                "trading_actions": reconcile_profile["trading_actions"],
+                "allowed_trading_actions": sorted(reconcile_profile["allowed_trading_actions"]),
+                "broker": {
+                    "type": reconcile_profile["broker_type"],
+                    "transport_mode": reconcile_profile["transport_mode"],
+                    "live_trading_enabled": reconcile_profile["live_trading_enabled"],
+                    "live_enabled": True,
+                    "production_transport_enabled": reconcile_profile["production_transport_enabled"],
+                    "production_live_fire_armed": reconcile_profile["production_live_fire_armed"],
+                },
+            }
+            config_path.write_text(
+                json.dumps(initial_config, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            broker = mock.Mock()
+            broker.health_check.return_value = mock.Mock(healthy=True)
+
+            payload_key = "SYNC-RECONCILE-PENDING"
+            context = mock.Mock()
+            context.report = {
+                "status": "APPROVED",
+                "blockers": [],
+                "approved_count": 1,
+                "source": "reports/trade_signals.csv",
+            }
+            context.config = initial_config
+            context.state_path = root / "state" / "v7_state.json"
+            context.report_blockers = ()
+            context.approved_idempotency_keys = {payload_key}
+            context.trade_signals_context = {"run_id": "RUN-003"}
+            context.approved_payloads_by_client_order_id = {
+                payload_key: {"client_order_id": payload_key},
+            }
+            context.accepted_orders_by_client_order_id = {
+                payload_key: _buy_order(payload_key),
+            }
+
+            with mock.patch.object(order_bridge_gate, "_read_json", return_value=({}, None)), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_parse_state",
+                    return_value=({payload_key}, None),
+                ), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_trade_signals_context",
+                    return_value=(context.trade_signals_context, []),
+                ) as trade_signals_context_mock, \
+                mock.patch.object(order_bridge_gate, "create_broker", return_value=broker), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_live_submit_preflight",
+                    return_value=["BRIDGE_OUTBOX_PENDING_COUNT:1"],
+                ) as live_preflight_mock:
+                result = order_bridge_gate.dispatch_approved_orders(root, context)
+
+            persisted_config = json.loads(config_path.read_text(encoding="utf-8"))
+
+            self.assertEqual([], result)
+            self.assertEqual(initial_config, persisted_config)
+            broker.health_check.assert_called_once_with()
+            broker.submit_order.assert_not_called()
+            broker.refresh_pending_orders.assert_not_called()
+            live_preflight_mock.assert_called_once_with(root, broker)
+            trade_signals_context_mock.assert_called_once()
+
+    def test_dispatch_reconcile_only_bridge_processing_keeps_reconcile_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = root / "config" / "v7_direct_pipeline_config.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+
+            reconcile_profile = order_bridge_gate.OPERATING_MODE_PROFILES["LIVE_RECONCILE_ONLY"]
+            initial_config = {
+                "operating_mode": "LIVE_RECONCILE_ONLY",
+                "trading_mode": reconcile_profile["trading_mode"],
+                "execution_mode": reconcile_profile["execution_mode"],
+                "trading_actions": reconcile_profile["trading_actions"],
+                "allowed_trading_actions": sorted(reconcile_profile["allowed_trading_actions"]),
+                "broker": {
+                    "type": reconcile_profile["broker_type"],
+                    "transport_mode": reconcile_profile["transport_mode"],
+                    "live_trading_enabled": reconcile_profile["live_trading_enabled"],
+                    "live_enabled": True,
+                    "production_transport_enabled": reconcile_profile["production_transport_enabled"],
+                    "production_live_fire_armed": reconcile_profile["production_live_fire_armed"],
+                },
+            }
+            config_path.write_text(
+                json.dumps(initial_config, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            broker = mock.Mock()
+            broker.health_check.return_value = mock.Mock(healthy=True)
+
+            payload_key = "SYNC-RECONCILE-PROCESSING"
+            context = mock.Mock()
+            context.report = {
+                "status": "APPROVED",
+                "blockers": [],
+                "approved_count": 1,
+                "source": "reports/trade_signals.csv",
+            }
+            context.config = initial_config
+            context.state_path = root / "state" / "v7_state.json"
+            context.report_blockers = ()
+            context.approved_idempotency_keys = {payload_key}
+            context.trade_signals_context = {"run_id": "RUN-004"}
+            context.approved_payloads_by_client_order_id = {
+                payload_key: {"client_order_id": payload_key},
+            }
+            context.accepted_orders_by_client_order_id = {
+                payload_key: _buy_order(payload_key),
+            }
+
+            with mock.patch.object(order_bridge_gate, "_read_json", return_value=({}, None)), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_parse_state",
+                    return_value=({payload_key}, None),
+                ), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_trade_signals_context",
+                    return_value=(context.trade_signals_context, []),
+                ) as trade_signals_context_mock, \
+                mock.patch.object(order_bridge_gate, "create_broker", return_value=broker), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_live_submit_preflight",
+                    return_value=["BRIDGE_OUTBOX_PROCESSING_COUNT:1"],
+                ) as live_preflight_mock:
+                result = order_bridge_gate.dispatch_approved_orders(root, context)
+
+            persisted_config = json.loads(config_path.read_text(encoding="utf-8"))
+
+            self.assertEqual([], result)
+            self.assertEqual(initial_config, persisted_config)
+            broker.health_check.assert_called_once_with()
+            broker.submit_order.assert_not_called()
+            broker.refresh_pending_orders.assert_not_called()
+            live_preflight_mock.assert_called_once_with(root, broker)
+            trade_signals_context_mock.assert_called_once()
+
+    def test_dispatch_reconcile_only_unhealthy_keeps_reconcile_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = root / "config" / "v7_direct_pipeline_config.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+
+            reconcile_profile = order_bridge_gate.OPERATING_MODE_PROFILES["LIVE_RECONCILE_ONLY"]
+            initial_config = {
+                "operating_mode": "LIVE_RECONCILE_ONLY",
+                "trading_mode": reconcile_profile["trading_mode"],
+                "execution_mode": reconcile_profile["execution_mode"],
+                "trading_actions": reconcile_profile["trading_actions"],
+                "allowed_trading_actions": sorted(reconcile_profile["allowed_trading_actions"]),
+                "broker": {
+                    "type": reconcile_profile["broker_type"],
+                    "transport_mode": reconcile_profile["transport_mode"],
+                    "live_trading_enabled": reconcile_profile["live_trading_enabled"],
+                    "live_enabled": True,
+                    "production_transport_enabled": reconcile_profile["production_transport_enabled"],
+                    "production_live_fire_armed": reconcile_profile["production_live_fire_armed"],
+                },
+            }
+            config_path.write_text(
+                json.dumps(initial_config, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            broker = mock.Mock()
+            broker.health_check.return_value = mock.Mock(healthy=False)
+
+            payload_key = "SYNC-RECONCILE-UNHEALTHY"
+            context = mock.Mock()
+            context.report = {
+                "status": "APPROVED",
+                "blockers": [],
+                "approved_count": 1,
+                "source": "reports/trade_signals.csv",
+            }
+            context.config = initial_config
+            context.state_path = root / "state" / "v7_state.json"
+            context.report_blockers = ()
+            context.approved_idempotency_keys = {payload_key}
+            context.trade_signals_context = {"run_id": "RUN-005"}
+            context.approved_payloads_by_client_order_id = {
+                payload_key: {"client_order_id": payload_key},
+            }
+            context.accepted_orders_by_client_order_id = {
+                payload_key: _buy_order(payload_key),
+            }
+
+            with mock.patch.object(order_bridge_gate, "_read_json", return_value=({}, None)), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_parse_state",
+                    return_value=({payload_key}, None),
+                ), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_trade_signals_context",
+                    return_value=(context.trade_signals_context, []),
+                ) as trade_signals_context_mock, \
+                mock.patch.object(order_bridge_gate, "create_broker", return_value=broker), \
+                mock.patch.object(order_bridge_gate, "_live_submit_preflight", return_value=[]) as live_preflight_mock:
+                result = order_bridge_gate.dispatch_approved_orders(root, context)
+
+            persisted_config = json.loads(config_path.read_text(encoding="utf-8"))
+
+            self.assertEqual([], result)
+            self.assertEqual(initial_config, persisted_config)
+            broker.health_check.assert_called_once_with()
+            broker.submit_order.assert_not_called()
+            broker.refresh_pending_orders.assert_not_called()
+            trade_signals_context_mock.assert_called_once()
+
+
+class TestBrokerAdapterReconciliationInterface(unittest.TestCase):
+    def test_live_authorization_strict_bool_literal_true_only(self) -> None:
+        self.assertTrue(
+            order_bridge_gate._live_authorization_enabled(
+                {"live_authorization_enabled": True}
+            )
+        )
+        for value in (False, None, 0, 1, "True", "False", "1"):
+            with self.subTest(value=value):
+                self.assertFalse(
+                    order_bridge_gate._live_authorization_enabled(
+                        {"live_authorization_enabled": value}
+                    )
+                )
+        self.assertFalse(order_bridge_gate._live_authorization_enabled({}))
+
+    def test_live_authorization_unauthorized_live_active_builds_safe_report_and_fail_closes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = root / "config" / "v7_direct_pipeline_config.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+
+            reconcile_profile = order_bridge_gate.OPERATING_MODE_PROFILES["LIVE_RECONCILE_ONLY"]
+            active_profile = order_bridge_gate.OPERATING_MODE_PROFILES["LIVE_ACTIVE"]
+            template = json.loads(
+                (Path(__file__).resolve().parents[1] / "config" / "v7_direct_pipeline_config.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            direct_config = json.loads(json.dumps(template))
+            direct_config["operating_mode"] = "LIVE_ACTIVE"
+            direct_config["live_authorization_enabled"] = False
+            direct_config["trading_mode"] = active_profile["trading_mode"]
+            direct_config["execution_mode"] = active_profile["execution_mode"]
+            direct_config["trading_actions"] = active_profile["trading_actions"]
+            direct_config["allowed_trading_actions"] = sorted(active_profile["allowed_trading_actions"])
+            direct_config["broker"].update(
+                {
+                    "type": active_profile["broker_type"],
+                    "transport_mode": active_profile["transport_mode"],
+                    "live_trading_enabled": active_profile["live_trading_enabled"],
+                    "live_enabled": True,
+                    "production_transport_enabled": active_profile["production_transport_enabled"],
+                    "production_live_fire_armed": active_profile["production_live_fire_armed"],
+                }
+            )
+            config_path.write_text(
+                json.dumps(direct_config, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            fake_batch = mock.Mock()
+            fake_batch.candidates = order_bridge_gate.pd.DataFrame()
+            fake_audit = mock.Mock()
+            fake_audit.as_dict.return_value = {"eligible_candidates_sha256": "SAFEHASH"}
+            fake_audit.eligible_candidates_sha256 = (
+                "SAFEHASH000000000000000000000000000000000000000000000000000000000000"
+            )
+            fake_batch.audit = fake_audit
+
+            broker = mock.Mock()
+            broker.get_account_snapshot.return_value = mock.Mock(equity_yen=1000000)
+            captured: dict[str, dict[str, object]] = {}
+
+            def read_json(path: Path) -> tuple[dict[str, object], str | None]:
+                name = Path(path).name
+                if name == "v7_direct_pipeline_config.json":
+                    return json.loads(json.dumps(direct_config)), None
+                if name == "v7_position_sizer_config.json":
+                    return {"position_sizing": {"lot_size": 100}}, None
+                if name == "v7_risk_config.json":
+                    return {"risk": {"max_daily_loss_pct": 0.03}}, None
+                if name == "notification_source_manifest.json":
+                    return {}, None
+                return {}, None
+
+            def load_broker(_root: Path, config: dict[str, object]):
+                captured["config"] = json.loads(json.dumps(config))
+                return broker, None
+
+            with mock.patch.dict(order_bridge_gate.os.environ, {"PHOENIX_OPERATING_SCOPE": "OPERATIONAL"}, clear=False), \
+                mock.patch.object(order_bridge_gate, "_read_json", side_effect=read_json), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_load_candidate_batch",
+                    return_value=(fake_batch, None, root / "reports" / "trade_signals.csv"),
+                ), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_position_sizing_config",
+                    return_value=mock.Mock(validate=mock.Mock(), lot_size=100),
+                ), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_risk_config",
+                    return_value=mock.Mock(validate=mock.Mock(), max_daily_loss_pct=0.03, risk_v2_enabled=False),
+                ), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_trade_signals_context",
+                    return_value=({"trade_signals_row_count": 0}, []),
+                ), \
+                mock.patch.object(order_bridge_gate, "resolve_effective_total_invested_pct", return_value=1.0), \
+                mock.patch.object(order_bridge_gate, "size_candidates", return_value=[]), \
+                mock.patch.object(order_bridge_gate, "_load_broker", side_effect=load_broker), \
+                mock.patch.object(order_bridge_gate, "create_broker") as create_broker_mock:
+                report, context = order_bridge_gate._build_preorder_report_artifacts(root)
+                result = order_bridge_gate.dispatch_approved_orders(root, context)
+
+            persisted_config = json.loads(config_path.read_text(encoding="utf-8"))
+            expected_safe_config = json.loads(json.dumps(direct_config))
+            expected_safe_config["operating_mode"] = "LIVE_RECONCILE_ONLY"
+            expected_safe_config["trading_mode"] = reconcile_profile["trading_mode"]
+            expected_safe_config["execution_mode"] = reconcile_profile["execution_mode"]
+            expected_safe_config["trading_actions"] = reconcile_profile["trading_actions"]
+            expected_safe_config["allowed_trading_actions"] = sorted(reconcile_profile["allowed_trading_actions"])
+            expected_safe_config["broker"].update(
+                {
+                    "type": reconcile_profile["broker_type"],
+                    "transport_mode": reconcile_profile["transport_mode"],
+                    "live_trading_enabled": reconcile_profile["live_trading_enabled"],
+                    "live_enabled": True,
+                    "production_transport_enabled": reconcile_profile["production_transport_enabled"],
+                    "production_live_fire_armed": reconcile_profile["production_live_fire_armed"],
+                }
+            )
+
+            expected_reconciled_config = json.loads(json.dumps(direct_config))
+            expected_reconciled_config["operating_mode"] = "LIVE_RECONCILE_ONLY"
+            expected_reconciled_config["trading_mode"] = reconcile_profile["trading_mode"]
+            expected_reconciled_config["execution_mode"] = reconcile_profile["execution_mode"]
+            expected_reconciled_config["trading_actions"] = reconcile_profile["trading_actions"]
+            expected_reconciled_config["allowed_trading_actions"] = sorted(reconcile_profile["allowed_trading_actions"])
+            expected_reconciled_config["broker"].update(
+                {
+                    "type": reconcile_profile["broker_type"],
+                    "transport_mode": reconcile_profile["transport_mode"],
+                    "live_trading_enabled": reconcile_profile["live_trading_enabled"],
+                    "live_enabled": True,
+                    "production_transport_enabled": reconcile_profile["production_transport_enabled"],
+                    "production_live_fire_armed": reconcile_profile["production_live_fire_armed"],
+                }
+            )
+
+            self.assertEqual("RECONCILE_ONLY", report["trading_actions"])
+            self.assertEqual(expected_safe_config, captured["config"])
+            self.assertEqual("LIVE_ACTIVE", context.config["operating_mode"])
+            self.assertFalse(context.config["live_authorization_enabled"])
+            self.assertEqual([], result)
+            create_broker_mock.assert_not_called()
+            self.assertEqual(expected_reconciled_config, persisted_config)
+
+    def test_live_authorization_reconcile_only_does_not_promote_when_unauthorized_or_monitor_only(self) -> None:
+        reconcile_profile = order_bridge_gate.OPERATING_MODE_PROFILES["LIVE_RECONCILE_ONLY"]
+
+        for live_authorization_enabled, operating_scope, blockers in (
+            (False, "OPERATIONAL", ("AUTHORIZATION_DISABLED",)),
+            (True, "MONITOR_ONLY", ("MONITOR_ONLY_SCOPE",)),
+        ):
+            with self.subTest(
+                live_authorization_enabled=live_authorization_enabled,
+                operating_scope=operating_scope,
+            ):
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    root = Path(temporary_directory)
+                    config_path = root / "config" / "v7_direct_pipeline_config.json"
+                    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+                    initial_config = {
+                        "operating_mode": "LIVE_RECONCILE_ONLY",
+                        "live_authorization_enabled": live_authorization_enabled,
+                        "trading_mode": reconcile_profile["trading_mode"],
+                        "execution_mode": reconcile_profile["execution_mode"],
+                        "trading_actions": reconcile_profile["trading_actions"],
+                        "allowed_trading_actions": sorted(reconcile_profile["allowed_trading_actions"]),
+                        "broker": {
+                            "type": reconcile_profile["broker_type"],
+                            "transport_mode": reconcile_profile["transport_mode"],
+                            "live_trading_enabled": reconcile_profile["live_trading_enabled"],
+                            "live_enabled": True,
+                            "production_transport_enabled": reconcile_profile["production_transport_enabled"],
+                            "production_live_fire_armed": reconcile_profile["production_live_fire_armed"],
+                        },
+                    }
+                    config_path.write_text(
+                        json.dumps(initial_config, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+
+                    broker = mock.Mock()
+                    broker.health_check.return_value = mock.Mock(
+                        healthy=True,
+                        message="BROKER_HEALTH_OK",
+                    )
+                    broker.refresh_pending_orders.return_value = None
+                    broker.nonterminal_order_count.return_value = 0
+
+                    context = order_bridge_gate.PreorderDispatchContext(
+                        report={
+                            "status": "BLOCKED",
+                            "blockers": list(blockers),
+                            "approved_count": 0,
+                            "source": "reports/trade_signals.csv",
+                            "operating_scope": operating_scope,
+                        },
+                        generated_at=order_bridge_gate._now_jst(),
+                        expires_at=order_bridge_gate._now_jst(),
+                        state_path=root / "state" / "v7_state.json",
+                        config=initial_config,
+                        approved_idempotency_keys=frozenset(),
+                        report_blockers=blockers,
+                        trade_signals_context={"trade_signals_row_count": 0},
+                        executable_orders_by_client_order_id={},
+                        accepted_orders_by_client_order_id={},
+                        approved_payloads_by_client_order_id={},
+                    )
+
+                    with mock.patch.object(order_bridge_gate, "_parse_state", return_value=(set(), None)), \
+                        mock.patch.object(order_bridge_gate, "_read_json", return_value=({}, None)), \
+                        mock.patch.object(
+                            order_bridge_gate,
+                            "_trade_signals_context",
+                            return_value=(context.trade_signals_context, []),
+                        ), \
+                        mock.patch.object(order_bridge_gate, "create_broker", return_value=broker):
+                        result = order_bridge_gate.dispatch_approved_orders(root, context)
+
+                    persisted_config = json.loads(config_path.read_text(encoding="utf-8"))
+                    self.assertEqual([], result)
+                    self.assertEqual(initial_config, persisted_config)
+                    broker.health_check.assert_called_once_with()
+                    broker.refresh_pending_orders.assert_called_once()
+                    broker.submit_order.assert_not_called()
+
+    def test_live_authorization_reconcile_only_operational_promotes_live_active_with_armed_true(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = root / "config" / "v7_direct_pipeline_config.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+
+            reconcile_profile = order_bridge_gate.OPERATING_MODE_PROFILES["LIVE_RECONCILE_ONLY"]
+            active_profile = order_bridge_gate.OPERATING_MODE_PROFILES["LIVE_ACTIVE"]
+            initial_config = {
+                "operating_mode": "LIVE_RECONCILE_ONLY",
+                "live_authorization_enabled": True,
+                "trading_mode": reconcile_profile["trading_mode"],
+                "execution_mode": reconcile_profile["execution_mode"],
+                "trading_actions": reconcile_profile["trading_actions"],
+                "allowed_trading_actions": sorted(reconcile_profile["allowed_trading_actions"]),
+                "broker": {
+                    "type": reconcile_profile["broker_type"],
+                    "transport_mode": reconcile_profile["transport_mode"],
+                    "live_trading_enabled": reconcile_profile["live_trading_enabled"],
+                    "live_enabled": True,
+                    "production_transport_enabled": reconcile_profile["production_transport_enabled"],
+                    "production_live_fire_armed": reconcile_profile["production_live_fire_armed"],
+                },
+            }
+            config_path.write_text(
+                json.dumps(initial_config, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
+            broker = mock.Mock()
+            broker.health_check.return_value = mock.Mock(
+                healthy=True,
+                message="BROKER_HEALTH_OK",
+            )
+            broker.refresh_pending_orders.return_value = None
+            broker.nonterminal_order_count.return_value = 0
+
+            payload_key = "SYNC-LIVE-AUTH-OPERATIONAL"
+            context = order_bridge_gate.PreorderDispatchContext(
+                report={
+                    "status": "APPROVED",
+                    "blockers": [],
+                    "approved_count": 1,
+                    "source": "reports/trade_signals.csv",
+                    "operating_scope": "OPERATIONAL",
+                },
+                generated_at=order_bridge_gate._now_jst(),
+                expires_at=order_bridge_gate._now_jst(),
+                state_path=root / "state" / "v7_state.json",
+                config=initial_config,
+                approved_idempotency_keys={payload_key},
+                report_blockers=(),
+                trade_signals_context={"trade_signals_row_count": 0},
+                executable_orders_by_client_order_id={},
+                accepted_orders_by_client_order_id={
+                    payload_key: _buy_order(payload_key),
+                },
+                approved_payloads_by_client_order_id={
+                    payload_key: {"client_order_id": payload_key},
+                },
+            )
+
+            with mock.patch.object(order_bridge_gate, "_parse_state", return_value=({payload_key}, None)), \
+                mock.patch.object(order_bridge_gate, "_read_json", return_value=({}, None)), \
+                mock.patch.object(
+                    order_bridge_gate,
+                    "_trade_signals_context",
+                    return_value=(context.trade_signals_context, []),
+                ), \
+                mock.patch.object(order_bridge_gate, "create_broker", return_value=broker):
+                result = order_bridge_gate.dispatch_approved_orders(root, context)
+
+            persisted_config = json.loads(config_path.read_text(encoding="utf-8"))
+            expected_config = {
+                "operating_mode": "LIVE_ACTIVE",
+                "live_authorization_enabled": True,
+                "trading_mode": active_profile["trading_mode"],
+                "execution_mode": active_profile["execution_mode"],
+                "trading_actions": active_profile["trading_actions"],
+                "allowed_trading_actions": sorted(active_profile["allowed_trading_actions"]),
+                "broker": {
+                    "type": active_profile["broker_type"],
+                    "transport_mode": active_profile["transport_mode"],
+                    "live_trading_enabled": active_profile["live_trading_enabled"],
+                    "live_enabled": True,
+                    "production_transport_enabled": active_profile["production_transport_enabled"],
+                    "production_live_fire_armed": active_profile["production_live_fire_armed"],
+                },
+            }
+
+            self.assertEqual([], result)
+            self.assertEqual(expected_config, persisted_config)
+            broker.health_check.assert_called_once_with()
+            broker.refresh_pending_orders.assert_called_once()
+            broker.submit_order.assert_not_called()
+
+    def test_broker_adapter_reconciliation_interface(self) -> None:
+        self.assertTrue(hasattr(BrokerAdapter, "refresh_pending_orders"))
+        self.assertTrue(hasattr(BrokerAdapter, "nonterminal_order_count"))
+        self.assertIsNot(
+            True,
+            getattr(
+                BrokerAdapter.refresh_pending_orders,
+                "__isabstractmethod__",
+                False,
+            ),
+        )
+        self.assertIsNot(
+            True,
+            getattr(
+                BrokerAdapter.nonterminal_order_count,
+                "__isabstractmethod__",
+                False,
+            ),
+        )
+        self.assertEqual([], PaperBroker().refresh_pending_orders())
+        self.assertEqual(0, PaperBroker().nonterminal_order_count())
+
+
+class TestPhoenixWatchdogCycleOwner(unittest.TestCase):
+    def test_watchdog_cycle_owner_contract(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        watchdog_source = (root / "phoenix_watchdog.py").read_text(encoding="utf-8")
+        scheduler_source = (root / "install_v7_scheduler.ps1").read_text(encoding="utf-8")
+        uninstall_source = (root / "uninstall_v7_scheduler.ps1").read_text(encoding="utf-8")
+        run_phoenix_source = (root / "run_phoenix.py").read_text(encoding="utf-8")
+        test_source = Path(__file__).read_text(encoding="utf-8")
+
+        self.assertIn('[string]$TaskName = "PHOENIX-v7-Watchdog"', scheduler_source)
+        self.assertIn('[string]$TaskName = "PHOENIX-v7-Watchdog"', uninstall_source)
+        self.assertIn('$EntryScript = Join-Path $Root "phoenix_watchdog.py"', scheduler_source)
+        self.assertIn("-LogonType Interactive", scheduler_source)
+
+        self.assertIn('TARGET_SCRIPT = ROOT_DIR / "run_phoenix.py"', watchdog_source)
+        self.assertIn("cycle_interval_seconds = 5 * 60.0", watchdog_source)
+        self.assertIn("if exit_code == 0:", watchdog_source)
+        self.assertIn("PROCESS_IDLE", watchdog_source)
+        self.assertIn("if exit_code is None:", watchdog_source)
+        self.assertIn("self.stop_event.wait(cycle_interval_seconds)", watchdog_source)
+        self.assertIn('cutoff_time = datetime.strptime("15:30", "%H:%M").time()', watchdog_source)
+        self.assertIn(
+            'if now.time() >= cutoff_time and operating_mode != "LIVE_RECONCILE_ONLY":',
+            watchdog_source,
+        )
+        self.assertIn('if refreshed_mode != "LIVE_RECONCILE_ONLY":', watchdog_source)
+        self.assertIn("enable_file_ready_heartbeat=True", watchdog_source)
+        self.assertIn("self._file_ready_transport = ProductionRakutenRssTransport()", watchdog_source)
+
+        self.assertNotIn("while True", run_phoenix_source)
+
+        self.assertIn(
+            "test_dispatch_reconcile_only_all_clear_persists_live_active_without_same_cycle_submit",
+            test_source,
+        )
+        self.assertIn(
+            "test_dispatch_reconcile_only_nonterminal_keeps_reconcile_only",
+            test_source,
+        )
+        self.assertIn(
+            "test_dispatch_reconcile_only_bridge_pending_keeps_reconcile_only",
+            test_source,
+        )
+        self.assertIn(
+            "test_dispatch_reconcile_only_bridge_processing_keeps_reconcile_only",
+            test_source,
+        )
+        self.assertIn(
+            "test_dispatch_reconcile_only_unhealthy_keeps_reconcile_only",
+            test_source,
+        )
+
+    def test_watchdog_reconcile_only_exits_after_zero_persisted_nonterminal_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = root / "config" / "v7_direct_pipeline_config.json"
+            state_path = root / "state" / "v7_rakuten_rss_broker.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "operating_mode": "LIVE_RECONCILE_ONLY",
+                        "broker": {
+                            "state_file": "state/v7_rakuten_rss_broker.json",
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "state_version": 1,
+                        "orders": {},
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            watchdog = phoenix_watchdog.PhoenixWatchdog(
+                target_script=root / "run_phoenix.py",
+                root_dir=root,
+                log_dir=root / "logs",
+                lock_file=root / "logs" / "phoenix_watchdog.lock",
+            )
+            launch_mock = mock.Mock(return_value=None)
+            wait_mock = mock.Mock(return_value=True)
+            datetime_mock = mock.Mock()
+            datetime_mock.now.return_value = datetime(2026, 8, 30, 15, 31, tzinfo=ZoneInfo("Asia/Tokyo"))
+            datetime_mock.strptime.return_value = datetime(2026, 8, 30, 15, 30)
+
+            with mock.patch.object(phoenix_watchdog, "datetime", datetime_mock), \
+                mock.patch.object(watchdog.logger, "emit") as emit_mock, \
+                mock.patch.object(watchdog, "_launch_and_monitor", launch_mock), \
+                mock.patch.object(watchdog.stop_event, "wait", wait_mock):
+                exit_code = watchdog._monitor()
+
+            self.assertEqual(phoenix_watchdog.EXIT_OK, exit_code)
+            self.assertEqual(1, launch_mock.call_count)
+            wait_mock.assert_not_called()
+            self.assertEqual(
+                [mock.call("SAFE_STOP", reason="reconciliation_complete", nonterminal_order_count=0)],
+                emit_mock.call_args_list,
+            )
+
+    def test_watchdog_reconcile_only_continues_when_persisted_nonterminal_count_positive(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = root / "config" / "v7_direct_pipeline_config.json"
+            state_path = root / "state" / "v7_rakuten_rss_broker.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "operating_mode": "LIVE_RECONCILE_ONLY",
+                        "broker": {
+                            "state_file": "state/v7_rakuten_rss_broker.json",
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "state_version": 1,
+                        "orders": {
+                            "CLIENT-001": {
+                                "status": "PENDING",
+                            }
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            watchdog = phoenix_watchdog.PhoenixWatchdog(
+                target_script=root / "run_phoenix.py",
+                root_dir=root,
+                log_dir=root / "logs",
+                lock_file=root / "logs" / "phoenix_watchdog.lock",
+            )
+            launch_mock = mock.Mock(return_value=None)
+            wait_mock = mock.Mock(return_value=True)
+            datetime_mock = mock.Mock()
+            datetime_mock.now.return_value = datetime(2026, 8, 30, 15, 31, tzinfo=ZoneInfo("Asia/Tokyo"))
+            datetime_mock.strptime.return_value = datetime(2026, 8, 30, 15, 30)
+
+            with mock.patch.object(phoenix_watchdog, "datetime", datetime_mock), \
+                mock.patch.object(watchdog.logger, "emit") as emit_mock, \
+                mock.patch.object(watchdog, "_launch_and_monitor", launch_mock), \
+                mock.patch.object(watchdog.stop_event, "wait", wait_mock):
+                exit_code = watchdog._monitor()
+
+            self.assertEqual(phoenix_watchdog.EXIT_OK, exit_code)
+            self.assertEqual(1, launch_mock.call_count)
+            wait_mock.assert_called_once_with(5 * 60.0)
+            self.assertEqual(
+                [
+                    mock.call("RECONCILIATION_CONTINUES", nonterminal_order_count=1),
+                    mock.call("SAFE_STOP", reason="requested"),
+                ],
+                emit_mock.call_args_list,
+            )
+
+    def test_watchdog_reconcile_only_waits_when_persisted_nonterminal_count_unknown(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = root / "config" / "v7_direct_pipeline_config.json"
+            state_path = root / "state" / "v7_rakuten_rss_broker.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "operating_mode": "LIVE_RECONCILE_ONLY",
+                        "broker": {
+                            "state_file": "state/v7_rakuten_rss_broker.json",
+                        },
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            state_path.write_text("{", encoding="utf-8")
+            watchdog = phoenix_watchdog.PhoenixWatchdog(
+                target_script=root / "run_phoenix.py",
+                root_dir=root,
+                log_dir=root / "logs",
+                lock_file=root / "logs" / "phoenix_watchdog.lock",
+            )
+            launch_mock = mock.Mock(return_value=None)
+            wait_mock = mock.Mock(return_value=True)
+            datetime_mock = mock.Mock()
+            datetime_mock.now.return_value = datetime(2026, 8, 30, 15, 31, tzinfo=ZoneInfo("Asia/Tokyo"))
+            datetime_mock.strptime.return_value = datetime(2026, 8, 30, 15, 30)
+
+            with mock.patch.object(phoenix_watchdog, "datetime", datetime_mock), \
+                mock.patch.object(watchdog.logger, "emit") as emit_mock, \
+                mock.patch.object(watchdog, "_launch_and_monitor", launch_mock), \
+                mock.patch.object(watchdog.stop_event, "wait", wait_mock):
+                exit_code = watchdog._monitor()
+
+            self.assertEqual(phoenix_watchdog.EXIT_OK, exit_code)
+            self.assertEqual(1, launch_mock.call_count)
+            wait_mock.assert_called_once_with(5 * 60.0)
+            self.assertEqual(
+                [
+                    mock.call(
+                        "RECONCILIATION_STATE_UNKNOWN",
+                        reason="persisted_nonterminal_count_unavailable",
+                    ),
+                    mock.call("SAFE_STOP", reason="requested"),
+                ],
+                emit_mock.call_args_list,
+            )
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from datetime import datetime
 import argparse
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
 import signal
 import subprocess
@@ -27,6 +28,7 @@ from phoenix_heartbeat import (
     inspect_heartbeat,
 )
 from phoenix_core.production_rakuten_rss_transport import ProductionRakutenRssTransport
+from phoenix_core.rakuten_rss_broker import read_persisted_nonterminal_order_count
 
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -36,7 +38,7 @@ LOCK_FILE = LOG_DIR / "phoenix_watchdog.lock"
 HEARTBEAT_PATH = ROOT_DIR / "runtime" / "guardian" / "heartbeat.json"
 RECOVERY_STATE_PATH = ROOT_DIR / "runtime" / "guardian" / "recovery_state.json"
 
-MODE = "PAPER"
+MODE = "LIVE"
 ORDERS_SUBMITTED = 0
 MAX_RESTARTS_HARD_LIMIT = 10
 FILE_READY_HEARTBEAT_SECONDS = 30.0
@@ -505,6 +507,23 @@ class PhoenixWatchdog:
 
         return False, f"Step44 READY summary not found: {path}"
 
+    def _reconciliation_nonterminal_count(
+        self,
+        pipeline_config: Mapping[str, Any],
+    ) -> int | None:
+        broker_config = pipeline_config.get("broker")
+        if not isinstance(broker_config, Mapping):
+            return None
+
+        state_file = broker_config.get("state_file")
+        if not isinstance(state_file, str) or not state_file.strip():
+            return None
+
+        state_path = Path(state_file)
+        if not state_path.is_absolute():
+            state_path = self.root_dir / state_path
+        return read_persisted_nonterminal_order_count(state_path)
+
     def _publish_file_ready_heartbeat_once(self) -> bool:
         if not self.enable_file_ready_heartbeat:
             return False
@@ -598,9 +617,9 @@ class PhoenixWatchdog:
             target=str(self.target_script),
         )
         self.logger.emit(
-            "PAPER_MODE_FIXED",
-            live_trading=False,
-            order_capability=False,
+            "LIVE_MODE_FIXED",
+            live_trading=True,
+            order_capability=True,
         )
 
         try:
@@ -627,13 +646,46 @@ class PhoenixWatchdog:
 
     def _monitor(self) -> int:
         restart_count = 0
-        child_idle = False
+        cycle_interval_seconds = 5 * 60.0
+        cutoff_time = datetime.strptime("15:30", "%H:%M").time()
+        operating_mode_path = self.root_dir / "config" / "v7_direct_pipeline_config.json"
         while not self.stop_event.is_set():
-            if child_idle:
-                if self.stop_event.wait(self.config.poll_seconds):
-                    self.logger.emit("SAFE_STOP", reason=self.stop_reason)
-                    return EXIT_OK
-                continue
+            try:
+                raw_payload = json.loads(operating_mode_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+                self.logger.emit(
+                    "CONFIGURATION_ERROR",
+                    reason="operating_mode_config_unavailable",
+                    target=str(operating_mode_path),
+                    error=str(error),
+                )
+                return EXIT_CONFIGURATION_ERROR
+
+            if not isinstance(raw_payload, dict):
+                self.logger.emit(
+                    "CONFIGURATION_ERROR",
+                    reason="operating_mode_config_invalid",
+                    target=str(operating_mode_path),
+                )
+                return EXIT_CONFIGURATION_ERROR
+
+            operating_mode = str(raw_payload.get("operating_mode", "")).strip().upper()
+            if operating_mode not in {"LIVE_ACTIVE", "LIVE_RECONCILE_ONLY"}:
+                self.logger.emit(
+                    "CONFIGURATION_ERROR",
+                    reason="operating_mode_not_live",
+                    target=str(operating_mode_path),
+                    operating_mode=operating_mode or "missing",
+                )
+                return EXIT_CONFIGURATION_ERROR
+
+            now = datetime.now(JST)
+            if now.time() >= cutoff_time and operating_mode != "LIVE_RECONCILE_ONLY":
+                self.logger.emit(
+                    "SAFE_STOP",
+                    reason="day_complete",
+                )
+                return EXIT_OK
 
             exit_code = self._launch_and_monitor(
                 restart_attempt=restart_count,
@@ -656,7 +708,60 @@ class PhoenixWatchdog:
                 )
                 return EXIT_CONFIGURATION_ERROR
             if exit_code is None:
-                child_idle = True
+                now = datetime.now(JST)
+                if now.time() >= cutoff_time:
+                    try:
+                        refreshed_payload = json.loads(
+                            operating_mode_path.read_text(encoding="utf-8")
+                        )
+                    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+                        self.logger.emit(
+                            "CONFIGURATION_ERROR",
+                            reason="operating_mode_config_unavailable",
+                            target=str(operating_mode_path),
+                            error=str(error),
+                        )
+                        return EXIT_CONFIGURATION_ERROR
+
+                    if not isinstance(refreshed_payload, dict):
+                        self.logger.emit(
+                            "CONFIGURATION_ERROR",
+                            reason="operating_mode_config_invalid",
+                            target=str(operating_mode_path),
+                        )
+                        return EXIT_CONFIGURATION_ERROR
+
+                    refreshed_mode = str(
+                        refreshed_payload.get("operating_mode", "")
+                    ).strip().upper()
+                    if refreshed_mode != "LIVE_RECONCILE_ONLY":
+                        self.logger.emit(
+                            "SAFE_STOP",
+                            reason="day_complete",
+                        )
+                        return EXIT_OK
+                    count = self._reconciliation_nonterminal_count(refreshed_payload)
+                    if count == 0:
+                        self.logger.emit(
+                            "SAFE_STOP",
+                            reason="reconciliation_complete",
+                            nonterminal_order_count=0,
+                        )
+                        return EXIT_OK
+                    if count is None:
+                        self.logger.emit(
+                            "RECONCILIATION_STATE_UNKNOWN",
+                            reason="persisted_nonterminal_count_unavailable",
+                        )
+                    else:
+                        self.logger.emit(
+                            "RECONCILIATION_CONTINUES",
+                            nonterminal_order_count=count,
+                        )
+
+                if self.stop_event.wait(cycle_interval_seconds):
+                    self.logger.emit("SAFE_STOP", reason=self.stop_reason)
+                    return EXIT_OK
                 continue
             if exit_code == EXIT_CONFIGURATION_ERROR:
                 self.logger.emit(
@@ -796,8 +901,8 @@ class PhoenixWatchdog:
                 "PYTHONUTF8": "1",
                 "PHOENIX_MODE": MODE,
                 "PHOENIX_EXECUTION_MODE": MODE,
-                "PHOENIX_LIVE_TRADING": "0",
-                "PHOENIX_ALLOW_LIVE_TRADING": "0",
+                "PHOENIX_LIVE_TRADING": "1",
+                "PHOENIX_ALLOW_LIVE_TRADING": "1",
                 "PHOENIX_WATCHDOG_RESTART_ATTEMPT": str(restart_attempt),
             }
         )
@@ -1013,7 +1118,7 @@ def _restore_signal_handlers(previous: dict[signal.Signals, Any]) -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="PHOENIX Step36 WatchDog (PAPER only)",
+        description="PHOENIX Step36 WatchDog (LIVE bootstrap)",
     )
     parser.add_argument(
         "--max-restarts",
