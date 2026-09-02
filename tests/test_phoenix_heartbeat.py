@@ -427,6 +427,8 @@ class RunPhoenixHeartbeatIntegrationTest(unittest.TestCase):
             status="READY",
             reasons=(),
             report_error=None,
+            mode="PAPER",
+            orders_submitted=0,
         )
         recovery = SimpleNamespace(
             blocked=False,
@@ -435,6 +437,7 @@ class RunPhoenixHeartbeatIntegrationTest(unittest.TestCase):
             recovery_reasons=(),
             state_path="recovery.json",
             previous_git_commit="a" * 40,
+            current_git_commit="b" * 40,
             recovery_attempt=0,
             recovered_at=None,
         )
@@ -561,6 +564,12 @@ class WatchdogHeartbeatIntegrationTest(unittest.TestCase):
         self.root = Path(self.temporary_directory.name)
         self.log_dir = self.root / "logs"
         self.lock_file = self.log_dir / "phoenix_watchdog.lock"
+        config_dir = self.root / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "v7_direct_pipeline_config.json").write_text(
+            json.dumps({"operating_mode": "LIVE_RECONCILE_ONLY"}),
+            encoding="utf-8",
+        )
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
