@@ -29,6 +29,7 @@ from phoenix_disaster_recovery import (
     STATUS_BLOCKED,
     STATUS_READY,
     STATUS_RECOVERY_REQUIRED,
+    _legacy_attempt_limit_identity,
     inspect_recovery_state_for_watchdog,
     recover_stale_lock,
     run_disaster_recovery,
@@ -50,7 +51,8 @@ class DisasterRecoveryStep40Test(unittest.TestCase):
         self.state_path = self.root / "runtime" / "guardian" / "recovery_state.json"
         self.log_dir = self.root / "logs"
         self.now = datetime(2026, 8, 3, 9, 0, 0, tzinfo=JST)
-        self.commit = "a" * 40
+        self.repo_root = Path(__file__).resolve().parents[1]
+        self.commit = phoenix_disaster_recovery._read_git_commit(self.repo_root)
         self.previous_pid = 30940
 
     def tearDown(self) -> None:
@@ -79,6 +81,15 @@ class DisasterRecoveryStep40Test(unittest.TestCase):
             "previous_fail_safe_status": "NOT_TRIGGERED",
             "previous_orders_submitted": 0,
             "previous_mode": "PAPER",
+            "current_git_commit": self.commit,
+            "current_repository_root": str(self.root),
+            "current_guardian_status": "READY",
+            "current_position_status": "READY",
+            "current_position_reasons": [],
+            "current_operating_scope": "OPERATIONAL",
+            "current_trading_actions": "PAPER_ONLY",
+            "current_mode": "PAPER",
+            "current_orders_submitted": 0,
             "recovery_status": "READY",
             "recovery_reasons": [],
             "recovery_attempt": 0,
@@ -428,6 +439,602 @@ class DisasterRecoveryStep40Test(unittest.TestCase):
         self.assertIn("RECOVERY_ATTEMPT_LIMIT_EXCEEDED", result.recovery_reasons)
         self.assertEqual(10, MAX_RECOVERY_ATTEMPTS_HARD_LIMIT)
 
+    def test_watchdog_allows_exact_legacy_attempt_limit_state_once(self) -> None:
+        repo_commit = self.commit
+        self.write_state(
+            previous_status="RUNNING",
+            previous_finished_at=None,
+            previous_heartbeat_status="RUNNING",
+            previous_git_commit=repo_commit,
+            previous_repository_root=str(self.repo_root),
+            previous_position_status="READY",
+            previous_position_reasons=[],
+            previous_operating_scope="OPERATIONAL",
+            previous_trading_actions="PAPER_ONLY",
+            recovery_status="BLOCKED",
+            recovery_reasons=["RECOVERY_ATTEMPT_LIMIT_EXCEEDED"],
+            recovery_attempt=DEFAULT_MAX_RECOVERY_ATTEMPTS,
+            exit_code=EXIT_BLOCKED,
+        )
+        legacy_payload = json.loads(self.state_path.read_text(encoding="utf-8"))
+        for key in tuple(legacy_payload):
+            if key.startswith("current_"):
+                del legacy_payload[key]
+        self.state_path.write_text(
+            json.dumps(legacy_payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+        gate = inspect_recovery_state_for_watchdog(
+            self.state_path,
+            expected_repository_root=self.repo_root,
+        )
+
+        self.assertEqual(STATUS_RECOVERY_REQUIRED, gate.status)
+        self.assertEqual("LEGACY_ATTEMPT_LIMIT_MIGRATION", gate.reason)
+        self.assertTrue(gate.restart_allowed)
+
+    def test_run_migrates_legacy_attempt_limit_and_persists_current_context(self) -> None:
+        repo_commit = self.commit
+        self.write_state(
+            previous_status="RUNNING",
+            previous_finished_at=None,
+            previous_heartbeat_status="RUNNING",
+            previous_git_commit=repo_commit,
+            previous_repository_root=str(self.repo_root),
+            previous_position_status="READY",
+            previous_position_reasons=[],
+            previous_operating_scope="OPERATIONAL",
+            previous_trading_actions="PAPER_ONLY",
+            recovery_status="BLOCKED",
+            recovery_reasons=["RECOVERY_ATTEMPT_LIMIT_EXCEEDED"],
+            recovery_attempt=DEFAULT_MAX_RECOVERY_ATTEMPTS,
+            exit_code=EXIT_BLOCKED,
+        )
+        legacy_payload = json.loads(self.state_path.read_text(encoding="utf-8"))
+        for key in tuple(legacy_payload):
+            if key.startswith("current_"):
+                del legacy_payload[key]
+        self.state_path.write_text(
+            json.dumps(legacy_payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+        result = self.run_recovery(
+            repository_root=self.repo_root,
+            expected_repository_root=self.repo_root,
+            current_git_commit=repo_commit,
+            guardian_status="READY",
+            position_status="READY",
+            monitor_only=False,
+            position_reasons=(),
+        )
+
+        self.assertEqual(STATUS_RECOVERY_REQUIRED, result.recovery_status)
+        self.assertEqual(0, result.recovery_attempt)
+        self.assertEqual(["LEGACY_ATTEMPT_LIMIT_MIGRATION"], result.recovery_reasons)
+        self.assertEqual(repo_commit, result.current_git_commit)
+        self.assertEqual(str(self.repo_root), result.current_repository_root)
+        self.assertEqual("READY", result.current_guardian_status)
+        self.assertEqual("READY", result.current_position_status)
+        self.assertEqual("OPERATIONAL", result.current_operating_scope)
+        self.assertEqual("PAPER_ONLY", result.current_trading_actions)
+        self.assertEqual("PAPER", result.current_mode)
+        self.assertEqual(0, result.current_orders_submitted)
+        persisted = json.loads(self.state_path.read_text(encoding="utf-8"))
+        for key in (
+            "current_git_commit",
+            "current_repository_root",
+            "current_guardian_status",
+            "current_position_status",
+            "current_position_reasons",
+            "current_operating_scope",
+            "current_trading_actions",
+            "current_mode",
+            "current_orders_submitted",
+        ):
+            self.assertIn(key, persisted)
+        self.assertRegex(persisted["migration_consumed_identity"], r"^[0-9a-f]{64}$")
+
+    def test_watchdog_rejects_current_context_git_mismatch(self) -> None:
+        self.write_state(
+            previous_status="RUNNING",
+            previous_finished_at=None,
+            previous_heartbeat_status="RUNNING",
+            previous_git_commit="b" * 40,
+            previous_repository_root=str(self.repo_root),
+            previous_position_status="READY",
+            previous_position_reasons=[],
+            previous_operating_scope="OPERATIONAL",
+            previous_trading_actions="PAPER_ONLY",
+            previous_fail_safe_status="NOT_TRIGGERED",
+            previous_orders_submitted=0,
+            previous_mode="PAPER",
+            previous_pid=999999999,
+            current_git_commit=self.commit,
+            current_repository_root=str(self.repo_root),
+            current_guardian_status="READY",
+            current_position_status="READY",
+            current_position_reasons=[],
+            current_operating_scope="OPERATIONAL",
+            current_trading_actions="PAPER_ONLY",
+            current_mode="PAPER",
+            current_orders_submitted=0,
+            recovery_status="RECOVERY_REQUIRED",
+            recovery_reasons=[],
+            recovery_attempt=1,
+            exit_code=EXIT_RECOVERY_REQUIRED,
+        )
+
+        gate = inspect_recovery_state_for_watchdog(
+            self.state_path,
+            expected_repository_root=self.repo_root,
+        )
+
+        self.assertEqual(STATUS_BLOCKED, gate.status)
+        self.assertEqual("GIT_COMMIT_MISMATCH", gate.reason)
+        self.assertFalse(gate.restart_allowed)
+
+    def test_watchdog_rejects_invalid_legacy_heartbeat_before_migration(self) -> None:
+        self.write_state(
+            previous_status="RUNNING",
+            previous_finished_at=None,
+            previous_heartbeat_status="INVALID",
+            previous_git_commit=self.commit,
+            previous_repository_root=str(self.repo_root),
+            previous_position_status="READY",
+            previous_position_reasons=[],
+            previous_operating_scope="OPERATIONAL",
+            previous_trading_actions="PAPER_ONLY",
+            previous_fail_safe_status="NOT_TRIGGERED",
+            previous_orders_submitted=0,
+            previous_mode="PAPER",
+            previous_pid=999999999,
+            recovery_status="BLOCKED",
+            recovery_reasons=["RECOVERY_ATTEMPT_LIMIT_EXCEEDED"],
+            recovery_attempt=DEFAULT_MAX_RECOVERY_ATTEMPTS,
+            exit_code=EXIT_BLOCKED,
+        )
+
+        gate = inspect_recovery_state_for_watchdog(
+            self.state_path,
+            expected_repository_root=self.repo_root,
+        )
+
+        self.assertEqual(STATUS_BLOCKED, gate.status)
+        self.assertEqual("HEARTBEAT_STATUS_INVALID", gate.reason)
+        self.assertFalse(gate.restart_allowed)
+
+    def test_migration_consumed_same_identity_blocks_both_entrypoints(self) -> None:
+        repo_commit = self.commit
+        legacy_payload = self.payload(
+            previous_status="RUNNING",
+            previous_finished_at=None,
+            previous_heartbeat_status="RUNNING",
+            previous_git_commit=repo_commit,
+            previous_repository_root=str(self.repo_root),
+            previous_position_status="READY",
+            previous_position_reasons=[],
+            previous_operating_scope="OPERATIONAL",
+            previous_trading_actions="PAPER_ONLY",
+            recovery_status="BLOCKED",
+            recovery_reasons=["RECOVERY_ATTEMPT_LIMIT_EXCEEDED"],
+            recovery_attempt=DEFAULT_MAX_RECOVERY_ATTEMPTS,
+            exit_code=EXIT_BLOCKED,
+        )
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        for key in tuple(legacy_payload):
+            if key.startswith("current_"):
+                del legacy_payload[key]
+        self.state_path.write_text(
+            json.dumps(legacy_payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+        first = self.run_recovery(
+            repository_root=self.repo_root,
+            expected_repository_root=self.repo_root,
+            current_git_commit=repo_commit,
+            guardian_status="READY",
+            position_status="READY",
+            monitor_only=False,
+            position_reasons=(),
+        )
+        self.assertEqual(STATUS_RECOVERY_REQUIRED, first.recovery_status)
+        self.assertEqual(["LEGACY_ATTEMPT_LIMIT_MIGRATION"], first.recovery_reasons)
+
+        consumed_payload = json.loads(self.state_path.read_text(encoding="utf-8"))
+        for key in tuple(consumed_payload):
+            if key.startswith("current_"):
+                del consumed_payload[key]
+        self.state_path.write_text(
+            json.dumps(consumed_payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+        gate = inspect_recovery_state_for_watchdog(
+            self.state_path,
+            expected_repository_root=self.repo_root,
+        )
+        result = self.run_recovery(
+            repository_root=self.repo_root,
+            expected_repository_root=self.repo_root,
+            current_git_commit=repo_commit,
+            guardian_status="READY",
+            position_status="READY",
+            monitor_only=False,
+            position_reasons=(),
+        )
+
+        self.assertEqual(STATUS_BLOCKED, gate.status)
+        self.assertEqual("LEGACY_ATTEMPT_LIMIT_MIGRATION_CONSUMED", gate.reason)
+        self.assertEqual(STATUS_BLOCKED, result.recovery_status)
+        self.assertEqual(
+            ["LEGACY_ATTEMPT_LIMIT_MIGRATION_CONSUMED"],
+            result.recovery_reasons,
+        )
+
+    def test_fail_safe_state_never_uses_legacy_migration(self) -> None:
+        self.write_state(
+            previous_status="RUNNING",
+            previous_finished_at=None,
+            previous_heartbeat_status="RUNNING",
+            previous_git_commit=self.commit,
+            previous_repository_root=str(self.repo_root),
+            previous_position_status="READY",
+            previous_position_reasons=[],
+            previous_operating_scope="OPERATIONAL",
+            previous_trading_actions="PAPER_ONLY",
+            previous_fail_safe_status="BLOCKED",
+            recovery_status="BLOCKED",
+            recovery_reasons=["FAIL_SAFE_TRIGGERED"],
+            recovery_attempt=DEFAULT_MAX_RECOVERY_ATTEMPTS,
+        )
+        legacy_payload = json.loads(self.state_path.read_text(encoding="utf-8"))
+        for key in tuple(legacy_payload):
+            if key.startswith("current_"):
+                del legacy_payload[key]
+        self.state_path.write_text(
+            json.dumps(legacy_payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+        gate = inspect_recovery_state_for_watchdog(
+            self.state_path,
+            expected_repository_root=self.repo_root,
+        )
+        result = self.run_recovery(
+            repository_root=self.repo_root,
+            expected_repository_root=self.repo_root,
+            current_git_commit=self.commit,
+            guardian_status="READY",
+            position_status="READY",
+            monitor_only=False,
+            position_reasons=(),
+        )
+
+        self.assertEqual(STATUS_BLOCKED, gate.status)
+        self.assertEqual("FAIL_SAFE_TRIGGERED", gate.reason)
+        self.assertEqual(STATUS_BLOCKED, result.recovery_status)
+        self.assertEqual(["FAIL_SAFE_TRIGGERED"], result.recovery_reasons)
+
+    def test_fail_safe_beats_consumed_identity_for_both_entrypoints(self) -> None:
+        payload = self.payload(
+            previous_status="RUNNING",
+            previous_finished_at=None,
+            previous_heartbeat_status="RUNNING",
+            previous_git_commit=self.commit,
+            previous_repository_root=str(self.repo_root),
+            previous_position_status="READY",
+            previous_position_reasons=[],
+            previous_operating_scope="OPERATIONAL",
+            previous_trading_actions="PAPER_ONLY",
+            previous_fail_safe_status="BLOCKED",
+            recovery_status="BLOCKED",
+            recovery_reasons=["RECOVERY_ATTEMPT_LIMIT_EXCEEDED"],
+            recovery_attempt=DEFAULT_MAX_RECOVERY_ATTEMPTS,
+            exit_code=EXIT_BLOCKED,
+        )
+        for key in tuple(payload):
+            if key.startswith("current_"):
+                del payload[key]
+        payload["migration_consumed_identity"] = _legacy_attempt_limit_identity(
+            payload,
+            self.repo_root,
+        )
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+        gate = inspect_recovery_state_for_watchdog(
+            self.state_path,
+            expected_repository_root=self.repo_root,
+        )
+        result = self.run_recovery(
+            repository_root=self.repo_root,
+            expected_repository_root=self.repo_root,
+            current_git_commit=self.commit,
+            guardian_status="READY",
+            position_status="READY",
+            monitor_only=False,
+            position_reasons=(),
+        )
+
+        self.assertEqual(STATUS_BLOCKED, gate.status)
+        self.assertEqual("FAIL_SAFE_TRIGGERED", gate.reason)
+        self.assertEqual(STATUS_BLOCKED, result.recovery_status)
+        self.assertEqual(["FAIL_SAFE_TRIGGERED"], result.recovery_reasons)
+
+    def test_initial_legacy_migration_is_not_blocked_by_missing_current_context(self) -> None:
+        payload = self.payload(
+            previous_status="RUNNING",
+            previous_finished_at=None,
+            previous_heartbeat_status="RUNNING",
+            previous_git_commit=self.commit,
+            previous_repository_root=str(self.repo_root),
+            previous_position_status="READY",
+            previous_position_reasons=[],
+            previous_operating_scope="OPERATIONAL",
+            previous_trading_actions="PAPER_ONLY",
+            recovery_status="BLOCKED",
+            recovery_reasons=["RECOVERY_ATTEMPT_LIMIT_EXCEEDED"],
+            recovery_attempt=DEFAULT_MAX_RECOVERY_ATTEMPTS,
+            exit_code=EXIT_BLOCKED,
+        )
+        for key in tuple(payload):
+            if key.startswith("current_"):
+                del payload[key]
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+        gate = inspect_recovery_state_for_watchdog(
+            self.state_path,
+            expected_repository_root=self.repo_root,
+        )
+        result = self.run_recovery(
+            repository_root=self.repo_root,
+            expected_repository_root=self.repo_root,
+            current_git_commit=self.commit,
+            guardian_status="READY",
+            position_status="READY",
+            monitor_only=False,
+            position_reasons=(),
+        )
+
+        self.assertEqual(STATUS_RECOVERY_REQUIRED, gate.status)
+        self.assertEqual("LEGACY_ATTEMPT_LIMIT_MIGRATION", gate.reason)
+        self.assertEqual(STATUS_RECOVERY_REQUIRED, result.recovery_status)
+        self.assertEqual(["LEGACY_ATTEMPT_LIMIT_MIGRATION"], result.recovery_reasons)
+
+    def test_migrated_state_without_current_context_consumed_reason_is_singleton(self) -> None:
+        payload = self.payload(
+            previous_status="RUNNING",
+            previous_finished_at=None,
+            previous_heartbeat_status="RUNNING",
+            previous_git_commit=self.commit,
+            previous_repository_root=str(self.repo_root),
+            previous_position_status="READY",
+            previous_position_reasons=[],
+            previous_operating_scope="OPERATIONAL",
+            previous_trading_actions="PAPER_ONLY",
+            recovery_status="BLOCKED",
+            recovery_reasons=["RECOVERY_ATTEMPT_LIMIT_EXCEEDED"],
+            recovery_attempt=DEFAULT_MAX_RECOVERY_ATTEMPTS,
+            exit_code=EXIT_BLOCKED,
+        )
+        for key in tuple(payload):
+            if key.startswith("current_"):
+                del payload[key]
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+        first = self.run_recovery(
+            repository_root=self.repo_root,
+            expected_repository_root=self.repo_root,
+            current_git_commit=self.commit,
+            guardian_status="READY",
+            position_status="READY",
+            monitor_only=False,
+            position_reasons=(),
+        )
+        self.assertEqual(["LEGACY_ATTEMPT_LIMIT_MIGRATION"], first.recovery_reasons)
+        consumed_payload = json.loads(self.state_path.read_text(encoding="utf-8"))
+        for key in tuple(consumed_payload):
+            if key.startswith("current_"):
+                del consumed_payload[key]
+        self.state_path.write_text(
+            json.dumps(consumed_payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+        gate = inspect_recovery_state_for_watchdog(
+            self.state_path,
+            expected_repository_root=self.repo_root,
+        )
+        result = self.run_recovery(
+            repository_root=self.repo_root,
+            expected_repository_root=self.repo_root,
+            current_git_commit=self.commit,
+            guardian_status="READY",
+            position_status="READY",
+            monitor_only=False,
+            position_reasons=(),
+        )
+
+        self.assertEqual(STATUS_BLOCKED, gate.status)
+        self.assertEqual("LEGACY_ATTEMPT_LIMIT_MIGRATION_CONSUMED", gate.reason)
+        self.assertEqual(STATUS_BLOCKED, result.recovery_status)
+        self.assertEqual(
+            ["LEGACY_ATTEMPT_LIMIT_MIGRATION_CONSUMED"],
+            result.recovery_reasons,
+        )
+
+    def test_legacy_identity_normalizes_previous_position_reasons(self) -> None:
+        first = self.payload(previous_position_reasons=["B", "A", "A"])
+        second = self.payload(previous_position_reasons=["A", "B"])
+
+        self.assertEqual(
+            _legacy_attempt_limit_identity(first, self.root),
+            _legacy_attempt_limit_identity(second, self.root),
+        )
+
+    def test_legacy_attempt_limit_migration_allows_distinct_unconsumed_identity(self) -> None:
+        payload = self.payload(
+            previous_status="RUNNING",
+            previous_finished_at=None,
+            previous_heartbeat_status="RUNNING",
+            previous_git_commit=self.commit,
+            previous_repository_root=str(self.repo_root),
+            previous_position_status="READY",
+            previous_position_reasons=[],
+            previous_operating_scope="OPERATIONAL",
+            previous_trading_actions="PAPER_ONLY",
+            recovery_status="BLOCKED",
+            recovery_reasons=["RECOVERY_ATTEMPT_LIMIT_EXCEEDED"],
+            recovery_attempt=DEFAULT_MAX_RECOVERY_ATTEMPTS,
+            exit_code=EXIT_BLOCKED,
+        )
+        for key in tuple(payload):
+            if key.startswith("current_"):
+                del payload[key]
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+        first = self.run_recovery(
+            repository_root=self.repo_root,
+            expected_repository_root=self.repo_root,
+            current_git_commit=self.commit,
+            guardian_status="READY",
+            position_status="READY",
+            monitor_only=False,
+            position_reasons=(),
+        )
+        self.assertEqual(STATUS_RECOVERY_REQUIRED, first.recovery_status)
+        distinct_payload = json.loads(self.state_path.read_text(encoding="utf-8"))
+        for key in tuple(distinct_payload):
+            if key.startswith("current_"):
+                del distinct_payload[key]
+        distinct_payload["previous_run_id"] = "distinct-run"
+        distinct_payload["recovery_status"] = "BLOCKED"
+        distinct_payload["recovery_reasons"] = ["RECOVERY_ATTEMPT_LIMIT_EXCEEDED"]
+        distinct_payload["recovery_attempt"] = DEFAULT_MAX_RECOVERY_ATTEMPTS
+        distinct_payload["exit_code"] = EXIT_BLOCKED
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(
+            json.dumps(distinct_payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+        gate = inspect_recovery_state_for_watchdog(
+            self.state_path,
+            expected_repository_root=self.repo_root,
+        )
+        second = self.run_recovery(
+            repository_root=self.repo_root,
+            expected_repository_root=self.repo_root,
+            current_git_commit=self.commit,
+            guardian_status="READY",
+            position_status="READY",
+            monitor_only=False,
+            position_reasons=(),
+        )
+
+        self.assertEqual(STATUS_RECOVERY_REQUIRED, gate.status)
+        self.assertEqual("LEGACY_ATTEMPT_LIMIT_MIGRATION", gate.reason)
+        self.assertEqual(STATUS_RECOVERY_REQUIRED, second.recovery_status)
+        self.assertEqual(["LEGACY_ATTEMPT_LIMIT_MIGRATION"], second.recovery_reasons)
+
+    def test_nonlegacy_current_safety_context_missing_fails_closed(self) -> None:
+        payload = self.payload()
+        for key in tuple(payload):
+            if key.startswith("current_"):
+                del payload[key]
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+        gate = inspect_recovery_state_for_watchdog(
+            self.state_path,
+            expected_repository_root=self.root,
+        )
+        result = self.run_recovery()
+
+        self.assertEqual(STATUS_BLOCKED, gate.status)
+        self.assertEqual("GIT_COMMIT_UNAVAILABLE", gate.reason)
+        self.assertEqual(STATUS_BLOCKED, result.recovery_status)
+        self.assertEqual(["CURRENT_SAFETY_CONTEXT_MISSING"], result.recovery_reasons)
+
+    def test_consumed_identity_with_repository_mismatch_uses_hard_validation_reason(self) -> None:
+        payload = self.payload(
+            previous_status="RUNNING",
+            previous_finished_at=None,
+            previous_heartbeat_status="RUNNING",
+            previous_git_commit=self.commit,
+            previous_repository_root=str(self.repo_root / "other"),
+            previous_position_status="READY",
+            previous_position_reasons=[],
+            previous_operating_scope="OPERATIONAL",
+            previous_trading_actions="PAPER_ONLY",
+            recovery_status="BLOCKED",
+            recovery_reasons=["RECOVERY_ATTEMPT_LIMIT_EXCEEDED"],
+            recovery_attempt=DEFAULT_MAX_RECOVERY_ATTEMPTS,
+            exit_code=EXIT_BLOCKED,
+        )
+        for key in tuple(payload):
+            if key.startswith("current_"):
+                del payload[key]
+        payload["migration_consumed_identity"] = _legacy_attempt_limit_identity(
+            payload,
+            self.repo_root,
+        )
+        self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.state_path.write_text(
+            json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+        )
+
+        gate = inspect_recovery_state_for_watchdog(
+            self.state_path,
+            expected_repository_root=self.repo_root,
+        )
+        result = self.run_recovery(
+            repository_root=self.repo_root,
+            expected_repository_root=self.repo_root,
+            current_git_commit=self.commit,
+            guardian_status="READY",
+            position_status="READY",
+            monitor_only=False,
+            position_reasons=(),
+        )
+
+        self.assertEqual(STATUS_BLOCKED, gate.status)
+        self.assertEqual("REPOSITORY_ROOT_MISMATCH", gate.reason)
+        self.assertEqual(STATUS_BLOCKED, result.recovery_status)
+        self.assertEqual(["REPOSITORY_ROOT_MISMATCH"], result.recovery_reasons)
+
+    def test_watchdog_rejects_legacy_attempt_state_with_git_mismatch(self) -> None:
+        wrong_commit = "b" * 40
+        self.write_state(
+            previous_status="RUNNING",
+            previous_finished_at=None,
+            previous_heartbeat_status="RUNNING",
+            previous_git_commit=wrong_commit,
+            previous_repository_root=str(self.repo_root),
+            previous_position_status="READY",
+            previous_position_reasons=[],
+            previous_operating_scope="OPERATIONAL",
+            previous_trading_actions="PAPER_ONLY",
+            recovery_status="BLOCKED",
+            recovery_reasons=["RECOVERY_ATTEMPT_LIMIT_EXCEEDED"],
+            recovery_attempt=DEFAULT_MAX_RECOVERY_ATTEMPTS,
+        )
+
+        gate = inspect_recovery_state_for_watchdog(
+            self.state_path,
+            expected_repository_root=self.repo_root,
+        )
+
+        self.assertEqual(STATUS_BLOCKED, gate.status)
+        self.assertEqual("GIT_COMMIT_MISMATCH", gate.reason)
+
     def test_atomic_state_and_logs_include_jst_and_required_fields(self) -> None:
         self.write_state()
 
@@ -497,18 +1104,37 @@ class DisasterRecoveryStep40Test(unittest.TestCase):
             previous_status="RUNNING",
             previous_finished_at=None,
             previous_heartbeat_status="RUNNING",
+            previous_git_commit=self.commit,
+            previous_repository_root=str(self.repo_root),
+            previous_position_status="READY",
+            previous_position_reasons=[],
+            previous_operating_scope="OPERATIONAL",
+            previous_trading_actions="PAPER_ONLY",
+            current_git_commit=self.commit,
+            current_repository_root=str(self.repo_root),
+            current_guardian_status="READY",
+            current_position_status="READY",
+            current_position_reasons=[],
+            current_operating_scope="OPERATIONAL",
+            current_trading_actions="PAPER_ONLY",
+            current_mode="PAPER",
+            current_orders_submitted=0,
             recovery_status="RECOVERY_REQUIRED",
             recovery_attempt=1,
             exit_code=1,
         )
         allowed = inspect_recovery_state_for_watchdog(
             self.state_path,
-            expected_repository_root=self.root,
+            expected_repository_root=self.repo_root,
         )
-        self.write_state(previous_mode="LIVE")
+        blocked_state = json.loads(self.state_path.read_text(encoding="utf-8"))
+        blocked_state["previous_mode"] = "LIVE"
+        self.state_path.write_text(
+            json.dumps(blocked_state, ensure_ascii=False), encoding="utf-8"
+        )
         blocked = inspect_recovery_state_for_watchdog(
             self.state_path,
-            expected_repository_root=self.root,
+            expected_repository_root=self.repo_root,
         )
 
         self.assertTrue(allowed.restart_allowed)
@@ -724,6 +1350,7 @@ class WatchdogDisasterRecoveryIntegrationTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary_directory.name)
+        self.repo_root = Path(__file__).resolve().parents[1]
         self.log_dir = self.root / "logs"
         self.lock_file = self.log_dir / "phoenix_watchdog.lock"
         self.state_path = self.root / "runtime" / "guardian" / "recovery_state.json"
@@ -734,7 +1361,7 @@ class WatchdogDisasterRecoveryIntegrationTest(unittest.TestCase):
     def make_watchdog(self, target: Path, max_restarts: int) -> PhoenixWatchdog:
         return PhoenixWatchdog(
             target_script=target,
-            root_dir=self.root,
+            root_dir=self.repo_root,
             log_dir=self.log_dir,
             lock_file=self.lock_file,
             recovery_state_path=self.state_path,
@@ -772,6 +1399,7 @@ class WatchdogDisasterRecoveryIntegrationTest(unittest.TestCase):
 
     def recovery_payload(self, *, status: str = "RECOVERY_REQUIRED") -> dict[str, object]:
         now = datetime.now(JST)
+        repo_commit = phoenix_disaster_recovery._read_git_commit(self.repo_root)
         return {
             "schema_version": 1,
             "checked_at": now.isoformat(timespec="seconds"),
@@ -780,14 +1408,23 @@ class WatchdogDisasterRecoveryIntegrationTest(unittest.TestCase):
             "previous_started_at": now.isoformat(timespec="seconds"),
             "previous_finished_at": None if status == "RECOVERY_REQUIRED" else now.isoformat(timespec="seconds"),
             "previous_pid": 999999999,
-            "previous_git_commit": "a" * 40,
-            "previous_repository_root": str(self.root),
+            "previous_git_commit": repo_commit,
+            "previous_repository_root": str(self.repo_root),
             "previous_guardian_status": "READY",
             "previous_position_status": "READY",
             "previous_heartbeat_status": "RUNNING" if status == "RECOVERY_REQUIRED" else "COMPLETED",
             "previous_fail_safe_status": "NOT_TRIGGERED",
             "previous_orders_submitted": 0,
             "previous_mode": "PAPER",
+            "current_git_commit": repo_commit,
+            "current_repository_root": str(self.repo_root),
+            "current_guardian_status": "READY",
+            "current_position_status": "READY",
+            "current_position_reasons": [],
+            "current_operating_scope": "OPERATIONAL",
+            "current_trading_actions": "PAPER_ONLY",
+            "current_mode": "PAPER",
+            "current_orders_submitted": 0,
             "recovery_status": status,
             "recovery_reasons": [],
             "recovery_attempt": 1 if status == "RECOVERY_REQUIRED" else 0,

@@ -465,6 +465,15 @@ class MonitorOnlyDisasterRecoveryTest(unittest.TestCase):
             "previous_fail_safe_status": "NOT_TRIGGERED",
             "previous_orders_submitted": 0,
             "previous_mode": "PAPER",
+            "current_git_commit": self.commit,
+            "current_repository_root": str(self.root),
+            "current_guardian_status": "READY",
+            "current_position_status": "WARNING",
+            "current_position_reasons": ["POSITIONS_PRESENT"],
+            "current_operating_scope": "MONITOR_ONLY",
+            "current_trading_actions": "DISABLED",
+            "current_mode": "PAPER",
+            "current_orders_submitted": 0,
             "recovery_status": "READY",
             "recovery_reasons": [],
             "recovery_attempt": 0,
@@ -508,12 +517,19 @@ class MonitorOnlyDisasterRecoveryTest(unittest.TestCase):
         self.assertEqual("PAPER", bootstrap.current_mode)
         self.assertEqual(0, bootstrap.current_orders_submitted)
 
-        self.write_state()
+        repo_root = Path(__file__).resolve().parents[1]
+        self.write_state(
+            previous_repository_root=str(repo_root),
+            current_repository_root=str(repo_root),
+        )
 
-        result = self.run_recovery()
+        result = self.run_recovery(
+            repository_root=repo_root,
+            expected_repository_root=repo_root,
+        )
         watchdog_gate = inspect_recovery_state_for_watchdog(
             self.state_path,
-            expected_repository_root=self.root,
+            expected_repository_root=repo_root,
         )
 
         self.assertEqual(STATUS_READY, result.recovery_status)

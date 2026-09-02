@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -38,6 +39,40 @@ MAX_RECOVERY_ATTEMPTS_HARD_LIMIT = 10
 ATOMIC_REPLACE_ATTEMPTS = 5
 ATOMIC_REPLACE_RETRY_SECONDS = 0.01
 JST = timezone(timedelta(hours=9), name="JST")
+CURRENT_SAFETY_CONTEXT_MISSING_REASON = "CURRENT_SAFETY_CONTEXT_MISSING"
+LEGACY_ATTEMPT_LIMIT_MIGRATION_REASON = "LEGACY_ATTEMPT_LIMIT_MIGRATION"
+LEGACY_ATTEMPT_LIMIT_MIGRATION_CONSUMED_REASON = (
+    "LEGACY_ATTEMPT_LIMIT_MIGRATION_CONSUMED"
+)
+CURRENT_SAFETY_CONTEXT_KEYS = (
+    "current_git_commit",
+    "current_repository_root",
+    "current_guardian_status",
+    "current_position_status",
+    "current_position_reasons",
+    "current_operating_scope",
+    "current_trading_actions",
+    "current_mode",
+    "current_orders_submitted",
+)
+MIGRATION_IDENTITY_FIELDS = (
+    "previous_run_id",
+    "previous_status",
+    "previous_started_at",
+    "previous_finished_at",
+    "previous_pid",
+    "previous_git_commit",
+    "previous_repository_root",
+    "previous_guardian_status",
+    "previous_position_status",
+    "previous_position_reasons",
+    "previous_operating_scope",
+    "previous_trading_actions",
+    "previous_heartbeat_status",
+    "previous_fail_safe_status",
+    "previous_orders_submitted",
+    "previous_mode",
+)
 
 VALID_RECOVERY_STATUSES = frozenset(
     {STATUS_READY, STATUS_RECOVERY_REQUIRED, STATUS_BLOCKED}
@@ -161,6 +196,7 @@ class DisasterRecoveryResult:
     json_report_path: str
     text_report_path: str
     report_error: str | None = None
+    migration_consumed_identity: str | None = None
 
     @property
     def ready(self) -> bool:
@@ -180,6 +216,8 @@ class DisasterRecoveryResult:
         payload.pop("json_report_path")
         payload.pop("text_report_path")
         payload.pop("report_error")
+        if payload["migration_consumed_identity"] is None:
+            payload.pop("migration_consumed_identity")
         return payload
 
 
@@ -463,6 +501,7 @@ def _blank_result(
         state_path=str(state_path),
         json_report_path=str(report_dir / "disaster_recovery.json"),
         text_report_path=str(report_dir / "disaster_recovery.txt"),
+        migration_consumed_identity=None,
     )
 
 
@@ -526,12 +565,186 @@ def _result_from_payload(
         state_path=str(state_path),
         json_report_path=str(report_dir / "disaster_recovery.json"),
         text_report_path=str(report_dir / "disaster_recovery.txt"),
+        migration_consumed_identity=payload.get("migration_consumed_identity")
+        if isinstance(payload.get("migration_consumed_identity"), str)
+        else None,
     )
 
 
 def _append_unique(reasons: list[str], reason: str) -> None:
     if reason not in reasons:
         reasons.append(reason)
+
+
+def _has_current_safety_context(payload: Mapping[str, object]) -> bool:
+    return any(key in payload for key in CURRENT_SAFETY_CONTEXT_KEYS)
+
+
+def _normalized_previous_position_reasons(payload: Mapping[str, object]) -> list[str]:
+    raw_reasons = payload.get("previous_position_reasons", [])
+    if not isinstance(raw_reasons, list):
+        raw_reasons = [raw_reasons]
+    return sorted({str(reason) for reason in raw_reasons})
+
+
+def _legacy_attempt_limit_identity(
+    payload: Mapping[str, object],
+    expected_repository_root: str | os.PathLike[str],
+) -> str:
+    identity_payload: dict[str, object] = {}
+    for field in MIGRATION_IDENTITY_FIELDS:
+        if field == "previous_repository_root":
+            value = payload.get(field)
+            identity_payload[field] = (
+                _path_identity(value)
+                if isinstance(value, str)
+                else _path_identity(expected_repository_root)
+            )
+        elif field == "previous_position_reasons":
+            identity_payload[field] = _normalized_previous_position_reasons(payload)
+        else:
+            identity_payload[field] = payload.get(field)
+    encoded = json.dumps(
+        identity_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _current_context_missing_only(reasons: list[str]) -> bool:
+    return reasons == [CURRENT_SAFETY_CONTEXT_MISSING_REASON]
+
+
+def _current_safety_context_from_payload(
+    payload: Mapping[str, object],
+    *,
+    expected_repository_root: str | os.PathLike[str],
+) -> tuple[dict[str, object], list[str]]:
+    if not _has_current_safety_context(payload):
+        return {
+            "git_commit": None,
+            "repository_root": expected_repository_root,
+            "guardian_status": None,
+            "position_status": None,
+            "position_reasons": [],
+            "operating_scope": None,
+            "trading_actions": None,
+            "mode": None,
+            "orders_submitted": None,
+        }, [CURRENT_SAFETY_CONTEXT_MISSING_REASON]
+
+    blocked: list[str] = []
+
+    current_operating_scope = payload.get("current_operating_scope")
+    current_trading_actions = payload.get("current_trading_actions")
+    if current_operating_scope not in {OPERATIONAL_SCOPE, MONITOR_ONLY_SCOPE}:
+        _append_unique(blocked, "OPERATING_SCOPE_INVALID")
+    elif current_operating_scope == MONITOR_ONLY_SCOPE:
+        if current_trading_actions != TRADING_ACTIONS_DISABLED:
+            _append_unique(blocked, "OPERATING_SCOPE_INVALID")
+    elif current_trading_actions != TRADING_ACTIONS_PAPER_ONLY:
+        _append_unique(blocked, "OPERATING_SCOPE_INVALID")
+
+    current_position_reasons = payload.get("current_position_reasons", [])
+    if not isinstance(current_position_reasons, list) or any(
+        not isinstance(reason, str) for reason in current_position_reasons
+    ):
+        _append_unique(blocked, "POSITION_REASONS_INVALID")
+        normalized_position_reasons: tuple[str, ...] = ()
+    else:
+        normalized_position_reasons = tuple(current_position_reasons)
+
+    current_root_value = payload.get("current_repository_root", expected_repository_root)
+    current, current_blocks = _current_safety_context(
+        root=Path(str(current_root_value)).resolve(strict=False),
+        expected_repository_root=expected_repository_root,
+        guardian_status=payload.get("current_guardian_status"),
+        position_status=payload.get("current_position_status"),
+        monitor_only=current_operating_scope == MONITOR_ONLY_SCOPE,
+        position_reasons=normalized_position_reasons,
+        current_mode=payload.get("current_mode"),
+        current_orders_submitted=payload.get("current_orders_submitted"),
+        current_git_commit=payload.get("current_git_commit"),
+    )
+    return current, blocked + current_blocks
+
+
+def _is_legacy_attempt_limit_state(
+    *,
+    payload: Mapping[str, object],
+    expected_repository_root: str | os.PathLike[str],
+    previous_pid: int | None,
+    pid_checker: Callable[[int], bool],
+    recovery_attempt: int,
+    max_recovery_attempts: int,
+) -> bool:
+    if payload.get("recovery_status") != STATUS_BLOCKED:
+        return False
+    if payload.get("recovery_reasons") != ["RECOVERY_ATTEMPT_LIMIT_EXCEEDED"]:
+        return False
+    if payload.get("exit_code") != EXIT_BLOCKED:
+        return False
+    if recovery_attempt < max_recovery_attempts:
+        return False
+    if recovery_attempt > MAX_RECOVERY_ATTEMPTS_HARD_LIMIT:
+        return False
+    if _has_current_safety_context(payload):
+        return False
+    legacy_identity = _legacy_attempt_limit_identity(payload, expected_repository_root)
+    if payload.get("migration_consumed_identity") == legacy_identity:
+        return False
+    if previous_pid is None or pid_checker(previous_pid):
+        return False
+    if payload.get("previous_fail_safe_status") != "NOT_TRIGGERED":
+        return False
+    if payload.get("previous_orders_submitted") != ORDERS_SUBMITTED:
+        return False
+    if payload.get("previous_guardian_status") != STATUS_READY:
+        return False
+    previous_status = payload.get("previous_status")
+    if previous_status not in VALID_PREVIOUS_STATUSES:
+        return False
+    if not _paths_equal(payload.get("previous_repository_root"), expected_repository_root):
+        return False
+    previous_position_status = payload.get("previous_position_status")
+    previous_operating_scope = payload.get("previous_operating_scope")
+    previous_position_reasons = _normalized_previous_position_reasons(payload)
+    previous_trading_actions = payload.get("previous_trading_actions")
+    if previous_position_status == "WARNING":
+        if (
+            previous_operating_scope != MONITOR_ONLY_SCOPE
+            or previous_position_reasons != [POSITIONS_PRESENT_REASON]
+            or previous_trading_actions != TRADING_ACTIONS_DISABLED
+        ):
+            return False
+    elif previous_position_status != STATUS_READY:
+        return False
+    elif (
+        previous_operating_scope != OPERATIONAL_SCOPE
+        or previous_position_reasons != []
+        or previous_trading_actions != TRADING_ACTIONS_PAPER_ONLY
+    ):
+        return False
+    if payload.get("previous_mode") != MODE:
+        return False
+    previous_commit = payload.get("previous_git_commit")
+    if (
+        not isinstance(previous_commit, str)
+        or re.fullmatch(r"[0-9a-fA-F]{7,40}", previous_commit) is None
+    ):
+        return False
+    try:
+        actual_current_commit = _read_git_commit(Path(expected_repository_root))
+    except RecoveryStateError:
+        return False
+    if previous_status != "COMPLETED" and (
+        not isinstance(previous_commit, str)
+        or previous_commit.lower() != actual_current_commit.lower()
+    ):
+        return False
+    return True
 
 
 def _is_uninitialized_recovery_decision(
@@ -845,6 +1058,13 @@ def run_disaster_recovery(
     parsed_times: list[datetime] = []
     previous_pid: int | None = None
     recovery_attempt = 0
+    payload_current, payload_current_blocks = _current_safety_context_from_payload(
+        payload,
+        expected_repository_root=expected_root,
+    )
+    if not _current_context_missing_only(payload_current_blocks):
+        for reason in payload_current_blocks:
+            _append_unique(blocked, reason)
 
     def block(reason: str) -> None:
         _append_unique(blocked, reason)
@@ -935,8 +1155,9 @@ def run_disaster_recovery(
     current_commit = current.get("git_commit")
     if (
         previous_status != "COMPLETED"
+        and isinstance(previous_commit, str)
         and isinstance(current_commit, str)
-        and previous_commit.lower() != current_commit
+        and previous_commit.lower() != current_commit.lower()
     ):
         block("GIT_COMMIT_MISMATCH")
 
@@ -981,8 +1202,6 @@ def run_disaster_recovery(
         or fail_safe_status not in VALID_FAIL_SAFE_STATUSES
     ):
         block("FAIL_SAFE_STATUS_INVALID")
-    elif fail_safe_status != "NOT_TRIGGERED":
-        block("FAIL_SAFE_TRIGGERED")
     if payload["previous_mode"] != MODE:
         block("MODE_NOT_PAPER")
     orders = payload["previous_orders_submitted"]
@@ -1012,6 +1231,17 @@ def run_disaster_recovery(
         block(error.reason)
         recovery_attempt = 0
 
+    legacy_identity = _legacy_attempt_limit_identity(payload, expected_root)
+    consumed_identity_matches = payload.get("migration_consumed_identity") == legacy_identity
+    legacy_attempt_state = _is_legacy_attempt_limit_state(
+        payload=payload,
+        expected_repository_root=expected_root,
+        previous_pid=previous_pid,
+        pid_checker=pid_checker,
+        recovery_attempt=recovery_attempt,
+        max_recovery_attempts=max_recovery_attempts,
+    )
+
     if not blocked:
         if previous_status in {"RUNNING", "FAILED", "INTERRUPTED"}:
             _append_unique(recovery, f"PREVIOUS_STATUS_{previous_status}")
@@ -1032,11 +1262,25 @@ def run_disaster_recovery(
 
     recovered_at: str | None = None
     next_attempt = recovery_attempt
-    if blocked:
+    if fail_safe_status != "NOT_TRIGGERED" and fail_safe_status in VALID_FAIL_SAFE_STATUSES:
+        status = STATUS_BLOCKED
+        reasons = ["FAIL_SAFE_TRIGGERED"]
+    elif blocked:
         status = STATUS_BLOCKED
         reasons = blocked
+    elif _current_context_missing_only(payload_current_blocks) and consumed_identity_matches:
+        status = STATUS_BLOCKED
+        reasons = [LEGACY_ATTEMPT_LIMIT_MIGRATION_CONSUMED_REASON]
+    elif _current_context_missing_only(payload_current_blocks) and legacy_attempt_state:
+        status = STATUS_RECOVERY_REQUIRED
+        reasons = [LEGACY_ATTEMPT_LIMIT_MIGRATION_REASON]
+        next_attempt = 0
+        payload["migration_consumed_identity"] = legacy_identity
+    elif payload_current_blocks:
+        status = STATUS_BLOCKED
+        reasons = payload_current_blocks
     elif recovery:
-        if recovery_attempt >= max_recovery_attempts:
+        if recovery_attempt >= max_recovery_attempts and not legacy_attempt_state:
             status = STATUS_BLOCKED
             reasons = ["RECOVERY_ATTEMPT_LIMIT_EXCEEDED"]
         elif (
@@ -1254,6 +1498,7 @@ def inspect_recovery_state_for_watchdog(
     *,
     expected_repository_root: str | os.PathLike[str],
     max_recovery_attempts: int = DEFAULT_MAX_RECOVERY_ATTEMPTS,
+    pid_checker: Callable[[int], bool] = _pid_is_alive,
 ) -> WatchdogRecoveryGate:
     try:
         payload = _load_json_object(Path(state_path))
@@ -1262,7 +1507,93 @@ def inspect_recovery_state_for_watchdog(
     attempt = payload.get("recovery_attempt")
     if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 0:
         return WatchdogRecoveryGate(STATUS_BLOCKED, "RECOVERY_ATTEMPT_INVALID", None)
-    if attempt > MAX_RECOVERY_ATTEMPTS_HARD_LIMIT or attempt >= max_recovery_attempts:
+    bootstrap_state = _is_uninitialized_recovery_decision(
+        payload, checked=_now_jst()
+    )
+    previous_fail_safe_status = payload.get("previous_fail_safe_status")
+    previous_status = payload.get("previous_status")
+    if (
+        isinstance(previous_fail_safe_status, str)
+        and previous_fail_safe_status in VALID_FAIL_SAFE_STATUSES
+        and previous_fail_safe_status != "NOT_TRIGGERED"
+    ):
+        return WatchdogRecoveryGate(STATUS_BLOCKED, "FAIL_SAFE_TRIGGERED", attempt)
+    if not bootstrap_state:
+        if previous_status not in VALID_PREVIOUS_STATUSES:
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "PREVIOUS_STATUS_INVALID", attempt
+            )
+        previous_commit = payload.get("previous_git_commit")
+        if (
+            not isinstance(previous_commit, str)
+            or re.fullmatch(r"[0-9a-fA-F]{7,40}", previous_commit) is None
+        ):
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "PREVIOUS_GIT_COMMIT_INVALID", attempt
+            )
+        previous_heartbeat_status = payload.get("previous_heartbeat_status")
+        if (
+            not isinstance(previous_heartbeat_status, str)
+            or previous_heartbeat_status not in VALID_HEARTBEAT_STATUSES
+        ):
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "HEARTBEAT_STATUS_INVALID", attempt
+            )
+        if (
+            not isinstance(previous_fail_safe_status, str)
+            or previous_fail_safe_status not in VALID_FAIL_SAFE_STATUSES
+        ):
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "FAIL_SAFE_STATUS_INVALID", attempt
+            )
+        try:
+            actual_current_commit = _read_git_commit(Path(expected_repository_root))
+        except RecoveryStateError as error:
+            return WatchdogRecoveryGate(STATUS_BLOCKED, error.reason, attempt)
+        if previous_status != "COMPLETED" and (
+            previous_commit.lower() != actual_current_commit.lower()
+        ):
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "GIT_COMMIT_MISMATCH", attempt
+            )
+    else:
+        previous_commit = payload.get("previous_git_commit")
+        previous_heartbeat_status = payload.get("previous_heartbeat_status")
+    previous_pid: int | None = None
+    try:
+        previous_pid = _strict_non_negative_int(
+            payload.get("previous_pid"), "PREVIOUS_PID_INVALID"
+        )
+        if previous_pid <= 0:
+            previous_pid = None
+    except RecoveryStateError:
+        previous_pid = None
+    legacy_identity = _legacy_attempt_limit_identity(payload, expected_repository_root)
+    consumed_identity_matches = payload.get("migration_consumed_identity") == legacy_identity
+    legacy_attempt_state = _is_legacy_attempt_limit_state(
+        payload=payload,
+        expected_repository_root=expected_repository_root,
+        previous_pid=previous_pid,
+        pid_checker=pid_checker,
+        recovery_attempt=attempt,
+        max_recovery_attempts=max_recovery_attempts,
+    )
+    current, current_blocks = _current_safety_context_from_payload(
+        payload,
+        expected_repository_root=expected_repository_root,
+    )
+    current_context_missing = _current_context_missing_only(current_blocks)
+    if current_blocks and not current_context_missing:
+        return WatchdogRecoveryGate(STATUS_BLOCKED, current_blocks[0], attempt)
+    if attempt > MAX_RECOVERY_ATTEMPTS_HARD_LIMIT:
+        return WatchdogRecoveryGate(
+            STATUS_BLOCKED, "RECOVERY_HARD_LIMIT_EXCEEDED", attempt
+        )
+    if (
+        attempt >= max_recovery_attempts
+        and not legacy_attempt_state
+        and not current_context_missing
+    ):
         return WatchdogRecoveryGate(
             STATUS_BLOCKED, "RECOVERY_ATTEMPT_LIMIT_EXCEEDED", attempt
         )
@@ -1385,10 +1716,34 @@ def inspect_recovery_state_for_watchdog(
         return WatchdogRecoveryGate(
             STATUS_BLOCKED, "POSITION_STATE_INCONSISTENT", attempt
         )
-    if payload.get("previous_fail_safe_status") != "NOT_TRIGGERED":
-        return WatchdogRecoveryGate(STATUS_BLOCKED, "FAIL_SAFE_TRIGGERED", attempt)
+    if previous_status == "RUNNING" and previous_pid is not None:
+        if pid_checker(previous_pid):
+            return WatchdogRecoveryGate(
+                STATUS_BLOCKED, "PREVIOUS_PID_STILL_RUNNING", attempt
+            )
+    if current_context_missing and consumed_identity_matches:
+        return WatchdogRecoveryGate(
+            STATUS_BLOCKED,
+            LEGACY_ATTEMPT_LIMIT_MIGRATION_CONSUMED_REASON,
+            attempt,
+        )
+    if current_context_missing and legacy_attempt_state:
+        return WatchdogRecoveryGate(
+            STATUS_RECOVERY_REQUIRED,
+            LEGACY_ATTEMPT_LIMIT_MIGRATION_REASON,
+            0,
+        )
+    if current_context_missing:
+        return WatchdogRecoveryGate(
+            STATUS_BLOCKED,
+            CURRENT_SAFETY_CONTEXT_MISSING_REASON,
+            attempt,
+        )
     recovery_status = payload.get("recovery_status")
-    if recovery_status == STATUS_BLOCKED or payload.get("exit_code") == EXIT_BLOCKED:
+    if (
+        (recovery_status == STATUS_BLOCKED or payload.get("exit_code") == EXIT_BLOCKED)
+        and not legacy_attempt_state
+    ):
         return WatchdogRecoveryGate(STATUS_BLOCKED, "RECOVERY_BLOCKED", attempt)
     previous_status = payload.get("previous_status")
     if (
