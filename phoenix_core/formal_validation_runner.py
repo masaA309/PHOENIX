@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import platform
+import re
 import sys
 import traceback
 import math
@@ -38,6 +39,7 @@ from phoenix_core.historical_validation_20y import (
 
 
 DEFAULT_SPEC_PATH = Path("config/formal_validation_runs.json")
+DEFAULT_ACCEPTANCE_CRITERIA_PATH = Path("config/formal_validation_acceptance_criteria.json")
 DEFAULT_OUTPUT_DIR = Path("reports/formal_validation")
 DEFAULT_INPUT_MANIFEST_FILE = "input_manifest.json"
 DEFAULT_SUMMARY_JSON_FILE = "summary.json"
@@ -550,6 +552,407 @@ def _run_metric(run: dict[str, Any], key: str, default: Any = 0.0) -> Any:
     return run.get(key, default)
 
 
+def _gate_row(name: str, status: str, reason: str) -> dict[str, str]:
+    return {"name": name, "status": status, "reason": reason}
+
+
+def _all_pass(rows: list[dict[str, Any]]) -> bool:
+    return all(row.get("status") == "PASS" for row in rows)
+
+
+def _safe_number(value: Any, field: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise FormalValidationError(f"{field} is missing or not numeric") from error
+    if not math.isfinite(number):
+        raise FormalValidationError(f"{field} is not finite")
+    return number
+
+
+def _contains_non_finite_json(value: Any) -> bool:
+    if isinstance(value, float):
+        return not math.isfinite(value)
+    if isinstance(value, dict):
+        return any(_contains_non_finite_json(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_non_finite_json(item) for item in value)
+    return False
+
+
+def _load_acceptance_criteria(root: Path, criteria_path: Path | str) -> dict[str, Any]:
+    criteria_file = resolve_within(root, str(criteria_path))
+    criteria = _load_json_file(criteria_file)
+    if int(criteria.get("schema_version", 0)) != MANIFEST_SCHEMA_VERSION:
+        raise FormalValidationError("formal validation acceptance criteria schema_version must be 1")
+    for key in ("hard_gates", "safety_gates", "performance_policy", "closure_policy"):
+        if not isinstance(criteria.get(key), dict):
+            raise FormalValidationError(f"formal validation acceptance criteria missing {key}")
+    metrics = criteria["performance_policy"].get("metrics")
+    if not isinstance(metrics, dict):
+        raise FormalValidationError("formal validation acceptance criteria missing performance_policy.metrics")
+    required_metrics = (
+        "cagr_delta_pct",
+        "final_equity_delta_yen",
+        "profit_factor_delta",
+        "max_drawdown_delta_pct",
+        "trade_count_delta",
+    )
+    for metric in required_metrics:
+        if metric not in metrics:
+            raise FormalValidationError(f"formal validation acceptance criteria missing metric {metric}")
+    pairs = criteria["performance_policy"].get("pairs")
+    if not isinstance(pairs, list) or not pairs:
+        raise FormalValidationError("formal validation acceptance criteria missing performance_policy.pairs")
+    return criteria
+
+
+def _evaluate_threshold(metric: str, value: float, rule: dict[str, Any]) -> tuple[str, str]:
+    if bool(rule.get("informational_only", False)):
+        return "PASS", f"{metric}={value} is informational only"
+    operator = str(rule.get("operator", "")).strip()
+    threshold = _safe_number(rule.get("threshold"), f"criteria.{metric}.threshold")
+    if operator == ">":
+        passed = value > threshold
+    elif operator == ">=":
+        passed = value >= threshold
+    elif operator == "<":
+        passed = value < threshold
+    elif operator == "<=":
+        passed = value <= threshold
+    else:
+        raise FormalValidationError(f"Unsupported acceptance operator for {metric}: {operator!r}")
+    status = "PASS" if passed else "FAIL"
+    return status, f"{metric}={value} {operator} {threshold}"
+
+
+def _read_text_if_present(path: Path) -> str:
+    if not path.is_file():
+        raise FormalValidationError(f"Required formal validation artifact is missing: {path}")
+    return path.read_text(encoding="utf-8-sig")
+
+
+def _comparison_rows_from_run_rows(run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    lookup = {row["run_name"]: row for row in run_rows if row.get("status") == "DONE"}
+    pairs = [("P1_OFF", "P1_ON"), ("P2_OFF", "P2_ON")]
+    comparisons: list[dict[str, Any]] = []
+    for off_name, on_name in pairs:
+        off = lookup.get(off_name)
+        on = lookup.get(on_name)
+        if not off or not on:
+            continue
+        comparisons.append(
+            {
+                "pair_name": f"{on_name} - {off_name}",
+                "left_run": off_name,
+                "right_run": on_name,
+                "final_equity_delta_yen": round(float(_run_metric(on, "final_equity_yen", 0.0)) - float(_run_metric(off, "final_equity_yen", 0.0)), 2),
+                "cagr_delta_pct": round(float(_run_metric(on, "cagr_pct", 0.0)) - float(_run_metric(off, "cagr_pct", 0.0)), 6),
+                "profit_factor_delta": round(float(_run_metric(on, "profit_factor", 0.0)) - float(_run_metric(off, "profit_factor", 0.0)), 6),
+                "max_drawdown_delta_pct": round(float(_run_metric(on, "max_drawdown_pct", 0.0)) - float(_run_metric(off, "max_drawdown_pct", 0.0)), 6),
+                "trade_count_delta": int(float(_run_metric(on, "trade_count", 0)) - float(_run_metric(off, "trade_count", 0))),
+            }
+        )
+    return comparisons
+
+
+def evaluate_formal_validation_acceptance(
+    root: Path | str | None = None,
+    *,
+    spec_path: Path | str = DEFAULT_SPEC_PATH,
+    criteria_path: Path | str = DEFAULT_ACCEPTANCE_CRITERIA_PATH,
+) -> dict[str, Any]:
+    repository = (Path(root) if root is not None else Path(__file__).resolve().parent.parent).resolve()
+    output_dir = Path(str(spec_path)).parent
+
+    hard_gates: list[dict[str, str]] = []
+    safety_gates: list[dict[str, str]] = []
+    outcome_rows: list[dict[str, Any]] = []
+    report_text = ""
+
+    try:
+        criteria = _load_acceptance_criteria(repository, criteria_path)
+        spec = load_formal_validation_spec(repository, spec_path)
+        output_dir = spec.output_dir
+        summary_path = output_dir / DEFAULT_SUMMARY_JSON_FILE
+        summary_csv_path = output_dir / DEFAULT_SUMMARY_CSV_FILE
+        report_text_path = output_dir / DEFAULT_REPORT_TEXT_FILE
+        input_manifest_path = output_dir / DEFAULT_INPUT_MANIFEST_FILE
+        dry_run_path = output_dir / DEFAULT_DRY_RUN_JSON_FILE
+        summary = _load_json_file(summary_path)
+        input_manifest = _load_json_file(input_manifest_path)
+        dry_run = _load_json_file(dry_run_path)
+        report_text = _read_text_if_present(report_text_path)
+        summary_csv = pd.read_csv(summary_csv_path, encoding="utf-8-sig")
+        all_files = sorted(path for path in output_dir.rglob("*") if path.is_file())
+
+        required_names = list(criteria["hard_gates"].get("required_run_names", []))
+        runs = summary.get("runs", [])
+        run_lookup = {str(run.get("run_name", "")): run for run in runs if isinstance(run, dict)}
+        present_names = [str(run.get("run_name", "")) for run in runs if isinstance(run, dict)]
+        hard_gates.append(
+            _gate_row(
+                "required_run_names",
+                "PASS" if present_names == required_names else "FAIL",
+                f"present={present_names}",
+            )
+        )
+        aggregate_status = str(criteria["hard_gates"].get("aggregate_status", ""))
+        hard_gates.append(
+            _gate_row(
+                "aggregate_status",
+                "PASS" if summary.get("status") == aggregate_status else "FAIL",
+                f"summary.status={summary.get('status')}",
+            )
+        )
+        expected_run_status = str(criteria["hard_gates"].get("run_status", ""))
+        hard_gates.append(
+            _gate_row(
+                "all_runs_done",
+                "PASS" if all(str(run.get("status", "")) == expected_run_status for run in runs) else "FAIL",
+                f"expected={expected_run_status}",
+            )
+        )
+
+        expected_input_sha = str(summary.get("input_manifest_sha256", ""))
+        manifest_ok = bool(expected_input_sha)
+        manifest_ok = manifest_ok and input_manifest.get("input_manifest_sha256") == expected_input_sha
+        manifest_ok = manifest_ok and dry_run.get("input_manifest_sha256") == expected_input_sha
+        expected_run_summary_status = str(criteria["hard_gates"].get("run_summary_status", ""))
+        missing_output_files: list[str] = []
+        for run_name in required_names:
+            run = run_lookup.get(run_name, {})
+            run_dir = output_dir / DEFAULT_RUNS_DIR / run_name
+            run_manifest = _load_json_file(run_dir / "manifest.json")
+            run_summary = _load_json_file(run_dir / "summary.json")
+            manifest_ok = manifest_ok and run_manifest.get("input_manifest_sha256") == expected_input_sha
+            manifest_ok = manifest_ok and run_summary.get("input_manifest_sha256") == expected_input_sha
+            manifest_ok = manifest_ok and run_manifest.get("run_spec_sha256") == run.get("run_spec_sha256")
+            manifest_ok = manifest_ok and run_manifest.get("run_identity_sha256") == run.get("run_identity_sha256")
+            manifest_ok = manifest_ok and run_manifest.get("status") == expected_run_status
+            manifest_ok = manifest_ok and run_summary.get("status") == expected_run_summary_status
+            output_files = run_summary.get("output_files", {})
+            if not isinstance(output_files, dict) or not output_files:
+                missing_output_files.append(f"{run_name}:output_files")
+            else:
+                for output_name, output_path in output_files.items():
+                    candidate = Path(str(output_path))
+                    artifact_path = candidate if candidate.is_absolute() else repository / candidate
+                    if not artifact_path.is_file():
+                        missing_output_files.append(f"{run_name}:{output_name}")
+        hard_gates.append(
+            _gate_row(
+                "manifest_binding",
+                "PASS" if manifest_ok else "FAIL",
+                f"input_manifest_sha256={expected_input_sha}",
+            )
+        )
+        hard_gates.append(
+            _gate_row(
+                "output_completeness",
+                "PASS" if not missing_output_files else "FAIL",
+                f"missing={missing_output_files}",
+            )
+        )
+
+        csv_ok = len(summary_csv.index) == len(required_names)
+        for run_name in required_names:
+            run = run_lookup.get(run_name, {})
+            matching_rows = summary_csv[summary_csv["run_name"] == run_name]
+            if len(matching_rows.index) != 1:
+                csv_ok = False
+                continue
+            row = matching_rows.iloc[0]
+            csv_ok = csv_ok and str(row.get("status", "")) == str(run.get("status", ""))
+            csv_ok = csv_ok and str(row.get("input_manifest_sha256", "")) == str(run.get("input_manifest_sha256", ""))
+            for metric in ("cagr_pct", "final_equity_yen", "profit_factor", "max_drawdown_pct", "trade_count"):
+                csv_ok = csv_ok and _safe_number(row.get(metric), f"summary.csv.{run_name}.{metric}") == _safe_number(
+                    _run_metric(run, metric),
+                    f"summary.json.{run_name}.{metric}",
+                )
+        report_ok = bool(re.search(r"Status\s+:\s+SUCCESS", report_text))
+        report_ok = report_ok and expected_input_sha in report_text
+        report_ok = report_ok and str(summary.get("output_dir", "")) in report_text
+        report_ok = report_ok and all(f"{run_name} | DONE | resume_skipped=False" in report_text for run_name in required_names)
+        for comparison in summary.get("comparisons", []):
+            report_ok = report_ok and str(comparison.get("pair_name", "")) in report_text
+        hard_gates.append(
+            _gate_row(
+                "report_consistency",
+                "PASS" if csv_ok and report_ok else "FAIL",
+                f"summary_csv={csv_ok}; report_text={report_ok}",
+            )
+        )
+
+        zero_byte_files = [_rel(repository, path) for path in all_files if path.stat().st_size == 0]
+        hard_gates.append(
+            _gate_row(
+                "zero_byte_outputs",
+                "PASS" if not zero_byte_files else "FAIL",
+                f"zero_byte_files={zero_byte_files}",
+            )
+        )
+
+        non_finite = _contains_non_finite_json(summary) or _contains_non_finite_json(input_manifest) or _contains_non_finite_json(dry_run)
+        non_finite_pattern = re.compile(r"\b(?:nan|inf|infinity)\b", re.IGNORECASE)
+        old_namespace_pattern = re.compile(r"reports[\\/]+formal_validation(?:[\\/]|$)")
+        old_namespace_hits: list[str] = []
+        for path in all_files:
+            if path.suffix.lower() not in {".json", ".csv", ".txt", ".log"}:
+                continue
+            text = path.read_text(encoding="utf-8-sig", errors="replace")
+            if non_finite_pattern.search(text):
+                non_finite = True
+            if old_namespace_pattern.search(text):
+                old_namespace_hits.append(_rel(repository, path))
+        hard_gates.append(
+            _gate_row(
+                "non_finite_values",
+                "PASS" if not non_finite else "FAIL",
+                "no NaN/Infinity tokens or numeric non-finite values found" if not non_finite else "non-finite value found",
+            )
+        )
+        hard_gates.append(
+            _gate_row(
+                "old_namespace_contamination",
+                "PASS" if not old_namespace_hits else "FAIL",
+                f"hits={old_namespace_hits}",
+            )
+        )
+
+        expected_safety = criteria["safety_gates"]
+        safety_gates.append(
+            _gate_row(
+                "allow_network_fetch",
+                "PASS" if spec.allow_network_fetch is bool(expected_safety.get("allow_network_fetch")) else "FAIL",
+                f"spec.allow_network_fetch={spec.allow_network_fetch}",
+            )
+        )
+        for run_name in required_names:
+            run_summary = _load_json_file(output_dir / DEFAULT_RUNS_DIR / run_name / "summary.json")
+            safety = run_summary.get("safety", {})
+            for field in ("no_rss", "no_real_orders", "orders_submitted", "live_trading_enabled"):
+                expected = expected_safety.get(field)
+                actual = safety.get(field)
+                safety_gates.append(
+                    _gate_row(
+                        f"{run_name}.{field}",
+                        "PASS" if actual == expected else "FAIL",
+                        f"actual={actual}; expected={expected}",
+                    )
+                )
+        paper_ok = all(
+            row.get("status") == "PASS"
+            for row in safety_gates
+            if row["name"].endswith(".no_real_orders")
+            or row["name"].endswith(".orders_submitted")
+            or row["name"].endswith(".live_trading_enabled")
+        )
+        safety_gates.append(
+            _gate_row(
+                "paper_maintained",
+                "PASS" if paper_ok and bool(expected_safety.get("paper_maintained", False)) else "FAIL",
+                "derived from no_real_orders=true, orders_submitted=0, live_trading_enabled=false",
+            )
+        )
+        safety_gates.append(
+            _gate_row(
+                "bridge_armed",
+                "PASS" if expected_safety.get("bridge_armed") is False else "FAIL",
+                "formal validation does not arm bridge; criteria requires false",
+            )
+        )
+
+        recalculated_comparisons = _comparison_rows_from_run_rows(runs)
+        if recalculated_comparisons != summary.get("comparisons", []):
+            hard_gates.append(_gate_row("comparison_binding", "FAIL", "summary comparisons do not match recalculated deltas"))
+        else:
+            hard_gates.append(_gate_row("comparison_binding", "PASS", "summary comparisons match recalculated deltas"))
+        comparison_lookup = {row["pair_name"]: row for row in recalculated_comparisons}
+        metric_rules = criteria["performance_policy"]["metrics"]
+        for pair in criteria["performance_policy"].get("pairs", []):
+            outcome_name = str(pair.get("name", ""))
+            off_name = str(pair.get("off_run", ""))
+            on_name = str(pair.get("on_run", ""))
+            pair_name = f"{on_name} - {off_name}"
+            comparison = comparison_lookup.get(pair_name)
+            metric_results: dict[str, Any] = {}
+            outcome_status = "PASS"
+            if comparison is None:
+                outcome_status = "FAIL"
+                metric_results["pair"] = {"status": "FAIL", "reason": f"missing comparison {pair_name}"}
+            else:
+                for metric, rule in metric_rules.items():
+                    if not isinstance(rule, dict):
+                        raise FormalValidationError(f"criteria for {metric} must be an object")
+                    value = _safe_number(comparison.get(metric), f"{pair_name}.{metric}")
+                    metric_status, reason = _evaluate_threshold(metric, value, rule)
+                    metric_results[metric] = {
+                        "status": metric_status,
+                        "delta": value,
+                        "reason": reason,
+                    }
+                    if metric_status != "PASS":
+                        outcome_status = "FAIL"
+            outcome_rows.append(
+                {
+                    "name": outcome_name,
+                    "status": outcome_status,
+                    "off_run": off_name,
+                    "on_run": on_name,
+                    "metric_results": metric_results,
+                }
+            )
+
+        execution_success = summary.get("status") == criteria["hard_gates"].get("aggregate_status")
+        artifact_acceptance = _all_pass(hard_gates)
+        safety_acceptance = _all_pass(safety_gates)
+        performance_acceptance = all(row.get("status") == "PASS" for row in outcome_rows)
+        closure = (
+            bool(criteria["closure_policy"].get("requires_execution_success", True)) and execution_success
+            and bool(criteria["closure_policy"].get("requires_artifact_acceptance", True)) and artifact_acceptance
+            and bool(criteria["closure_policy"].get("requires_safety_acceptance", True)) and safety_acceptance
+            and bool(criteria["closure_policy"].get("requires_all_performance_outcomes_pass", True)) and performance_acceptance
+        )
+        status = "PASS" if closure else "FAIL"
+        return {
+            "schema_version": MANIFEST_SCHEMA_VERSION,
+            "version": "PHOENIX Formal Validation Acceptance Report",
+            "generated_at": _now_text(),
+            "status": status,
+            "formal_validation_closed": closure,
+            "criteria_file": _rel(repository, resolve_within(repository, str(criteria_path))),
+            "spec_file": _rel(repository, spec.path),
+            "output_dir": _rel(repository, output_dir),
+            "execution_success": execution_success,
+            "artifact_acceptance": artifact_acceptance,
+            "safety_acceptance": safety_acceptance,
+            "performance_acceptance": performance_acceptance,
+            "hard_gates": hard_gates,
+            "safety_gates": safety_gates,
+            "outcomes": outcome_rows,
+        }
+    except Exception as error:
+        return {
+            "schema_version": MANIFEST_SCHEMA_VERSION,
+            "version": "PHOENIX Formal Validation Acceptance Report",
+            "generated_at": _now_text(),
+            "status": "FAIL",
+            "formal_validation_closed": False,
+            "criteria_file": str(criteria_path),
+            "spec_file": str(spec_path),
+            "output_dir": str(output_dir),
+            "execution_success": False,
+            "artifact_acceptance": False,
+            "safety_acceptance": False,
+            "performance_acceptance": False,
+            "hard_gates": hard_gates,
+            "safety_gates": safety_gates,
+            "outcomes": outcome_rows,
+            "error": f"{type(error).__name__}: {error}",
+        }
+
+
 class FormalValidationRunner:
     def __init__(
         self,
@@ -977,27 +1380,7 @@ class FormalValidationRunner:
         )
 
     def _comparison_rows(self, run_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        lookup = {row["run_name"]: row for row in run_rows if row.get("status") == "DONE"}
-        pairs = [("P1_OFF", "P1_ON"), ("P2_OFF", "P2_ON")]
-        comparisons: list[dict[str, Any]] = []
-        for off_name, on_name in pairs:
-            off = lookup.get(off_name)
-            on = lookup.get(on_name)
-            if not off or not on:
-                continue
-            comparisons.append(
-                {
-                    "pair_name": f"{on_name} - {off_name}",
-                    "left_run": off_name,
-                    "right_run": on_name,
-                    "final_equity_delta_yen": round(float(_run_metric(on, "final_equity_yen", 0.0)) - float(_run_metric(off, "final_equity_yen", 0.0)), 2),
-                    "cagr_delta_pct": round(float(_run_metric(on, "cagr_pct", 0.0)) - float(_run_metric(off, "cagr_pct", 0.0)), 6),
-                    "profit_factor_delta": round(float(_run_metric(on, "profit_factor", 0.0)) - float(_run_metric(off, "profit_factor", 0.0)), 6),
-                    "max_drawdown_delta_pct": round(float(_run_metric(on, "max_drawdown_pct", 0.0)) - float(_run_metric(off, "max_drawdown_pct", 0.0)), 6),
-                    "trade_count_delta": int(float(_run_metric(on, "trade_count", 0)) - float(_run_metric(off, "trade_count", 0))),
-                }
-            )
-        return comparisons
+        return _comparison_rows_from_run_rows(run_rows)
 
     def _summary_from_run_rows(self, input_manifest_sha256: str, run_rows: list[dict[str, Any]]) -> dict[str, Any]:
         status = "SUCCESS"
@@ -1107,10 +1490,27 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Validate the formal validation inputs and prepare one window without running simulations.",
     )
+    parser.add_argument(
+        "--acceptance-only",
+        action="store_true",
+        help="Evaluate existing formal validation artifacts without running simulations.",
+    )
+    parser.add_argument(
+        "--acceptance-criteria",
+        default=str(DEFAULT_ACCEPTANCE_CRITERIA_PATH),
+        help="Path to config/formal_validation_acceptance_criteria.json",
+    )
     args = parser.parse_args(argv)
 
-    runner = FormalValidationRunner(spec_path=args.config)
     try:
+        if args.acceptance_only:
+            result = evaluate_formal_validation_acceptance(
+                spec_path=args.config,
+                criteria_path=args.acceptance_criteria,
+            )
+            print(_canonical_json(result))
+            return 0 if result.get("status") == "PASS" else 1
+        runner = FormalValidationRunner(spec_path=args.config)
         if args.dry_run:
             result = runner.dry_run()
             print(_canonical_json(result))

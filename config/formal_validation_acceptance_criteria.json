@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "version": "PHOENIX Formal Validation Acceptance Criteria",
+  "hard_gates": {
+    "required_run_names": [
+      "P1_OFF",
+      "P1_ON",
+      "P2_OFF",
+      "P2_ON"
+    ],
+    "aggregate_status": "SUCCESS",
+    "run_status": "DONE",
+    "run_summary_status": "SUCCESS",
+    "require_report_consistency": true,
+    "require_manifest_binding": true,
+    "require_no_zero_byte_outputs": true,
+    "require_no_non_finite_values": true,
+    "forbid_old_namespace_contamination": true
+  },
+  "safety_gates": {
+    "allow_network_fetch": false,
+    "no_rss": true,
+    "no_real_orders": true,
+    "orders_submitted": 0,
+    "live_trading_enabled": false,
+    "paper_maintained": true,
+    "bridge_armed": false
+  },
+  "performance_policy": {
+    "outcome_mode": "separate",
+    "delta_definition": "ON_MINUS_OFF",
+    "pairs": [
+      {
+        "name": "P1",
+        "off_run": "P1_OFF",
+        "on_run": "P1_ON"
+      },
+      {
+        "name": "P2",
+        "off_run": "P2_OFF",
+        "on_run": "P2_ON"
+      }
+    ],
+    "metrics": {
+      "cagr_delta_pct": {
+        "operator": ">",
+        "threshold": 0
+      },
+      "final_equity_delta_yen": {
+        "operator": ">",
+        "threshold": 0
+      },
+      "profit_factor_delta": {
+        "operator": ">=",
+        "threshold": 0
+      },
+      "max_drawdown_delta_pct": {
+        "operator": "<=",
+        "threshold": 2.0,
+        "positive_delta_means": "deterioration"
+      },
+      "trade_count_delta": {
+        "informational_only": true
+      }
+    }
+  },
+  "closure_policy": {
+    "requires_execution_success": true,
+    "requires_artifact_acceptance": true,
+    "requires_safety_acceptance": true,
+    "requires_all_performance_outcomes_pass": true
+  }
+}
