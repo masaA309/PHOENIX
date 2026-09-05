@@ -1,82 +1,265 @@
 {
   "classes": [
     {
-      "aliases": ["G-001"],
+      "aliases": [
+        "G-001"
+      ],
       "canonical_id": "FC-SELF-REPORTED-PASS",
       "closure_evidence": {
-        "artifact_hashes": {"codex_candidate.schema.json":"95e89f34ba4e5a416d59b0944f5ca320c23e44c01df697107aedfff006faf461","codex_execution_preflight_gate.py":"d3bac0771380e341f9b51e20b157a4129386b48f98a909baac277a9642d8a814","evidence_graph.schema.json":"a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce","failure_class.schema.json":"d2423cb1d4b1c1803e2263d8ed10ecc72bb82acb3b9cb6e30eac01720f2086a0","gate_report.schema.json":"69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8","root_cause_synonyms.json":"456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1","test_codex_execution_preflight_gate.py":"51702bb419a1eaa5e17eeae5c6f483b27fe3b6302de3dafcd2690baaea723e4f"},
-        "closed_at_utc": "2026-09-02T00:00:00+00:00",
-        "required_prevention_controls": ["independent evidence binding"],
-        "test_run_id": "governance-bootstrap-20260902",
+        "validator_version": "1.1.0",
+        "artifact_hashes": {
+          "AGENTS.md": "fdae145e26b6cfbd6379e081c1aea323142bd7eea2600c44a7cd6f9443cba591",
+          "tools/codex_execution_preflight_gate.py": "c3285dc603d4a165dd4f5e4b1b0a5815e88d9a79fd14ccb0b7ab7f6b1667035c",
+          "tools/governance_command_runner.py": "e3aa02280f3c247419a0345c3e5932c428776b578a19d9a450b1b962255d567f",
+          "config/governance/codex_candidate.schema.json": "d5138c905d08e5dffa556657e71569f54360d46fcf2d6fc8ec4bdfc91f8bb1f0",
+          "config/governance/evidence_graph.schema.json": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce",
+          "config/governance/failure_class.schema.json": "fb8af14f515724fdf93137546547627c2ad91922d4d26a6780b349775e5c3e9e",
+          "config/governance/gate_report.schema.json": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8",
+          "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
+          "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
+        },
+        "closed_at_utc": "2026-09-05T14:29:05.509677+00:00",
         "time_window": "until_governance_artifact_change",
-        "validator_version": "1.0.0"
+        "required_prevention_controls": [
+          "independent evidence binding"
+        ],
+        "test_run_id": "gov1-v4-functional-85tests-20260905",
+        "ledger_version": 3
       },
       "reopen_condition": "artifact identity or closure evidence changes",
-      "required_prevention_controls": ["independent evidence binding"],
-      "root_cause_aliases": ["自己申告PASS", "self reported pass"],
+      "required_prevention_controls": [
+        "independent evidence binding"
+      ],
+      "root_cause_aliases": [
+        "自己申告PASS",
+        "self reported pass"
+      ],
       "root_cause_code": "self-reported pass without independent evidence",
       "root_cause_description": "A PASS conclusion was asserted without independent evidence.",
       "status": "CLOSED"
     },
     {
-      "aliases": ["G-002"],
+      "aliases": [
+        "G-002"
+      ],
       "canonical_id": "FC-SHELL-BOUNDARY-EXPANSION",
-      "closure_evidence": {"artifact_hashes":{"codex_candidate.schema.json":"95e89f34ba4e5a416d59b0944f5ca320c23e44c01df697107aedfff006faf461","codex_execution_preflight_gate.py":"d3bac0771380e341f9b51e20b157a4129386b48f98a909baac277a9642d8a814","evidence_graph.schema.json":"a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce","failure_class.schema.json":"d2423cb1d4b1c1803e2263d8ed10ecc72bb82acb3b9cb6e30eac01720f2086a0","gate_report.schema.json":"69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8","root_cause_synonyms.json":"456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1","test_codex_execution_preflight_gate.py":"51702bb419a1eaa5e17eeae5c6f483b27fe3b6302de3dafcd2690baaea723e4f"},"closed_at_utc":"2026-09-02T00:00:00+00:00","required_prevention_controls":["hash-locked -File transport"],"test_run_id":"governance-bootstrap-20260902","time_window":"until_governance_artifact_change","validator_version":"1.0.0"},
+      "closure_evidence": {
+        "validator_version": "1.1.0",
+        "artifact_hashes": {
+          "AGENTS.md": "fdae145e26b6cfbd6379e081c1aea323142bd7eea2600c44a7cd6f9443cba591",
+          "tools/codex_execution_preflight_gate.py": "c3285dc603d4a165dd4f5e4b1b0a5815e88d9a79fd14ccb0b7ab7f6b1667035c",
+          "tools/governance_command_runner.py": "e3aa02280f3c247419a0345c3e5932c428776b578a19d9a450b1b962255d567f",
+          "config/governance/codex_candidate.schema.json": "d5138c905d08e5dffa556657e71569f54360d46fcf2d6fc8ec4bdfc91f8bb1f0",
+          "config/governance/evidence_graph.schema.json": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce",
+          "config/governance/failure_class.schema.json": "fb8af14f515724fdf93137546547627c2ad91922d4d26a6780b349775e5c3e9e",
+          "config/governance/gate_report.schema.json": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8",
+          "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
+          "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
+        },
+        "closed_at_utc": "2026-09-05T14:29:05.509677+00:00",
+        "time_window": "until_governance_artifact_change",
+        "required_prevention_controls": [
+          "hash-locked -File transport"
+        ],
+        "test_run_id": "gov1-v4-functional-85tests-20260905",
+        "ledger_version": 3
+      },
       "reopen_condition": "shell transport changes",
-      "required_prevention_controls": ["hash-locked -File transport"],
-      "root_cause_aliases": ["shell variable expansion", "シェル境界変数展開"],
+      "required_prevention_controls": [
+        "hash-locked -File transport"
+      ],
+      "root_cause_aliases": [
+        "shell variable expansion",
+        "シェル境界変数展開"
+      ],
       "root_cause_code": "shell boundary variable expansion",
       "root_cause_description": "A shell boundary expanded variables unexpectedly.",
       "status": "CLOSED"
     },
     {
-      "aliases": ["G-003"],
+      "aliases": [
+        "G-003"
+      ],
       "canonical_id": "FC-OUTPUT-TRANSPORT-OVERSIZED",
-      "closure_evidence": {"artifact_hashes":{"codex_candidate.schema.json":"95e89f34ba4e5a416d59b0944f5ca320c23e44c01df697107aedfff006faf461","codex_execution_preflight_gate.py":"d3bac0771380e341f9b51e20b157a4129386b48f98a909baac277a9642d8a814","evidence_graph.schema.json":"a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce","failure_class.schema.json":"d2423cb1d4b1c1803e2263d8ed10ecc72bb82acb3b9cb6e30eac01720f2086a0","gate_report.schema.json":"69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8","root_cause_synonyms.json":"456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1","test_codex_execution_preflight_gate.py":"51702bb419a1eaa5e17eeae5c6f483b27fe3b6302de3dafcd2690baaea723e4f"},"closed_at_utc":"2026-09-02T00:00:00+00:00","required_prevention_controls":["bounded output capture"],"test_run_id":"governance-bootstrap-20260902","time_window":"until_governance_artifact_change","validator_version":"1.0.0"},
+      "closure_evidence": {
+        "validator_version": "1.1.0",
+        "artifact_hashes": {
+          "AGENTS.md": "fdae145e26b6cfbd6379e081c1aea323142bd7eea2600c44a7cd6f9443cba591",
+          "tools/codex_execution_preflight_gate.py": "c3285dc603d4a165dd4f5e4b1b0a5815e88d9a79fd14ccb0b7ab7f6b1667035c",
+          "tools/governance_command_runner.py": "e3aa02280f3c247419a0345c3e5932c428776b578a19d9a450b1b962255d567f",
+          "config/governance/codex_candidate.schema.json": "d5138c905d08e5dffa556657e71569f54360d46fcf2d6fc8ec4bdfc91f8bb1f0",
+          "config/governance/evidence_graph.schema.json": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce",
+          "config/governance/failure_class.schema.json": "fb8af14f515724fdf93137546547627c2ad91922d4d26a6780b349775e5c3e9e",
+          "config/governance/gate_report.schema.json": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8",
+          "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
+          "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
+        },
+        "closed_at_utc": "2026-09-05T14:29:05.509677+00:00",
+        "time_window": "until_governance_artifact_change",
+        "required_prevention_controls": [
+          "bounded output capture"
+        ],
+        "test_run_id": "gov1-v4-functional-85tests-20260905",
+        "ledger_version": 3
+      },
       "reopen_condition": "output transport changes",
-      "required_prevention_controls": ["bounded output capture"],
-      "root_cause_aliases": ["oversized output", "出力転送過大"],
+      "required_prevention_controls": [
+        "bounded output capture"
+      ],
+      "root_cause_aliases": [
+        "oversized output",
+        "出力転送過大"
+      ],
       "root_cause_code": "oversized chat output transport",
       "root_cause_description": "Chat output exceeded a bounded transport.",
       "status": "CLOSED"
     },
     {
-      "aliases": ["G-004"],
+      "aliases": [
+        "G-004"
+      ],
       "canonical_id": "FC-STATIC-CONTRADICTION",
-      "closure_evidence": {"artifact_hashes":{"codex_candidate.schema.json":"95e89f34ba4e5a416d59b0944f5ca320c23e44c01df697107aedfff006faf461","codex_execution_preflight_gate.py":"d3bac0771380e341f9b51e20b157a4129386b48f98a909baac277a9642d8a814","evidence_graph.schema.json":"a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce","failure_class.schema.json":"d2423cb1d4b1c1803e2263d8ed10ecc72bb82acb3b9cb6e30eac01720f2086a0","gate_report.schema.json":"69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8","root_cause_synonyms.json":"456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1","test_codex_execution_preflight_gate.py":"51702bb419a1eaa5e17eeae5c6f483b27fe3b6302de3dafcd2690baaea723e4f"},"closed_at_utc":"2026-09-02T00:00:00+00:00","required_prevention_controls":["static contradiction validation"],"test_run_id":"governance-bootstrap-20260902","time_window":"until_governance_artifact_change","validator_version":"1.0.0"},
+      "closure_evidence": {
+        "validator_version": "1.1.0",
+        "artifact_hashes": {
+          "AGENTS.md": "fdae145e26b6cfbd6379e081c1aea323142bd7eea2600c44a7cd6f9443cba591",
+          "tools/codex_execution_preflight_gate.py": "c3285dc603d4a165dd4f5e4b1b0a5815e88d9a79fd14ccb0b7ab7f6b1667035c",
+          "tools/governance_command_runner.py": "e3aa02280f3c247419a0345c3e5932c428776b578a19d9a450b1b962255d567f",
+          "config/governance/codex_candidate.schema.json": "d5138c905d08e5dffa556657e71569f54360d46fcf2d6fc8ec4bdfc91f8bb1f0",
+          "config/governance/evidence_graph.schema.json": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce",
+          "config/governance/failure_class.schema.json": "fb8af14f515724fdf93137546547627c2ad91922d4d26a6780b349775e5c3e9e",
+          "config/governance/gate_report.schema.json": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8",
+          "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
+          "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
+        },
+        "closed_at_utc": "2026-09-05T14:29:05.509677+00:00",
+        "time_window": "until_governance_artifact_change",
+        "required_prevention_controls": [
+          "static contradiction validation"
+        ],
+        "test_run_id": "gov1-v4-functional-85tests-20260905",
+        "ledger_version": 3
+      },
       "reopen_condition": "candidate validation changes",
-      "required_prevention_controls": ["static contradiction validation"],
-      "root_cause_aliases": ["instruction contradiction", "静的指示矛盾"],
+      "required_prevention_controls": [
+        "static contradiction validation"
+      ],
+      "root_cause_aliases": [
+        "instruction contradiction",
+        "静的指示矛盾"
+      ],
       "root_cause_code": "static instruction contradiction",
       "root_cause_description": "A candidate contained a static instruction contradiction.",
       "status": "CLOSED"
     },
     {
-      "aliases": ["G-005"],
+      "aliases": [
+        "G-005"
+      ],
       "canonical_id": "FC-WRONG-ARTIFACT-EXECUTION",
-      "closure_evidence": {"artifact_hashes":{"codex_candidate.schema.json":"95e89f34ba4e5a416d59b0944f5ca320c23e44c01df697107aedfff006faf461","codex_execution_preflight_gate.py":"d3bac0771380e341f9b51e20b157a4129386b48f98a909baac277a9642d8a814","evidence_graph.schema.json":"a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce","failure_class.schema.json":"d2423cb1d4b1c1803e2263d8ed10ecc72bb82acb3b9cb6e30eac01720f2086a0","gate_report.schema.json":"69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8","root_cause_synonyms.json":"456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1","test_codex_execution_preflight_gate.py":"51702bb419a1eaa5e17eeae5c6f483b27fe3b6302de3dafcd2690baaea723e4f"},"closed_at_utc":"2026-09-02T00:00:00+00:00","required_prevention_controls":["artifact hash lock"],"test_run_id":"governance-bootstrap-20260902","time_window":"until_governance_artifact_change","validator_version":"1.0.0"},
+      "closure_evidence": {
+        "validator_version": "1.1.0",
+        "artifact_hashes": {
+          "AGENTS.md": "fdae145e26b6cfbd6379e081c1aea323142bd7eea2600c44a7cd6f9443cba591",
+          "tools/codex_execution_preflight_gate.py": "c3285dc603d4a165dd4f5e4b1b0a5815e88d9a79fd14ccb0b7ab7f6b1667035c",
+          "tools/governance_command_runner.py": "e3aa02280f3c247419a0345c3e5932c428776b578a19d9a450b1b962255d567f",
+          "config/governance/codex_candidate.schema.json": "d5138c905d08e5dffa556657e71569f54360d46fcf2d6fc8ec4bdfc91f8bb1f0",
+          "config/governance/evidence_graph.schema.json": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce",
+          "config/governance/failure_class.schema.json": "fb8af14f515724fdf93137546547627c2ad91922d4d26a6780b349775e5c3e9e",
+          "config/governance/gate_report.schema.json": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8",
+          "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
+          "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
+        },
+        "closed_at_utc": "2026-09-05T14:29:05.509677+00:00",
+        "time_window": "until_governance_artifact_change",
+        "required_prevention_controls": [
+          "artifact hash lock"
+        ],
+        "test_run_id": "gov1-v4-functional-85tests-20260905",
+        "ledger_version": 3
+      },
       "reopen_condition": "artifact identity controls change",
-      "required_prevention_controls": ["artifact hash lock"],
-      "root_cause_aliases": ["wrong artifact", "誤ったartifact実行"],
+      "required_prevention_controls": [
+        "artifact hash lock"
+      ],
+      "root_cause_aliases": [
+        "wrong artifact",
+        "誤ったartifact実行"
+      ],
       "root_cause_code": "wrong artifact execution",
       "root_cause_description": "An artifact other than the locked artifact was executed.",
       "status": "CLOSED"
     },
     {
-      "aliases": ["G-006"],
+      "aliases": [
+        "G-006"
+      ],
       "canonical_id": "FC-UNMITIGATED-RECURRENCE",
-      "closure_evidence": {"artifact_hashes":{"codex_candidate.schema.json":"95e89f34ba4e5a416d59b0944f5ca320c23e44c01df697107aedfff006faf461","codex_execution_preflight_gate.py":"d3bac0771380e341f9b51e20b157a4129386b48f98a909baac277a9642d8a814","evidence_graph.schema.json":"a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce","failure_class.schema.json":"d2423cb1d4b1c1803e2263d8ed10ecc72bb82acb3b9cb6e30eac01720f2086a0","gate_report.schema.json":"69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8","root_cause_synonyms.json":"456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1","test_codex_execution_preflight_gate.py":"51702bb419a1eaa5e17eeae5c6f483b27fe3b6302de3dafcd2690baaea723e4f"},"closed_at_utc":"2026-09-02T00:00:00+00:00","required_prevention_controls":["failure class status validation"],"test_run_id":"governance-bootstrap-20260902","time_window":"until_governance_artifact_change","validator_version":"1.0.0"},
+      "closure_evidence": {
+        "validator_version": "1.1.0",
+        "artifact_hashes": {
+          "AGENTS.md": "fdae145e26b6cfbd6379e081c1aea323142bd7eea2600c44a7cd6f9443cba591",
+          "tools/codex_execution_preflight_gate.py": "c3285dc603d4a165dd4f5e4b1b0a5815e88d9a79fd14ccb0b7ab7f6b1667035c",
+          "tools/governance_command_runner.py": "e3aa02280f3c247419a0345c3e5932c428776b578a19d9a450b1b962255d567f",
+          "config/governance/codex_candidate.schema.json": "d5138c905d08e5dffa556657e71569f54360d46fcf2d6fc8ec4bdfc91f8bb1f0",
+          "config/governance/evidence_graph.schema.json": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce",
+          "config/governance/failure_class.schema.json": "fb8af14f515724fdf93137546547627c2ad91922d4d26a6780b349775e5c3e9e",
+          "config/governance/gate_report.schema.json": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8",
+          "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
+          "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
+        },
+        "closed_at_utc": "2026-09-05T14:29:05.509677+00:00",
+        "time_window": "until_governance_artifact_change",
+        "required_prevention_controls": [
+          "failure class status validation"
+        ],
+        "test_run_id": "gov1-v4-functional-85tests-20260905",
+        "ledger_version": 3
+      },
       "reopen_condition": "failure ledger changes",
-      "required_prevention_controls": ["failure class status validation"],
-      "root_cause_aliases": ["failure class recurrence", "未対策failure class再発"],
+      "required_prevention_controls": [
+        "failure class status validation"
+      ],
+      "root_cause_aliases": [
+        "failure class recurrence",
+        "未対策failure class再発"
+      ],
       "root_cause_code": "unmitigated failure class recurrence",
       "root_cause_description": "A known failure class recurred without mitigation.",
       "status": "CLOSED"
     }
   ],
   "test_run": {
-    "modules": ["tests.test_prompt_redundancy_validator", "tests.test_codex_execution_preflight_gate"],
-    "names": ["test_missing_required_section_fails", "test_proof_source_zero_fails", "test_proof_source_multiple_candidates_fails", "test_atomic_bundle_passes", "test_git_bash_powershell_inline_command_fails", "test_hash_locked_ps1_file_passes", "test_output_budget_missing_or_exceeded_fails", "test_complete_and_truncate_fails", "test_wrong_artifact_hash_fails", "test_open_class_fails", "test_unknown_root_cause_is_not_proven", "test_ambiguous_root_cause_is_not_proven", "test_closed_stale_evidence_is_not_proven", "test_lifecycle_missing_fails", "test_unproven_runtime_prerequisite_is_not_proven", "test_rollback_missing_fails", "test_user_operation_two_fails", "test_prior_conclusion_in_review_input_fails", "test_same_actor_independent_audit_fails", "test_internal_schema_error_returns_exit_four", "test_stale_candidate_hash_fails", "test_candidate_canonicalization_vector_matches", "test_runner_stdout_limit_stops_child_and_fails", "test_non_redundant_candidate_passes_all_conditions"]
+    "modules": [
+      "tests.test_prompt_redundancy_validator",
+      "tests.test_codex_execution_preflight_gate"
+    ],
+    "names": [
+      "test_missing_required_section_fails",
+      "test_proof_source_zero_fails",
+      "test_proof_source_multiple_candidates_fails",
+      "test_atomic_bundle_passes",
+      "test_git_bash_powershell_inline_command_fails",
+      "test_hash_locked_ps1_file_passes",
+      "test_output_budget_missing_or_exceeded_fails",
+      "test_complete_and_truncate_fails",
+      "test_wrong_artifact_hash_fails",
+      "test_open_class_fails",
+      "test_unknown_root_cause_is_not_proven",
+      "test_ambiguous_root_cause_is_not_proven",
+      "test_closed_stale_evidence_is_not_proven",
+      "test_lifecycle_missing_fails",
+      "test_unproven_runtime_prerequisite_is_not_proven",
+      "test_rollback_missing_fails",
+      "test_user_operation_two_fails",
+      "test_prior_conclusion_in_review_input_fails",
+      "test_same_actor_independent_audit_fails",
+      "test_internal_schema_error_returns_exit_four",
+      "test_stale_candidate_hash_fails",
+      "test_candidate_canonicalization_vector_matches",
+      "test_runner_stdout_limit_stops_child_and_fails",
+      "test_non_redundant_candidate_passes_all_conditions"
+    ]
   },
-  "version": 1
+  "version": 3
 }
