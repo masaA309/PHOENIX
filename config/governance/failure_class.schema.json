@@ -1,1 +1,155 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"canonical_id":{"type":"string"},"closure_evidence":{"type":"object"},"reopen_condition":{"type":"string"},"required_prevention_controls":{"type":"array"},"root_cause_aliases":{"type":"array"},"root_cause_code":{"type":"string"},"root_cause_description":{"type":"string"},"status":{"enum":["OPEN","CLOSED","REOPENED"]}},"required":["canonical_id","root_cause_code","root_cause_description","root_cause_aliases","required_prevention_controls","status","closure_evidence","reopen_condition"],"type":"object"}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "canonical_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "root_cause_code": {
+      "type": "string",
+      "minLength": 1
+    },
+    "root_cause_description": {
+      "type": "string",
+      "minLength": 1
+    },
+    "root_cause_aliases": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "required_prevention_controls": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "status": {
+      "enum": [
+        "OPEN",
+        "CLOSED",
+        "REOPENED"
+      ]
+    },
+    "closure_evidence": {
+      "type": "object"
+    },
+    "reopen_condition": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "canonical_id",
+    "aliases",
+    "root_cause_code",
+    "root_cause_description",
+    "root_cause_aliases",
+    "required_prevention_controls",
+    "status",
+    "closure_evidence",
+    "reopen_condition"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "CLOSED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "closure_evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "validator_version": {
+                "type": "string",
+                "minLength": 1
+              },
+              "artifact_hashes": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{64}$"
+                }
+              },
+              "closed_at_utc": {
+                "type": "string",
+                "minLength": 1
+              },
+              "time_window": {
+                "type": "string",
+                "minLength": 1
+              },
+              "required_prevention_controls": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              },
+              "test_run_id": {
+                "type": "string"
+              },
+              "ledger_version": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": [
+              "validator_version",
+              "artifact_hashes",
+              "closed_at_utc",
+              "time_window",
+              "required_prevention_controls"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "OPEN",
+              "REOPENED"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "closure_evidence": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  ]
+}
