@@ -325,3 +325,13 @@ candidate hashまたは依存artifact hashが不一致ならFAIL。
 required reviewはcandidate作成者が任意に減らさない。全candidateにMECHANICAL_REVIEWとCOMPLETENESS_REVIEWを必須とする。ユーザーが外部監査を明示した場合、governance原則・validator・schema・正規化辞書を変更する場合、新しい重大failure classを登録する場合はINDEPENDENT_AUDITも必須とする。ただし外部actor利用不能時にユーザーが独立性欠如を理解して代行reviewを明示承認したgovernance変更だけは、SUBSTITUTE_COMPLETENESS_REVIEWとして記録して実装へ進める。この例外で通常runtime・実機・Trading SafetyをPASSにしない。
 CODEX_EXECUTION_PREFLIGHT_GATE自体の起動はgovernance_command_runner必須の例外とする。preflightのstdoutは固定schema・固定byte上限とし、PASS後のcommandだけをgovernance_command_runner経由に限定する。state/governance/incomingとstate/governance/reportsはruntime evidenceでありGit対象にしない。
 validator internal error、schema error、report欠落はFAILとして停止する。人間の自由文PASSで上書きしない。
+
+## 16. ECO-FAST
+
+ECO-FASTはPHOENIXの省トークン・省計算運用原則とする。目的達成に必要な実装、必要テスト、検証、終了を可能な限り1サイクルで完結する。実況、低価値なverification-only別サイクル、PASS後の磨き込み、任意リファクタ、合否に無関係なwarning修正、同一testの不要な再実行は禁止する。
+
+repo全探索、同一内容の再読、既知仕様の再調査は必要時のみ行い、通常は必要ファイルだけを読む。routine作業は最小推論・最小操作で処理し、architecture / safety / owner / lifecycle / rollback などの難所は十分に推論してから進める。
+
+ECO-FASTは安全gate、正確性、必要検証を省略する理由にしてはならない。commit/push許可があるサイクルでは、scope確認、commit、push、最終確認までを可能な限り一括化し、目的達成時点で即終了する。
+
+ECO-FASTは既存の必須gate、review、承認、activation順序を変更せず、staleなgovernance evidenceを再利用する根拠にもならない。
