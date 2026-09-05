@@ -18,13 +18,13 @@
           "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
           "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
         },
-        "closed_at_utc": "2026-09-05T14:29:05.509677+00:00",
+        "closed_at_utc": "2026-09-05T15:16:53.779115+00:00",
         "time_window": "until_governance_artifact_change",
         "required_prevention_controls": [
           "independent evidence binding"
         ],
-        "test_run_id": "gov1-v4-functional-85tests-20260905",
-        "ledger_version": 3
+        "test_run_id": "gov2-cycle-b-close-g001-g006-20260906",
+        "ledger_version": 6
       },
       "reopen_condition": "artifact identity or closure evidence changes",
       "required_prevention_controls": [
@@ -56,13 +56,13 @@
           "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
           "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
         },
-        "closed_at_utc": "2026-09-05T14:29:05.509677+00:00",
+        "closed_at_utc": "2026-09-05T15:16:53.779115+00:00",
         "time_window": "until_governance_artifact_change",
         "required_prevention_controls": [
           "hash-locked -File transport"
         ],
-        "test_run_id": "gov1-v4-functional-85tests-20260905",
-        "ledger_version": 3
+        "test_run_id": "gov2-cycle-b-close-g001-g006-20260906",
+        "ledger_version": 6
       },
       "reopen_condition": "shell transport changes",
       "required_prevention_controls": [
@@ -94,13 +94,13 @@
           "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
           "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
         },
-        "closed_at_utc": "2026-09-05T14:29:05.509677+00:00",
+        "closed_at_utc": "2026-09-05T15:16:53.779115+00:00",
         "time_window": "until_governance_artifact_change",
         "required_prevention_controls": [
           "bounded output capture"
         ],
-        "test_run_id": "gov1-v4-functional-85tests-20260905",
-        "ledger_version": 3
+        "test_run_id": "gov2-cycle-b-close-g001-g006-20260906",
+        "ledger_version": 6
       },
       "reopen_condition": "output transport changes",
       "required_prevention_controls": [
@@ -132,13 +132,13 @@
           "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
           "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
         },
-        "closed_at_utc": "2026-09-05T14:29:05.509677+00:00",
+        "closed_at_utc": "2026-09-05T15:16:53.779115+00:00",
         "time_window": "until_governance_artifact_change",
         "required_prevention_controls": [
           "static contradiction validation"
         ],
-        "test_run_id": "gov1-v4-functional-85tests-20260905",
-        "ledger_version": 3
+        "test_run_id": "gov2-cycle-b-close-g001-g006-20260906",
+        "ledger_version": 6
       },
       "reopen_condition": "candidate validation changes",
       "required_prevention_controls": [
@@ -170,13 +170,13 @@
           "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
           "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
         },
-        "closed_at_utc": "2026-09-05T14:29:05.509677+00:00",
+        "closed_at_utc": "2026-09-05T15:16:53.779115+00:00",
         "time_window": "until_governance_artifact_change",
         "required_prevention_controls": [
           "artifact hash lock"
         ],
-        "test_run_id": "gov1-v4-functional-85tests-20260905",
-        "ledger_version": 3
+        "test_run_id": "gov2-cycle-b-close-g001-g006-20260906",
+        "ledger_version": 6
       },
       "reopen_condition": "artifact identity controls change",
       "required_prevention_controls": [
@@ -208,13 +208,13 @@
           "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
           "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
         },
-        "closed_at_utc": "2026-09-05T14:29:05.509677+00:00",
+        "closed_at_utc": "2026-09-05T15:16:53.779115+00:00",
         "time_window": "until_governance_artifact_change",
         "required_prevention_controls": [
           "failure class status validation"
         ],
-        "test_run_id": "gov1-v4-functional-85tests-20260905",
-        "ledger_version": 3
+        "test_run_id": "gov2-cycle-b-close-g001-g006-20260906",
+        "ledger_version": 6
       },
       "reopen_condition": "failure ledger changes",
       "required_prevention_controls": [
@@ -227,6 +227,159 @@
       "root_cause_code": "unmitigated failure class recurrence",
       "root_cause_description": "A known failure class recurred without mitigation.",
       "status": "CLOSED"
+    },
+    {
+      "canonical_id": "FC-NONAUTHORITATIVE-MARKET-STATE",
+      "aliases": [
+        "G-007"
+      ],
+      "root_cause_code": "non-authoritative market state used for trading decision",
+      "root_cause_aliases": [
+        "非権威市場状態"
+      ],
+      "root_cause_description": "A trading decision relies on market state that is not bound to the authoritative source.",
+      "required_prevention_controls": [
+        "authoritative market-state source binding"
+      ],
+      "reopen_condition": "authoritative market-state source or binding changes",
+      "status": "OPEN",
+      "closure_evidence": {}
+    },
+    {
+      "canonical_id": "FC-OBSERVATION-WRITE-SIDE-EFFECT",
+      "aliases": [
+        "G-008"
+      ],
+      "root_cause_code": "observation path causes write side effect",
+      "root_cause_aliases": [
+        "観測経路書込副作用"
+      ],
+      "root_cause_description": "A nominally observational path mutates production state.",
+      "required_prevention_controls": [
+        "read-only observation boundary"
+      ],
+      "reopen_condition": "observation/read boundary or side-effect behavior changes",
+      "status": "OPEN",
+      "closure_evidence": {}
+    },
+    {
+      "canonical_id": "FC-LIVE-RUNTIME-PROVENANCE-DIVERGENCE",
+      "aliases": [
+        "G-009"
+      ],
+      "root_cause_code": "live runtime provenance divergence",
+      "root_cause_aliases": [
+        "ライブ実行由来乖離"
+      ],
+      "root_cause_description": "The live runtime identity or provenance differs from the validated deployment identity.",
+      "required_prevention_controls": [
+        "live runtime provenance lock"
+      ],
+      "reopen_condition": "validated or live runtime provenance identity changes",
+      "status": "OPEN",
+      "closure_evidence": {}
+    },
+    {
+      "canonical_id": "FC-LIVE-AUTHORITY-BOUNDARY-VIOLATION",
+      "aliases": [
+        "G-010"
+      ],
+      "root_cause_code": "live authority boundary violation",
+      "root_cause_aliases": [
+        "ライブ権限境界違反"
+      ],
+      "root_cause_description": "An actor outside the designated live authority mutates economic state.",
+      "required_prevention_controls": [
+        "single live economic mutation authority"
+      ],
+      "reopen_condition": "live economic mutation authority boundary changes",
+      "status": "OPEN",
+      "closure_evidence": {}
+    },
+    {
+      "canonical_id": "FC-FAILSAFE-ORDER-MUTATION",
+      "aliases": [
+        "G-011"
+      ],
+      "root_cause_code": "fail-safe path mutates orders outside authorized execution owner",
+      "root_cause_aliases": [
+        "フェイルセーフ注文変更逸脱"
+      ],
+      "root_cause_description": "A fail-safe path mutates orders without routing through the authorized execution owner.",
+      "required_prevention_controls": [
+        "fail-safe order mutation authority routing"
+      ],
+      "reopen_condition": "fail-safe order mutation routing or owner changes",
+      "status": "OPEN",
+      "closure_evidence": {}
+    },
+    {
+      "canonical_id": "FC-CLOUD-SYNC-LIVE-RUNTIME",
+      "aliases": [
+        "G-012"
+      ],
+      "root_cause_code": "cloud-synced live runtime state",
+      "root_cause_aliases": [
+        "クラウド同期ライブ状態"
+      ],
+      "root_cause_description": "Live runtime state depends on a cloud-synchronized path or file identity.",
+      "required_prevention_controls": [
+        "local canonical live runtime state"
+      ],
+      "reopen_condition": "live runtime persistence path or sync semantics change",
+      "status": "OPEN",
+      "closure_evidence": {}
+    },
+    {
+      "canonical_id": "FC-CROSS-DAY-EVIDENCE-LOSS",
+      "aliases": [
+        "G-013"
+      ],
+      "root_cause_code": "cross-day evidence loss",
+      "root_cause_aliases": [
+        "日跨ぎ証拠消失"
+      ],
+      "root_cause_description": "Evidence required across trading days is not durably persisted.",
+      "required_prevention_controls": [
+        "cross-day durable evidence persistence"
+      ],
+      "reopen_condition": "cross-day evidence persistence or retention changes",
+      "status": "OPEN",
+      "closure_evidence": {}
+    },
+    {
+      "canonical_id": "FC-POSITION-OWNERSHIP-LEAKAGE",
+      "aliases": [
+        "G-014"
+      ],
+      "root_cause_code": "position ownership leakage",
+      "root_cause_aliases": [
+        "ポジション所有権漏洩"
+      ],
+      "root_cause_description": "Orders or exits can act on quantity not owned by PHOENIX.",
+      "required_prevention_controls": [
+        "PHOENIX-owned quantity boundary"
+      ],
+      "reopen_condition": "position ownership attribution or quantity boundary changes",
+      "status": "OPEN",
+      "closure_evidence": {}
+    },
+    {
+      "canonical_id": "FC-LIVE-SCALABILITY-DIVERGENCE",
+      "aliases": [
+        "G-015"
+      ],
+      "root_cause_code": "live scalability divergence",
+      "root_cause_aliases": [
+        "ライブスケーラビリティ乖離"
+      ],
+      "root_cause_description": "Validated workload or scalability assumptions diverge from the live execution workload.",
+      "required_prevention_controls": [
+        "live workload equivalence proof"
+      ],
+      "reopen_condition": "live workload, universe, cadence, or capacity assumptions change",
+      "status": "OPEN",
+      "closure_evidence": {}
     }
   ],
   "test_run": {
@@ -261,5 +414,5 @@
       "test_non_redundant_candidate_passes_all_conditions"
     ]
   },
-  "version": 3
+  "version": 6
 }
