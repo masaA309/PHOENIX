@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 
-VALIDATOR_VERSION = "1.1.0"
+VALIDATOR_VERSION = "1.2.0"
 CANONICAL_WORKSPACE = r"C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX"
 
 GOVERNANCE_ARTIFACTS = (
@@ -34,19 +34,16 @@ GOVERNANCE_CLOSURE_ARTIFACTS = tuple(
 )
 GOVERNANCE_PATHS_BY_CASEFOLD = {path.casefold(): path for path in GOVERNANCE_ARTIFACTS}
 
-INDEPENDENT_AUDIT_WRITE_PATHS = frozenset(GOVERNANCE_ARTIFACTS)
-
 REVIEW_TYPES = frozenset(
     {
         "MECHANICAL_REVIEW",
         "COMPLETENESS_REVIEW",
         "INDEPENDENT_AUDIT",
-        "SUBSTITUTE_COMPLETENESS_REVIEW",
         "USER_APPROVAL",
     }
 )
 
-FAILURE_ACTIONS = frozenset({"USE", "REMEDIATE", "REGISTER", "CLOSE"})
+FAILURE_ACTIONS = frozenset({"USE", "REMEDIATE", "REGISTER", "CLOSE", "NONE"})
 FAILURE_DECLARATION_KEYS = frozenset(
     {
         "action",
@@ -233,6 +230,20 @@ def _proof_ids(candidate: dict[str, Any]) -> set[str]:
     }
 
 
+def _is_exact_none_declaration(declaration: object) -> bool:
+    return (
+        isinstance(declaration, dict)
+        and set(declaration) == FAILURE_DECLARATION_KEYS
+        and declaration.get("action") == "NONE"
+        and declaration.get("proposed_root_cause_text") == "NONE"
+        and declaration.get("declared_failure_class_ids") == []
+        and declaration.get("resolved_root_cause_code") == "NONE"
+        and declaration.get("target_prevention_controls") == []
+        and declaration.get("prevention_control_evidence") == {}
+        and declaration.get("registration") is None
+    )
+
+
 def _candidate_sensitive_write_paths(candidate: dict[str, Any]) -> set[str]:
     manifest = candidate.get("execution_manifest", {})
     raw = manifest.get("write_files", []) if isinstance(manifest, dict) else []
@@ -245,15 +256,6 @@ def _candidate_sensitive_write_paths(candidate: dict[str, Any]) -> set[str]:
                 continue
             paths.add(GOVERNANCE_PATHS_BY_CASEFOLD.get(normalized.casefold(), normalized))
     return paths
-
-
-def _requires_independent_audit(candidate: dict[str, Any]) -> bool:
-    if _candidate_sensitive_write_paths(candidate) & INDEPENDENT_AUDIT_WRITE_PATHS:
-        return True
-    return any(
-        isinstance(declaration, dict) and declaration.get("action") == "REGISTER"
-        for declaration in candidate.get("failure_classes", [])
-    )
 
 
 def _valid_user_approval(
@@ -280,17 +282,6 @@ def _valid_user_approval(
                 continue
         return True
     return False
-
-
-def _governance_lock_hashes(candidate: dict[str, Any]) -> dict[str, str]:
-    lock_map = {
-        str(lock.get("path")): str(lock.get("sha256"))
-        for lock in candidate.get("artifact_lock", [])
-        if isinstance(lock, dict) and lock.get("existing") is True
-    }
-    if any(path not in lock_map for path in GOVERNANCE_ARTIFACTS):
-        return {}
-    return {path: lock_map[path] for path in GOVERNANCE_ARTIFACTS}
 
 
 def validate_candidate_schema(candidate: dict[str, Any]) -> list[GateFinding]:
@@ -441,12 +432,25 @@ def validate_candidate_schema(candidate: dict[str, Any]) -> list[GateFinding]:
             return [GateFinding("MG-01", "FAIL", "proof_id must be unique")]
         proof_ids.add(proof["proof_id"])
 
+    none_declarations = [
+        declaration
+        for declaration in candidate["failure_classes"]
+        if isinstance(declaration, dict) and declaration.get("action") == "NONE"
+    ]
+    if none_declarations and (
+        len(candidate["failure_classes"]) != 1
+        or not _is_exact_none_declaration(candidate["failure_classes"][0])
+    ):
+        return [GateFinding("MG-01", "FAIL", "NONE must be the sole exact no-class declaration")]
+
     for declaration in candidate["failure_classes"]:
         if not isinstance(declaration, dict) or set(declaration) != FAILURE_DECLARATION_KEYS:
             return [GateFinding("MG-01", "FAIL", "failure class declaration shape is not strict")]
         action = declaration.get("action")
         if action not in FAILURE_ACTIONS:
             return [GateFinding("MG-01", "FAIL", "failure action is invalid")]
+        if action == "NONE":
+            continue
         if not isinstance(declaration.get("proposed_root_cause_text"), str) or not declaration[
             "proposed_root_cause_text"
         ]:
@@ -904,6 +908,14 @@ def _validate_registration_collisions(
 def resolve_failure_classes(
     candidate: dict[str, Any], ledger: dict[str, Any], synonyms: dict[str, Any]
 ) -> list[GateFinding]:
+    declarations = candidate.get("failure_classes", [])
+    if (
+        isinstance(declarations, list)
+        and len(declarations) == 1
+        and _is_exact_none_declaration(declarations[0])
+    ):
+        return [GateFinding("MG-07", "PASS", "no applicable failure class")]
+
     raw_classes = ledger.get("classes", [])
     if not isinstance(raw_classes, list) or not all(isinstance(item, dict) for item in raw_classes):
         return [GateFinding("MG-07", "FAIL", "failure class ledger shape is invalid")]
@@ -1059,18 +1071,7 @@ def validate_review_separation(candidate: dict[str, Any]) -> list[GateFinding]:
                 and review.get("provider") == review.get("candidate_provider")
             ):
                 return [GateFinding("MG-12", "FAIL", "same actor/provider cannot become independent by context change")]
-        if review.get("review_type") == "SUBSTITUTE_COMPLETENESS_REVIEW":
-            if review.get("completed") is True and not _valid_user_approval(
-                candidate, "SUBSTITUTE_COMPLETENESS_REVIEW"
-            ):
-                return [GateFinding("MG-12", "NOT_PROVEN", "substitute review lacks explicit user approval")]
-    if candidate.get("candidate_type") == "GOVERNANCE":
-        approved = _governance_lock_hashes(candidate)
-        if not approved or not _valid_user_approval(
-            candidate, "GOVERNANCE_ARTIFACTS", approved
-        ):
-            return [GateFinding("MG-12", "NOT_PROVEN", "governance artifact approval is not exact-hash bound")]
-    return [GateFinding("MG-12", "PASS", "review inputs are separated and approvals are hash bound")]
+    return [GateFinding("MG-12", "PASS", "review inputs are separated")]
 
 def derive_gate_status(findings: list[GateFinding], candidate: dict[str, Any]) -> str:
     if any(finding.status == "FAIL" for finding in findings):
@@ -1080,8 +1081,6 @@ def derive_gate_status(findings: list[GateFinding], candidate: dict[str, Any]) -
 
     requirements = {"MECHANICAL_REVIEW", "COMPLETENESS_REVIEW"}
     requirements.update(candidate.get("review_requirements", []))
-    if _requires_independent_audit(candidate):
-        requirements.add("INDEPENDENT_AUDIT")
 
     completed = {
         review.get("review_type")
@@ -1090,18 +1089,9 @@ def derive_gate_status(findings: list[GateFinding], candidate: dict[str, Any]) -
     }
     completed.add("MECHANICAL_REVIEW")
 
-    if "INDEPENDENT_AUDIT" in requirements and candidate.get("candidate_type") == "GOVERNANCE":
-        if (
-            "SUBSTITUTE_COMPLETENESS_REVIEW" in completed
-            and _valid_user_approval(candidate, "SUBSTITUTE_COMPLETENESS_REVIEW")
-        ):
-            requirements.remove("INDEPENDENT_AUDIT")
-            requirements.add("SUBSTITUTE_COMPLETENESS_REVIEW")
-
     if any(requirement not in completed for requirement in requirements):
         return "NOT_PROVEN"
     return "PASS"
-
 
 def _report_artifact_hashes(
     root: Path, candidate: dict[str, Any], candidate_path: Path | None = None

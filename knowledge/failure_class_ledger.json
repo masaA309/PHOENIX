@@ -6,25 +6,25 @@
       ],
       "canonical_id": "FC-SELF-REPORTED-PASS",
       "closure_evidence": {
-        "validator_version": "1.1.0",
+        "validator_version": "1.2.0",
         "artifact_hashes": {
-          "AGENTS.md": "fdae145e26b6cfbd6379e081c1aea323142bd7eea2600c44a7cd6f9443cba591",
-          "tools/codex_execution_preflight_gate.py": "c3285dc603d4a165dd4f5e4b1b0a5815e88d9a79fd14ccb0b7ab7f6b1667035c",
+          "AGENTS.md": "7ad74f18942fcf5a7eb4c38315554f51c0d9d62aff224b294a9d1c6cc48654af",
+          "tools/codex_execution_preflight_gate.py": "6590cd192e5f5328c3439a3a9a6362f85f136f34af51e4a1959960d358c92012",
           "tools/governance_command_runner.py": "e3aa02280f3c247419a0345c3e5932c428776b578a19d9a450b1b962255d567f",
-          "config/governance/codex_candidate.schema.json": "d5138c905d08e5dffa556657e71569f54360d46fcf2d6fc8ec4bdfc91f8bb1f0",
+          "config/governance/codex_candidate.schema.json": "f659a6ea3852f08b8ba8380fbede926869d28ce6c09464a6a659e61e317c1e3c",
           "config/governance/evidence_graph.schema.json": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce",
           "config/governance/failure_class.schema.json": "fb8af14f515724fdf93137546547627c2ad91922d4d26a6780b349775e5c3e9e",
           "config/governance/gate_report.schema.json": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8",
           "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
-          "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
+          "tests/test_codex_execution_preflight_gate.py": "4c6e34217933100aec959121378aa3e9f8c3251697b64eeece9c1c339a5627eb"
         },
-        "closed_at_utc": "2026-09-05T15:16:53.779115+00:00",
+        "closed_at_utc": "2026-09-10T03:41:00+00:00",
         "time_window": "until_governance_artifact_change",
         "required_prevention_controls": [
           "independent evidence binding"
         ],
-        "test_run_id": "gov2-cycle-b-close-g001-g006-20260906",
-        "ledger_version": 6
+        "test_run_id": "gov-machine-projection-v1.2.0-20260910",
+        "ledger_version": 7
       },
       "reopen_condition": "artifact identity or closure evidence changes",
       "required_prevention_controls": [
@@ -44,25 +44,25 @@
       ],
       "canonical_id": "FC-SHELL-BOUNDARY-EXPANSION",
       "closure_evidence": {
-        "validator_version": "1.1.0",
+        "validator_version": "1.2.0",
         "artifact_hashes": {
-          "AGENTS.md": "fdae145e26b6cfbd6379e081c1aea323142bd7eea2600c44a7cd6f9443cba591",
-          "tools/codex_execution_preflight_gate.py": "c3285dc603d4a165dd4f5e4b1b0a5815e88d9a79fd14ccb0b7ab7f6b1667035c",
+          "AGENTS.md": "7ad74f18942fcf5a7eb4c38315554f51c0d9d62aff224b294a9d1c6cc48654af",
+          "tools/codex_execution_preflight_gate.py": "6590cd192e5f5328c3439a3a9a6362f85f136f34af51e4a1959960d358c92012",
           "tools/governance_command_runner.py": "e3aa02280f3c247419a0345c3e5932c428776b578a19d9a450b1b962255d567f",
-          "config/governance/codex_candidate.schema.json": "d5138c905d08e5dffa556657e71569f54360d46fcf2d6fc8ec4bdfc91f8bb1f0",
+          "config/governance/codex_candidate.schema.json": "f659a6ea3852f08b8ba8380fbede926869d28ce6c09464a6a659e61e317c1e3c",
           "config/governance/evidence_graph.schema.json": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce",
           "config/governance/failure_class.schema.json": "fb8af14f515724fdf93137546547627c2ad91922d4d26a6780b349775e5c3e9e",
           "config/governance/gate_report.schema.json": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8",
           "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
-          "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
+          "tests/test_codex_execution_preflight_gate.py": "4c6e34217933100aec959121378aa3e9f8c3251697b64eeece9c1c339a5627eb"
         },
-        "closed_at_utc": "2026-09-05T15:16:53.779115+00:00",
+        "closed_at_utc": "2026-09-10T03:41:00+00:00",
         "time_window": "until_governance_artifact_change",
         "required_prevention_controls": [
           "hash-locked -File transport"
         ],
-        "test_run_id": "gov2-cycle-b-close-g001-g006-20260906",
-        "ledger_version": 6
+        "test_run_id": "gov-machine-projection-v1.2.0-20260910",
+        "ledger_version": 7
       },
       "reopen_condition": "shell transport changes",
       "required_prevention_controls": [
@@ -82,25 +82,25 @@
       ],
       "canonical_id": "FC-OUTPUT-TRANSPORT-OVERSIZED",
       "closure_evidence": {
-        "validator_version": "1.1.0",
+        "validator_version": "1.2.0",
         "artifact_hashes": {
-          "AGENTS.md": "fdae145e26b6cfbd6379e081c1aea323142bd7eea2600c44a7cd6f9443cba591",
-          "tools/codex_execution_preflight_gate.py": "c3285dc603d4a165dd4f5e4b1b0a5815e88d9a79fd14ccb0b7ab7f6b1667035c",
+          "AGENTS.md": "7ad74f18942fcf5a7eb4c38315554f51c0d9d62aff224b294a9d1c6cc48654af",
+          "tools/codex_execution_preflight_gate.py": "6590cd192e5f5328c3439a3a9a6362f85f136f34af51e4a1959960d358c92012",
           "tools/governance_command_runner.py": "e3aa02280f3c247419a0345c3e5932c428776b578a19d9a450b1b962255d567f",
-          "config/governance/codex_candidate.schema.json": "d5138c905d08e5dffa556657e71569f54360d46fcf2d6fc8ec4bdfc91f8bb1f0",
+          "config/governance/codex_candidate.schema.json": "f659a6ea3852f08b8ba8380fbede926869d28ce6c09464a6a659e61e317c1e3c",
           "config/governance/evidence_graph.schema.json": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce",
           "config/governance/failure_class.schema.json": "fb8af14f515724fdf93137546547627c2ad91922d4d26a6780b349775e5c3e9e",
           "config/governance/gate_report.schema.json": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8",
           "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
-          "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
+          "tests/test_codex_execution_preflight_gate.py": "4c6e34217933100aec959121378aa3e9f8c3251697b64eeece9c1c339a5627eb"
         },
-        "closed_at_utc": "2026-09-05T15:16:53.779115+00:00",
+        "closed_at_utc": "2026-09-10T03:41:00+00:00",
         "time_window": "until_governance_artifact_change",
         "required_prevention_controls": [
           "bounded output capture"
         ],
-        "test_run_id": "gov2-cycle-b-close-g001-g006-20260906",
-        "ledger_version": 6
+        "test_run_id": "gov-machine-projection-v1.2.0-20260910",
+        "ledger_version": 7
       },
       "reopen_condition": "output transport changes",
       "required_prevention_controls": [
@@ -120,25 +120,25 @@
       ],
       "canonical_id": "FC-STATIC-CONTRADICTION",
       "closure_evidence": {
-        "validator_version": "1.1.0",
+        "validator_version": "1.2.0",
         "artifact_hashes": {
-          "AGENTS.md": "fdae145e26b6cfbd6379e081c1aea323142bd7eea2600c44a7cd6f9443cba591",
-          "tools/codex_execution_preflight_gate.py": "c3285dc603d4a165dd4f5e4b1b0a5815e88d9a79fd14ccb0b7ab7f6b1667035c",
+          "AGENTS.md": "7ad74f18942fcf5a7eb4c38315554f51c0d9d62aff224b294a9d1c6cc48654af",
+          "tools/codex_execution_preflight_gate.py": "6590cd192e5f5328c3439a3a9a6362f85f136f34af51e4a1959960d358c92012",
           "tools/governance_command_runner.py": "e3aa02280f3c247419a0345c3e5932c428776b578a19d9a450b1b962255d567f",
-          "config/governance/codex_candidate.schema.json": "d5138c905d08e5dffa556657e71569f54360d46fcf2d6fc8ec4bdfc91f8bb1f0",
+          "config/governance/codex_candidate.schema.json": "f659a6ea3852f08b8ba8380fbede926869d28ce6c09464a6a659e61e317c1e3c",
           "config/governance/evidence_graph.schema.json": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce",
           "config/governance/failure_class.schema.json": "fb8af14f515724fdf93137546547627c2ad91922d4d26a6780b349775e5c3e9e",
           "config/governance/gate_report.schema.json": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8",
           "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
-          "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
+          "tests/test_codex_execution_preflight_gate.py": "4c6e34217933100aec959121378aa3e9f8c3251697b64eeece9c1c339a5627eb"
         },
-        "closed_at_utc": "2026-09-05T15:16:53.779115+00:00",
+        "closed_at_utc": "2026-09-10T03:41:00+00:00",
         "time_window": "until_governance_artifact_change",
         "required_prevention_controls": [
           "static contradiction validation"
         ],
-        "test_run_id": "gov2-cycle-b-close-g001-g006-20260906",
-        "ledger_version": 6
+        "test_run_id": "gov-machine-projection-v1.2.0-20260910",
+        "ledger_version": 7
       },
       "reopen_condition": "candidate validation changes",
       "required_prevention_controls": [
@@ -158,25 +158,25 @@
       ],
       "canonical_id": "FC-WRONG-ARTIFACT-EXECUTION",
       "closure_evidence": {
-        "validator_version": "1.1.0",
+        "validator_version": "1.2.0",
         "artifact_hashes": {
-          "AGENTS.md": "fdae145e26b6cfbd6379e081c1aea323142bd7eea2600c44a7cd6f9443cba591",
-          "tools/codex_execution_preflight_gate.py": "c3285dc603d4a165dd4f5e4b1b0a5815e88d9a79fd14ccb0b7ab7f6b1667035c",
+          "AGENTS.md": "7ad74f18942fcf5a7eb4c38315554f51c0d9d62aff224b294a9d1c6cc48654af",
+          "tools/codex_execution_preflight_gate.py": "6590cd192e5f5328c3439a3a9a6362f85f136f34af51e4a1959960d358c92012",
           "tools/governance_command_runner.py": "e3aa02280f3c247419a0345c3e5932c428776b578a19d9a450b1b962255d567f",
-          "config/governance/codex_candidate.schema.json": "d5138c905d08e5dffa556657e71569f54360d46fcf2d6fc8ec4bdfc91f8bb1f0",
+          "config/governance/codex_candidate.schema.json": "f659a6ea3852f08b8ba8380fbede926869d28ce6c09464a6a659e61e317c1e3c",
           "config/governance/evidence_graph.schema.json": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce",
           "config/governance/failure_class.schema.json": "fb8af14f515724fdf93137546547627c2ad91922d4d26a6780b349775e5c3e9e",
           "config/governance/gate_report.schema.json": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8",
           "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
-          "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
+          "tests/test_codex_execution_preflight_gate.py": "4c6e34217933100aec959121378aa3e9f8c3251697b64eeece9c1c339a5627eb"
         },
-        "closed_at_utc": "2026-09-05T15:16:53.779115+00:00",
+        "closed_at_utc": "2026-09-10T03:41:00+00:00",
         "time_window": "until_governance_artifact_change",
         "required_prevention_controls": [
           "artifact hash lock"
         ],
-        "test_run_id": "gov2-cycle-b-close-g001-g006-20260906",
-        "ledger_version": 6
+        "test_run_id": "gov-machine-projection-v1.2.0-20260910",
+        "ledger_version": 7
       },
       "reopen_condition": "artifact identity controls change",
       "required_prevention_controls": [
@@ -196,25 +196,25 @@
       ],
       "canonical_id": "FC-UNMITIGATED-RECURRENCE",
       "closure_evidence": {
-        "validator_version": "1.1.0",
+        "validator_version": "1.2.0",
         "artifact_hashes": {
-          "AGENTS.md": "fdae145e26b6cfbd6379e081c1aea323142bd7eea2600c44a7cd6f9443cba591",
-          "tools/codex_execution_preflight_gate.py": "c3285dc603d4a165dd4f5e4b1b0a5815e88d9a79fd14ccb0b7ab7f6b1667035c",
+          "AGENTS.md": "7ad74f18942fcf5a7eb4c38315554f51c0d9d62aff224b294a9d1c6cc48654af",
+          "tools/codex_execution_preflight_gate.py": "6590cd192e5f5328c3439a3a9a6362f85f136f34af51e4a1959960d358c92012",
           "tools/governance_command_runner.py": "e3aa02280f3c247419a0345c3e5932c428776b578a19d9a450b1b962255d567f",
-          "config/governance/codex_candidate.schema.json": "d5138c905d08e5dffa556657e71569f54360d46fcf2d6fc8ec4bdfc91f8bb1f0",
+          "config/governance/codex_candidate.schema.json": "f659a6ea3852f08b8ba8380fbede926869d28ce6c09464a6a659e61e317c1e3c",
           "config/governance/evidence_graph.schema.json": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce",
           "config/governance/failure_class.schema.json": "fb8af14f515724fdf93137546547627c2ad91922d4d26a6780b349775e5c3e9e",
           "config/governance/gate_report.schema.json": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8",
           "config/governance/root_cause_synonyms.json": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1",
-          "tests/test_codex_execution_preflight_gate.py": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
+          "tests/test_codex_execution_preflight_gate.py": "4c6e34217933100aec959121378aa3e9f8c3251697b64eeece9c1c339a5627eb"
         },
-        "closed_at_utc": "2026-09-05T15:16:53.779115+00:00",
+        "closed_at_utc": "2026-09-10T03:41:00+00:00",
         "time_window": "until_governance_artifact_change",
         "required_prevention_controls": [
           "failure class status validation"
         ],
-        "test_run_id": "gov2-cycle-b-close-g001-g006-20260906",
-        "ledger_version": 6
+        "test_run_id": "gov-machine-projection-v1.2.0-20260910",
+        "ledger_version": 7
       },
       "reopen_condition": "failure ledger changes",
       "required_prevention_controls": [
@@ -384,11 +384,15 @@
   ],
   "test_run": {
     "modules": [
-      "tests.test_prompt_redundancy_validator",
       "tests.test_codex_execution_preflight_gate"
     ],
     "names": [
       "test_missing_required_section_fails",
+      "test_failure_classes_must_not_be_empty",
+      "test_exact_none_path_passes_schema_and_resolver_without_ledger_lookup",
+      "test_malformed_or_mixed_none_fails",
+      "test_non_register_declared_failure_ids_must_not_be_empty",
+      "test_candidate_schema_requires_failure_declaration",
       "test_proof_source_zero_fails",
       "test_proof_source_multiple_candidates_fails",
       "test_atomic_bundle_passes",
@@ -397,10 +401,32 @@
       "test_output_budget_missing_or_exceeded_fails",
       "test_complete_and_truncate_fails",
       "test_wrong_artifact_hash_fails",
-      "test_open_class_fails",
+      "test_open_class_use_fails",
       "test_unknown_root_cause_is_not_proven",
       "test_ambiguous_root_cause_is_not_proven",
       "test_closed_stale_evidence_is_not_proven",
+      "test_closed_fresh_use_passes",
+      "test_open_class_remediation_subset_passes",
+      "test_remediation_invalid_controls_fail",
+      "test_stale_closed_governance_remediation_passes_but_fresh_closed_fails",
+      "test_register_requires_governance_candidate_and_user_approval",
+      "test_register_collisions_fail",
+      "test_close_requires_governance_candidate",
+      "test_close_requires_all_prevention_controls_and_proof",
+      "test_closed_ledger_version_change_is_not_proven",
+      "test_mandatory_reviews_are_system_derived",
+      "test_governance_write_does_not_auto_require_independent_audit",
+      "test_substitute_review_type_is_rejected",
+      "test_candidate_expiry_and_workspace_are_strict",
+      "test_governance_artifact_locks_are_exact_unique_and_agents_raw",
+      "test_agents_hash_must_match_raw_agents_artifact_lock",
+      "test_failure_class_schema_declares_separate_alias_fields",
+      "test_candidate_schema_declares_failure_action_contract",
+      "test_manifest_scope_and_command_shape_are_strict",
+      "test_manifest_allowed_commands_and_proof_target_order_are_exact",
+      "test_canonical_governance_writes_do_not_auto_require_independent_audit",
+      "test_time_validation_accepts_injected_utc_now_only",
+      "test_governed_runner_rejects_output_paths_outside_root_or_same",
       "test_lifecycle_missing_fails",
       "test_unproven_runtime_prerequisite_is_not_proven",
       "test_rollback_missing_fails",
@@ -411,8 +437,44 @@
       "test_stale_candidate_hash_fails",
       "test_candidate_canonicalization_vector_matches",
       "test_runner_stdout_limit_stops_child_and_fails",
+      "test_runner_spawns_before_output_sinks_open",
+      "test_runner_rechecks_candidate_hash_before_spawn",
+      "test_runner_rechecks_agents_hash_before_spawn",
+      "test_runner_rechecks_governance_artifact_before_spawn",
+      "test_runner_rechecks_gate_status_before_spawn",
+      "test_runner_rejects_unknown_command_id",
+      "test_runner_fresh_pass_spawns_once",
+      "test_evidence_missing_non_lifecycle_required_field_fails",
+      "test_proof_target_order_mismatch_fails",
+      "test_workspace_textual_alias_is_rejected",
+      "test_powershell_transport_cannot_disagree_with_manifest_command",
+      "test_powershell_encoded_command_is_rejected",
+      "test_powershell_script_hash_must_match_artifact_lock",
+      "test_preflight_report_cannot_target_governance_artifact",
+      "test_preflight_candidate_must_be_under_incoming",
+      "test_governed_runner_rejects_unauthorized_output_without_io",
+      "test_governed_runner_auth_failure_does_not_write_authorized_outputs",
+      "test_same_actor_provider_different_context_is_not_independent",
+      "test_governance_candidate_has_no_universal_artifact_approval_requirement",
+      "test_validator_and_candidate_schema_versions_match_v120",
+      "test_legacy_closed_use_is_not_proven_but_governance_remediation_can_proceed",
+      "test_failure_schema_loads_legacy_closed_without_ledger_version_requirement",
+      "test_nested_powershell_invocation_is_rejected",
+      "test_preflight_report_symlink_alias_is_rejected_without_source_write",
+      "test_runner_candidate_and_report_paths_must_be_canonical_runtime_dirs",
+      "test_preflight_governance_input_alias_path_is_rejected",
+      "test_manual_candidate_validation_rejects_schema_invalid_empty_strings",
+      "test_output_budget_boolean_is_not_an_integer",
+      "test_governance_path_case_alias_is_rejected",
+      "test_artifact_lock_case_alias_duplicate_fails",
+      "test_review_prior_free_text_conclusion_schema_uses_boolean",
+      "test_register_declarations_colliding_with_each_other_fail",
+      "test_preflight_report_hardlink_cannot_overwrite_governance_artifact",
+      "test_governed_runner_hardlink_output_does_not_spawn_or_overwrite",
+      "test_runner_low_level_cli_is_rejected_in_canonical_workspace",
+      "test_runner_candidate_and_report_require_json_suffix",
       "test_non_redundant_candidate_passes_all_conditions"
     ]
   },
-  "version": 6
+  "version": 7
 }

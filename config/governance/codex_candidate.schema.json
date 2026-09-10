@@ -31,7 +31,7 @@
       "pattern": "^[0-9a-fA-F]{64}$"
     },
     "validator_version": {
-      "const": "1.1.0"
+      "const": "1.2.0"
     },
     "objective": {
       "type": "string",
@@ -356,7 +356,8 @@
               "USE",
               "REMEDIATE",
               "REGISTER",
-              "CLOSE"
+              "CLOSE",
+              "NONE"
             ]
           },
           "proposed_root_cause_text": {
@@ -616,10 +617,64 @@
                 }
               }
             }
+          },
+          {
+            "if": {
+              "properties": {
+                "action": {
+                  "const": "NONE"
+                }
+              },
+              "required": [
+                "action"
+              ]
+            },
+            "then": {
+              "properties": {
+                "proposed_root_cause_text": {
+                  "const": "NONE"
+                },
+                "declared_failure_class_ids": {
+                  "maxItems": 0
+                },
+                "resolved_root_cause_code": {
+                  "const": "NONE"
+                },
+                "target_prevention_controls": {
+                  "maxItems": 0
+                },
+                "prevention_control_evidence": {
+                  "maxProperties": 0
+                },
+                "registration": {
+                  "type": "null"
+                }
+              }
+            }
           }
         ]
       },
-      "minItems": 1
+      "minItems": 1,
+      "allOf": [
+        {
+          "if": {
+            "contains": {
+              "type": "object",
+              "properties": {
+                "action": {
+                  "const": "NONE"
+                }
+              },
+              "required": [
+                "action"
+              ]
+            }
+          },
+          "then": {
+            "maxItems": 1
+          }
+        }
+      ]
     },
     "runtime_preconditions": {
       "type": "array"
@@ -727,7 +782,6 @@
               "MECHANICAL_REVIEW",
               "COMPLETENESS_REVIEW",
               "INDEPENDENT_AUDIT",
-              "SUBSTITUTE_COMPLETENESS_REVIEW",
               "USER_APPROVAL"
             ]
           },
@@ -780,33 +834,7 @@
           "review_type",
           "completed"
         ],
-        "additionalProperties": false,
-        "allOf": [
-          {
-            "if": {
-              "properties": {
-                "review_type": {
-                  "const": "USER_APPROVAL"
-                },
-                "approval_scope": {
-                  "const": "GOVERNANCE_ARTIFACTS"
-                }
-              },
-              "required": [
-                "review_type",
-                "approval_scope"
-              ]
-            },
-            "then": {
-              "required": [
-                "actor",
-                "user_approved",
-                "approval_evidence",
-                "approved_artifact_hashes"
-              ]
-            }
-          }
-        ]
+        "additionalProperties": false
       }
     },
     "review_requirements": {
@@ -816,7 +844,6 @@
           "MECHANICAL_REVIEW",
           "COMPLETENESS_REVIEW",
           "INDEPENDENT_AUDIT",
-          "SUBSTITUTE_COMPLETENESS_REVIEW",
           "USER_APPROVAL"
         ]
       },

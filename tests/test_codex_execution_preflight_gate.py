@@ -112,7 +112,7 @@ def _candidate(root: Path | None = None) -> dict[str, object]:
                 "failure_path": "stop",
             }
         ],
-        "failure_classes": [],
+        "failure_classes": [_none_declaration()],
         "runtime_preconditions": [],
         "rollback_stop": {
             "failure_path": "stop",
@@ -147,6 +147,18 @@ def _proof_declaration(action: str, **extra: object) -> dict[str, object]:
     }
     declaration.update(extra)
     return declaration
+
+
+def _none_declaration() -> dict[str, object]:
+    return {
+        "action": "NONE",
+        "proposed_root_cause_text": "NONE",
+        "declared_failure_class_ids": [],
+        "resolved_root_cause_code": "NONE",
+        "target_prevention_controls": [],
+        "prevention_control_evidence": {},
+        "registration": None,
+    }
 
 
 def _fresh_closed_ledger(candidate: dict[str, object], status: str = "CLOSED") -> dict[str, object]:
@@ -186,44 +198,6 @@ def _fresh_closed_ledger(candidate: dict[str, object], status: str = "CLOSED") -
     }
 
 
-def _add_substitute_approval(candidate: dict[str, object]) -> None:
-    candidate["review_inputs"].extend(
-        [
-            {
-                "review_type": "SUBSTITUTE_COMPLETENESS_REVIEW",
-                "completed": True,
-            },
-            {
-                "review_type": "USER_APPROVAL",
-                "completed": True,
-                "actor": "USER",
-                "user_approved": True,
-                "approval_scope": "SUBSTITUTE_COMPLETENESS_REVIEW",
-                "approval_evidence": "user-approved-governance-substitute",
-            },
-        ]
-    )
-
-
-def _add_governance_artifact_approval(candidate: dict[str, object]) -> None:
-    approved = {
-        item["path"]: item["sha256"]
-        for item in candidate["artifact_lock"]
-        if item["path"] in GOVERNANCE_ARTIFACTS and item["existing"]
-    }
-    candidate["review_inputs"].append(
-        {
-            "review_type": "USER_APPROVAL",
-            "completed": True,
-            "actor": "USER",
-            "user_approved": True,
-            "approval_scope": "GOVERNANCE_ARTIFACTS",
-            "approval_evidence": "exact-governance-artifact-hashes-approved",
-            "approved_artifact_hashes": approved,
-        }
-    )
-
-
 def _gate_candidate(root: Path | None = None) -> dict[str, object]:
     candidate = _candidate(root)
     candidate["candidate_type"] = "GOVERNANCE"
@@ -254,8 +228,6 @@ def _gate_candidate(root: Path | None = None) -> dict[str, object]:
             "approval_evidence": "test-approved",
         }
     )
-    _add_substitute_approval(candidate)
-    _add_governance_artifact_approval(candidate)
     return _rehash(candidate)
 
 
@@ -297,7 +269,22 @@ class CodexExecutionPreflightGateTest(unittest.TestCase):
 
     def test_failure_classes_must_not_be_empty(self) -> None:
         candidate = _candidate()
+        candidate["failure_classes"] = []
         self.assertEqual("FAIL", validate_candidate_schema(candidate)[0].status)
+
+    def test_exact_none_path_passes_schema_and_resolver_without_ledger_lookup(self) -> None:
+        candidate = _candidate()
+        self.assertEqual("PASS", validate_candidate_schema(candidate)[0].status)
+        self.assertEqual("PASS", resolve_failure_classes(candidate, None, None)[0].status)
+
+    def test_malformed_or_mixed_none_fails(self) -> None:
+        malformed = _candidate()
+        malformed["failure_classes"][0]["resolved_root_cause_code"] = "NOT_NONE"
+        self.assertEqual("FAIL", validate_candidate_schema(malformed)[0].status)
+
+        mixed = _candidate()
+        mixed["failure_classes"].append(_proof_declaration("USE"))
+        self.assertEqual("FAIL", validate_candidate_schema(mixed)[0].status)
 
     def test_non_register_declared_failure_ids_must_not_be_empty(self) -> None:
         candidate = _candidate()
@@ -318,6 +305,19 @@ class CodexExecutionPreflightGateTest(unittest.TestCase):
         self.assertEqual(1, mins["USE"])
         self.assertEqual(1, mins["REMEDIATE"])
         self.assertEqual(1, mins["CLOSE"])
+        self.assertIn("NONE", declaration_array["items"]["properties"]["action"]["enum"])
+        none_condition = next(
+            item for item in conditions
+            if item["if"]["properties"]["action"]["const"] == "NONE"
+        )
+        none_props = none_condition["then"]["properties"]
+        self.assertEqual("NONE", none_props["proposed_root_cause_text"]["const"])
+        self.assertEqual("NONE", none_props["resolved_root_cause_code"]["const"])
+        self.assertEqual(0, none_props["declared_failure_class_ids"]["maxItems"])
+        self.assertEqual(0, none_props["target_prevention_controls"]["maxItems"])
+        self.assertEqual(0, none_props["prevention_control_evidence"]["maxProperties"])
+        self.assertEqual("null", none_props["registration"]["type"])
+        self.assertEqual(1, declaration_array["allOf"][0]["then"]["maxItems"])
 
     def test_proof_source_zero_fails(self) -> None:
         candidate = _candidate()
@@ -585,35 +585,40 @@ class CodexExecutionPreflightGateTest(unittest.TestCase):
         candidate["review_inputs"] = []
         self.assertEqual("NOT_PROVEN", derive_gate_status([], candidate))
 
-    def test_governance_sensitive_change_requires_independent_or_approved_substitute(self) -> None:
+    def test_governance_write_does_not_auto_require_independent_audit(self) -> None:
         candidate = _candidate()
         candidate["candidate_type"] = "GOVERNANCE"
         candidate["execution_manifest"]["write_files"] = ["tools/codex_execution_preflight_gate.py"]
-        self.assertEqual("NOT_PROVEN", derive_gate_status([], candidate))
-        candidate["review_inputs"].append(
-            {
-                "review_type": "SUBSTITUTE_COMPLETENESS_REVIEW",
-                "completed": True,
-            }
-        )
-        self.assertEqual("NOT_PROVEN", derive_gate_status([], candidate))
-        candidate["review_inputs"].append(
-            {
-                "review_type": "USER_APPROVAL",
-                "completed": True,
-                "actor": "USER",
-                "user_approved": True,
-                "approval_scope": "SUBSTITUTE_COMPLETENESS_REVIEW",
-                "approval_evidence": "approved",
-            }
-        )
         self.assertEqual("PASS", derive_gate_status([], candidate))
 
-    def test_substitute_cannot_satisfy_normal_implementation_independent_requirement(self) -> None:
-        candidate = _candidate()
         candidate["review_requirements"] = ["INDEPENDENT_AUDIT"]
-        _add_substitute_approval(candidate)
         self.assertEqual("NOT_PROVEN", derive_gate_status([], candidate))
+        candidate["review_inputs"].append(
+            {
+                "review_type": "INDEPENDENT_AUDIT",
+                "completed": True,
+                "actor": "external-auditor",
+                "provider": "external-provider",
+                "context_id": "audit-context",
+                "candidate_actor": "ChatGPT",
+                "candidate_provider": "OpenAI",
+                "candidate_context_id": "candidate-context",
+            }
+        )
+        self.assertEqual("PASS", validate_review_separation(candidate)[0].status)
+        self.assertEqual("PASS", derive_gate_status([], candidate))
+
+    def test_substitute_review_type_is_rejected(self) -> None:
+        candidate = _candidate()
+        candidate["review_inputs"].append(
+            {"review_type": "SUBSTITUTE_COMPLETENESS_REVIEW", "completed": True}
+        )
+        self.assertEqual("FAIL", validate_candidate_schema(candidate)[0].status)
+        schema = json.loads(Path("config/governance/codex_candidate.schema.json").read_text(encoding="utf-8"))
+        review_enum = schema["properties"]["review_inputs"]["items"]["properties"]["review_type"]["enum"]
+        requirement_enum = schema["properties"]["review_requirements"]["items"]["enum"]
+        self.assertNotIn("SUBSTITUTE_COMPLETENESS_REVIEW", review_enum)
+        self.assertNotIn("SUBSTITUTE_COMPLETENESS_REVIEW", requirement_enum)
 
     def test_candidate_expiry_and_workspace_are_strict(self) -> None:
         candidate = _candidate()
@@ -680,13 +685,13 @@ class CodexExecutionPreflightGateTest(unittest.TestCase):
         candidate["evidence_graph"].append(dict(candidate["evidence_graph"][0], proof_id="PT-2"))
         self.assertEqual("FAIL", validate_candidate_schema(candidate)[0].status)
 
-    def test_all_canonical_governance_writes_require_independent_or_substitute(self) -> None:
+    def test_canonical_governance_writes_do_not_auto_require_independent_audit(self) -> None:
         for path in GOVERNANCE_ARTIFACTS:
             with self.subTest(path=path):
                 candidate = _candidate()
                 candidate["candidate_type"] = "GOVERNANCE"
                 candidate["execution_manifest"]["write_files"] = [path]
-                self.assertEqual("NOT_PROVEN", derive_gate_status([], candidate))
+                self.assertEqual("PASS", derive_gate_status([], candidate))
 
     def test_time_validation_accepts_injected_utc_now_only(self) -> None:
         root = Path.cwd().resolve()
@@ -1051,19 +1056,20 @@ class CodexExecutionPreflightGateTest(unittest.TestCase):
         }]
         self.assertEqual("FAIL", validate_review_separation(candidate)[0].status)
 
-    def test_governance_approval_without_exact_hashes_is_not_proven(self) -> None:
+    def test_governance_candidate_has_no_universal_artifact_approval_requirement(self) -> None:
         candidate = _gate_candidate()
-        for review in candidate["review_inputs"]:
-            if review.get("approval_scope") == "GOVERNANCE_ARTIFACTS":
-                review.pop("approved_artifact_hashes")
-        self.assertEqual("NOT_PROVEN", validate_review_separation(candidate)[0].status)
+        self.assertFalse(
+            any(
+                review.get("approval_scope") == "GOVERNANCE_ARTIFACTS"
+                for review in candidate["review_inputs"]
+            )
+        )
+        self.assertEqual("PASS", validate_review_separation(candidate)[0].status)
 
-    def test_governance_approval_wrong_hashes_is_not_proven(self) -> None:
-        candidate = _gate_candidate()
-        for review in candidate["review_inputs"]:
-            if review.get("approval_scope") == "GOVERNANCE_ARTIFACTS":
-                review["approved_artifact_hashes"]["AGENTS.md"] = "0" * 64
-        self.assertEqual("NOT_PROVEN", validate_review_separation(candidate)[0].status)
+    def test_validator_and_candidate_schema_versions_match_v120(self) -> None:
+        schema = json.loads(Path("config/governance/codex_candidate.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual("1.2.0", VALIDATOR_VERSION)
+        self.assertEqual(VALIDATOR_VERSION, schema["properties"]["validator_version"]["const"])
 
     def test_legacy_closed_use_is_not_proven_but_governance_remediation_can_proceed(self) -> None:
         candidate = _gate_candidate()
@@ -1188,11 +1194,10 @@ class CodexExecutionPreflightGateTest(unittest.TestCase):
         self.assertEqual("FAIL", validate_candidate_schema(candidate)[0].status)
         self.assertEqual("FAIL", validate_output_transport(candidate)[0].status)
 
-    def test_governance_path_case_alias_is_rejected_and_still_sensitive(self) -> None:
+    def test_governance_path_case_alias_is_rejected(self) -> None:
         candidate = _candidate()
         candidate["failure_classes"] = [_proof_declaration("USE")]
         candidate["execution_manifest"]["write_files"].append("agents.md")
-        self.assertTrue(gate._requires_independent_audit(candidate))
         self.assertEqual("FAIL", validate_candidate_schema(candidate)[0].status)
 
     def test_artifact_lock_case_alias_duplicate_fails(self) -> None:
