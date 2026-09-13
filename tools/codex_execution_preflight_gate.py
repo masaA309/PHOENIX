@@ -11,7 +11,7 @@ from typing import Any
 
 
 VALIDATOR_VERSION = "1.2.0"
-CANONICAL_WORKSPACE = r"C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX"
+CANONICAL_WORKSPACE = str(Path(__file__).resolve().parents[1])
 
 GOVERNANCE_ARTIFACTS = (
     "AGENTS.md",

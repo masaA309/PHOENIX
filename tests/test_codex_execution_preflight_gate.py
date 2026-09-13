@@ -262,6 +262,22 @@ def _write_candidate_and_report(root: Path, candidate: dict[str, object]) -> tup
 
 
 class CodexExecutionPreflightGateTest(unittest.TestCase):
+    def test_workspace_schema_uses_non_empty_string_without_machine_const(self) -> None:
+        schema = json.loads(
+            (Path(__file__).resolve().parents[1] / "config/governance/codex_candidate.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        workspace_schema = schema["properties"]["workspace"]
+        self.assertNotIn("const", workspace_schema)
+        self.assertEqual("string", workspace_schema["type"])
+        self.assertEqual(1, workspace_schema["minLength"])
+
+    def test_production_workspace_authority_is_validator_repository_root(self) -> None:
+        expected = str(Path(gate.__file__).resolve().parents[1])
+        self.assertEqual(expected, gate.CANONICAL_WORKSPACE)
+        self.assertEqual(gate.CANONICAL_WORKSPACE, runner.CANONICAL_WORKSPACE)
+
     def test_missing_required_section_fails(self) -> None:
         candidate = _candidate()
         candidate.pop("task")
