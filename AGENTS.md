@@ -375,13 +375,12 @@ USER_MACHINEまたは追加authorityが不可避な地点まで進めた場合�
 
 ## 10. EXECUTION ENVIRONMENT
 
-canonical workspace:
-`C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX`
+canonical local workspaceは、canonical PHOENIX repository内のcanonical governance artifact位置から決定論的に導出したresolved repository rootとする。
+
+user名、drive letter、OneDrive、SharePoint、その他machine固有absolute pathをcanonical workspace authorityとしてhard-codeしない。candidateの `workspace`、preflight runtime root、governed runnerの `cwd` は、同じresolved repository rootへ一致しなければならない。caller supplied文字列だけでcanonical workspaceを再定義しない。textual alias、symlink alias、別checkout、別worktree、`work/`、temporary copyをcanonical workspaceとして許可しない。別repository rootへの移行にはUSER明示authorityを必須とする。
 
 canonical Python:
 `./.venv/Scripts/python.exe`
-
-USERがその時点で別場所を明示指定しない限り固定する。
 
 禁止（実行環境）:
 - `work/`
