@@ -1,0 +1,890 @@
+diff --git a/config/governance/codex_candidate.schema.json b/config/governance/codex_candidate.schema.json
+index 5869840..24783e1 100644
+--- a/config/governance/codex_candidate.schema.json
++++ b/config/governance/codex_candidate.schema.json
+@@ -1 +1 @@
+-{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"agents_sha256":{"type":"string"},"allowed":{"type":"array"},"artifact_lock":{"type":"array"},"candidate_id":{"type":"string"},"candidate_sha256":{"type":"string"},"candidate_type":{"enum":["IMPLEMENTATION","GOVERNANCE","FINAL_ACCEPTANCE"]},"created_at_utc":{"type":"string"},"evidence_graph":{"type":"array"},"execution_manifest":{"type":"object"},"expires_at_utc":{"type":"string"},"failure_classes":{"type":"array"},"forbidden":{"type":"array"},"objective":{"type":"string"},"output":{"type":"object"},"output_budget":{"type":"object"},"proof_targets":{"type":"array"},"result_branches":{"type":"object"},"review_inputs":{"type":"array"},"review_requirements":{"type":"array"},"rollback_stop":{"type":"object"},"runtime_preconditions":{"type":"array"},"safety":{"type":"object"},"shell_transport":{"type":"object"},"task":{"type":"string"},"user_machine_operations":{"type":"array"},"validator_version":{"type":"string"},"workspace":{"type":"string"}},"required":["candidate_id","candidate_sha256","candidate_type","created_at_utc","expires_at_utc","agents_sha256","validator_version","objective","workspace","task","allowed","forbidden","safety","output","execution_manifest","proof_targets","evidence_graph","failure_classes","runtime_preconditions","rollback_stop","result_branches","user_machine_operations","shell_transport","output_budget","artifact_lock","review_inputs","review_requirements"],"type":"object"}
++{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"agents_sha256":{"type":"string"},"allowed":{"items":{"type":"string"},"type":"array"},"artifact_lock":{"items":{"additionalProperties":false,"properties":{"existing":{"type":"boolean"},"path":{"type":"string"},"sha256":{"type":"string"}},"required":["path","sha256","existing"],"type":"object"},"type":"array"},"candidate_id":{"type":"string"},"candidate_sha256":{"type":"string"},"candidate_type":{"enum":["IMPLEMENTATION","GOVERNANCE","FINAL_ACCEPTANCE"]},"created_at_utc":{"type":"string"},"evidence_graph":{"type":"array"},"execution_manifest":{"additionalProperties":false,"properties":{"allowed_assertions":{"items":{"type":"string"},"type":"array"},"allowed_behaviors":{"items":{"type":"string"},"type":"array"},"allowed_functions":{"items":{"type":"string"},"type":"array"},"allowed_tests":{"items":{"type":"string"},"type":"array"},"commands":{"items":{"additionalProperties":false,"properties":{"argv":{"items":{"type":"string"},"type":"array"},"command_id":{"type":"string"},"preflight":{"type":"boolean"},"via_runner":{"type":"boolean"}},"required":["command_id","argv","via_runner","preflight"],"type":"object"},"type":"array"},"forbidden_additions":{"items":{"type":"string"},"type":"array"},"proof_targets":{"items":{"type":"string"},"type":"array"},"read_files":{"items":{"type":"string"},"type":"array"},"write_files":{"items":{"type":"string"},"type":"array"}},"required":["read_files","write_files","allowed_functions","allowed_behaviors","commands","allowed_tests","allowed_assertions","proof_targets","forbidden_additions"],"type":"object"},"expires_at_utc":{"type":"string"},"failure_classes":{"items":{"additionalProperties":false,"properties":{"action":{"enum":["USE","REMEDIATE","REGISTER","CLOSE"]},"closure_controls_proven":{"items":{"type":"string"},"type":"array"},"declared_failure_class_ids":{"items":{"type":"string"},"type":"array"},"proof_targets":{"items":{"type":"string"},"type":"array"},"proposed_root_cause_text":{"type":"string"},"resolved_root_cause_code":{"type":"string"},"status":{"enum":["OPEN","CLOSED","REOPENED"]},"target_controls":{"items":{"type":"string"},"type":"array"}},"required":["action","proposed_root_cause_text","declared_failure_class_ids","resolved_root_cause_code"],"type":"object"},"type":"array"},"forbidden":{"items":{"type":"string"},"type":"array"},"objective":{"type":"string"},"output":{"type":"object"},"output_budget":{"additionalProperties":true,"properties":{"declared_stderr_bytes":{"type":"integer"},"declared_stdout_bytes":{"type":"integer"},"max_stderr_bytes":{"type":"integer"},"max_stdout_bytes":{"type":"integer"}},"required":["max_stdout_bytes","max_stderr_bytes"],"type":"object"},"proof_targets":{"items":{"type":"string"},"type":"array"},"result_branches":{"type":"object"},"review_inputs":{"type":"array"},"review_requirements":{"items":{"type":"string"},"type":"array"},"rollback_stop":{"type":"object"},"runtime_preconditions":{"type":"array"},"safety":{"type":"object"},"shell_transport":{"type":"object"},"task":{"type":"string"},"user_machine_operations":{"type":"array"},"validator_version":{"type":"string"},"workspace":{"type":"string"}},"required":["candidate_id","candidate_sha256","candidate_type","created_at_utc","expires_at_utc","agents_sha256","validator_version","objective","workspace","task","allowed","forbidden","safety","output","execution_manifest","proof_targets","evidence_graph","failure_classes","runtime_preconditions","rollback_stop","result_branches","user_machine_operations","shell_transport","output_budget","artifact_lock","review_inputs","review_requirements"],"type":"object"}
+diff --git a/config/governance/failure_class.schema.json b/config/governance/failure_class.schema.json
+index 903bcda..6b3f833 100644
+--- a/config/governance/failure_class.schema.json
++++ b/config/governance/failure_class.schema.json
+@@ -1 +1 @@
+-{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"canonical_id":{"type":"string"},"closure_evidence":{"type":"object"},"reopen_condition":{"type":"string"},"required_prevention_controls":{"type":"array"},"root_cause_aliases":{"type":"array"},"root_cause_code":{"type":"string"},"root_cause_description":{"type":"string"},"status":{"enum":["OPEN","CLOSED","REOPENED"]}},"required":["canonical_id","root_cause_code","root_cause_description","root_cause_aliases","required_prevention_controls","status","closure_evidence","reopen_condition"],"type":"object"}
++{"$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"aliases":{"items":{"type":"string"},"type":"array"},"canonical_id":{"type":"string"},"closure_evidence":{"additionalProperties":false,"properties":{"artifact_hashes":{"type":"object"},"closed_at_utc":{"type":"string"},"ledger_sha256":{"type":"string"},"required_prevention_controls":{"items":{"type":"string"},"type":"array"},"test_run_id":{"type":"string"},"time_window":{"type":"string"},"validator_version":{"type":"string"}},"required":["validator_version","artifact_hashes","closed_at_utc","time_window","required_prevention_controls","ledger_sha256"],"type":"object"},"reopen_condition":{"type":"string"},"required_prevention_controls":{"items":{"type":"string"},"type":"array"},"root_cause_aliases":{"items":{"type":"string"},"type":"array"},"root_cause_code":{"type":"string"},"root_cause_description":{"type":"string"},"status":{"enum":["OPEN","CLOSED","REOPENED"]}},"required":["canonical_id","aliases","root_cause_code","root_cause_description","root_cause_aliases","required_prevention_controls","status","closure_evidence","reopen_condition"],"type":"object"}
+diff --git a/tests/test_codex_execution_preflight_gate.py b/tests/test_codex_execution_preflight_gate.py
+index bb257b3..151a7dc 100644
+--- a/tests/test_codex_execution_preflight_gate.py
++++ b/tests/test_codex_execution_preflight_gate.py
+@@ -9,12 +9,14 @@ import tempfile
+ import unittest
+ 
+ from tools.codex_execution_preflight_gate import (
++    GOVERNANCE_ARTIFACTS,
+     VALIDATOR_VERSION,
+     canonical_json_bytes,
+     derive_gate_status,
+     main,
+     resolve_failure_classes,
+     sha256_bytes,
++    sha256_file,
+     validate_artifact_identity,
+     validate_candidate_schema,
+     validate_evidence_lifecycle,
+@@ -25,28 +27,38 @@ from tools.codex_execution_preflight_gate import (
+     validate_runtime_preconditions,
+     validate_shell_transport,
+     validate_static_contradictions,
++    validate_time_and_workspace,
+     validate_user_operations,
+ )
+-from tools.governance_command_runner import run_command
++from tools.governance_command_runner import run_command, run_governed_command
+ 
+ 
+ def _candidate() -> dict[str, object]:
+     candidate: dict[str, object] = {
+         "candidate_id": "candidate-1",
+         "candidate_sha256": "",
+-        "candidate_type": "GOVERNANCE",
++        "candidate_type": "IMPLEMENTATION",
+         "created_at_utc": "2026-09-02T00:00:00+00:00",
+-        "expires_at_utc": "2026-09-03T00:00:00+00:00",
++        "expires_at_utc": "2099-09-03T00:00:00+00:00",
+         "agents_sha256": "a" * 64,
+         "validator_version": VALIDATOR_VERSION,
+         "objective": "governance test",
+-        "workspace": "workspace",
++        "workspace": str(Path.cwd().resolve()),
+         "task": "test",
+         "allowed": [],
+         "forbidden": [],
+         "safety": {"required_states": []},
+         "output": {"complete": True, "truncate": False},
+-        "execution_manifest": {"commands": [{"via_runner": True}]},
++        "execution_manifest": {
++            "commands": [
++                {
++                    "command_id": "echo",
++                    "argv": [sys.executable, "-c", "print('ok')"],
++                    "via_runner": True,
++                    "preflight": False,
++                }
++            ]
++        },
+         "proof_targets": ["PT-1"],
+         "evidence_graph": [
+             {
+@@ -82,7 +94,10 @@ def _candidate() -> dict[str, object]:
+         "user_machine_operations": [],
+         "shell_transport": {"layers": ["PowerShell"], "command": []},
+         "output_budget": {"max_stdout_bytes": 1024, "max_stderr_bytes": 1024},
+-        "artifact_lock": [],
++        "artifact_lock": [
++            {"path": path, "sha256": sha256_file(Path.cwd() / path), "existing": True}
++            for path in GOVERNANCE_ARTIFACTS
++        ],
+         "review_inputs": [
+             {"review_type": "MECHANICAL_REVIEW", "completed": True},
+             {"review_type": "COMPLETENESS_REVIEW", "completed": True},
+@@ -95,6 +110,32 @@ def _candidate() -> dict[str, object]:
+     return candidate
+ 
+ 
++def _closed_ledger(root_cause_code: str = "root") -> dict[str, object]:
++    return {
++        "classes": [
++            {
++                "canonical_id": "FC",
++                "aliases": ["G-001"],
++                "root_cause_code": root_cause_code,
++                "root_cause_aliases": ["root alias"],
++                "required_prevention_controls": ["control"],
++                "status": "CLOSED",
++                "closure_evidence": {
++                    "validator_version": VALIDATOR_VERSION,
++                    "artifact_hashes": {},
++                    "closed_at_utc": "2026-09-02T00:00:00+00:00",
++                    "time_window": "until_governance_artifact_change",
++                    "required_prevention_controls": ["control"],
++                    "ledger_sha256": sha256_file(
++                        Path.cwd() / "knowledge/failure_class_ledger.json"
++                    ),
++                },
++                "reopen_condition": "change",
++            }
++        ]
++    }
++
++
+ class CodexExecutionPreflightGateTest(unittest.TestCase):
+     def test_missing_required_section_fails(self) -> None:
+         candidate = _candidate()
+@@ -144,6 +185,40 @@ class CodexExecutionPreflightGateTest(unittest.TestCase):
+         candidate["output_budget"]["declared_stdout_bytes"] = 1025
+         self.assertEqual("FAIL", validate_static_contradictions(candidate)[0].status)
+ 
++    def test_mandatory_governance_reviews_cannot_be_omitted_by_candidate(self) -> None:
++        candidate = _candidate()
++        candidate["review_requirements"] = ["COMPLETENESS_REVIEW"]
++        self.assertEqual("NOT_PROVEN", derive_gate_status([], candidate))
++        candidate = _candidate()
++        candidate["candidate_type"] = "GOVERNANCE"
++        candidate["review_requirements"] = [
++            "MECHANICAL_REVIEW",
++            "COMPLETENESS_REVIEW",
++            "SUBSTITUTE_COMPLETENESS_REVIEW",
++        ]
++        candidate["review_inputs"].append(
++            {"review_type": "SUBSTITUTE_COMPLETENESS_REVIEW", "completed": True}
++        )
++        self.assertEqual("PASS", derive_gate_status([], candidate))
++
++    def test_candidate_expiry_and_workspace_are_strict(self) -> None:
++        candidate = _candidate()
++        self.assertEqual("PASS", validate_time_and_workspace(Path.cwd(), candidate)[0].status)
++        candidate["expires_at_utc"] = "2026-09-03T00:00:00+00:00"
++        self.assertEqual("FAIL", validate_time_and_workspace(Path.cwd(), candidate)[0].status)
++        candidate = _candidate()
++        candidate["workspace"] = "other"
++        self.assertEqual("FAIL", validate_time_and_workspace(Path.cwd(), candidate)[0].status)
++
++    def test_governance_artifact_locks_are_exact_unique_and_agents_raw(self) -> None:
++        candidate = _candidate()
++        self.assertEqual("PASS", validate_artifact_identity(Path.cwd(), candidate)[0].status)
++        candidate["artifact_lock"].append(candidate["artifact_lock"][0])
++        payload = dict(candidate)
++        payload.pop("candidate_sha256")
++        candidate["candidate_sha256"] = sha256_bytes(canonical_json_bytes(payload))
++        self.assertEqual("FAIL", validate_artifact_identity(Path.cwd(), candidate)[0].status)
++
+     def test_complete_and_truncate_fails(self) -> None:
+         candidate = _candidate()
+         candidate["output"]["truncate"] = True
+@@ -174,15 +249,58 @@ class CodexExecutionPreflightGateTest(unittest.TestCase):
+     def test_ambiguous_root_cause_is_not_proven(self) -> None:
+         candidate = _candidate()
+         candidate["failure_classes"] = [{"proposed_root_cause_text": "alias", "declared_failure_class_ids": [], "resolved_root_cause_code": "alias"}]
+-        synonyms = {"synonyms": {"first": ["alias"], "second": ["alias"]}}
+-        self.assertEqual("NOT_PROVEN", resolve_failure_classes(candidate, {"classes": []}, synonyms)[0].status)
++        ledger = {
++            "classes": [
++                {"canonical_id": "FC1", "aliases": [], "root_cause_code": "first", "root_cause_aliases": ["alias"], "status": "CLOSED"},
++                {"canonical_id": "FC2", "aliases": [], "root_cause_code": "second", "root_cause_aliases": ["alias"], "status": "CLOSED"},
++            ]
++        }
++        self.assertEqual("NOT_PROVEN", resolve_failure_classes(candidate, ledger, {"synonyms": {}})[0].status)
+ 
+     def test_closed_stale_evidence_is_not_proven(self) -> None:
+         candidate = _candidate()
+         candidate["failure_classes"] = [{"proposed_root_cause_text": "root", "declared_failure_class_ids": ["G-001"], "resolved_root_cause_code": "root"}]
+-        ledger = {"classes": [{"canonical_id": "FC", "aliases": ["G-001"], "root_cause_code": "root", "status": "CLOSED", "closure_evidence": {}, "reopen_condition": "change"}]}
++        ledger = {"classes": [{"canonical_id": "FC", "aliases": ["G-001"], "root_cause_code": "root", "root_cause_aliases": [], "status": "CLOSED", "closure_evidence": {}, "reopen_condition": "change"}]}
+         self.assertEqual("NOT_PROVEN", resolve_failure_classes(candidate, ledger, {"synonyms": {"root": []}})[0].status)
+ 
++    def test_failure_action_use_requires_closed_class(self) -> None:
++        candidate = _candidate()
++        candidate["failure_classes"] = [{"action": "USE", "proposed_root_cause_text": "root alias", "declared_failure_class_ids": ["G-001"], "resolved_root_cause_code": "root"}]
++        self.assertEqual("PASS", resolve_failure_classes(candidate, _closed_ledger(), {"synonyms": {}})[0].status)
++        ledger = copy.deepcopy(_closed_ledger())
++        ledger["classes"][0]["status"] = "OPEN"
++        self.assertEqual("FAIL", resolve_failure_classes(candidate, ledger, {"synonyms": {}})[0].status)
++
++    def test_failure_action_remediate_requires_open_or_reopened_class(self) -> None:
++        candidate = _candidate()
++        candidate["failure_classes"] = [{"action": "REMEDIATE", "proposed_root_cause_text": "root", "declared_failure_class_ids": ["G-001"], "resolved_root_cause_code": "root"}]
++        ledger = copy.deepcopy(_closed_ledger())
++        ledger["classes"][0]["status"] = "REOPENED"
++        self.assertEqual("PASS", resolve_failure_classes(candidate, ledger, {"synonyms": {}})[0].status)
++        self.assertEqual("FAIL", resolve_failure_classes(candidate, _closed_ledger(), {"synonyms": {}})[0].status)
++
++    def test_failure_action_register_requires_governance_new_open(self) -> None:
++        candidate = _candidate()
++        candidate["candidate_type"] = "GOVERNANCE"
++        candidate["failure_classes"] = [{"action": "REGISTER", "proposed_root_cause_text": "new root", "declared_failure_class_ids": ["G-NEW"], "resolved_root_cause_code": "new root", "status": "OPEN"}]
++        self.assertEqual("PASS", resolve_failure_classes(candidate, {"classes": []}, {"synonyms": {}})[0].status)
++        candidate["candidate_type"] = "IMPLEMENTATION"
++        self.assertEqual("FAIL", resolve_failure_classes(candidate, {"classes": []}, {"synonyms": {}})[0].status)
++
++    def test_failure_action_close_requires_governance_and_all_controls(self) -> None:
++        candidate = _candidate()
++        candidate["failure_classes"] = [{"action": "CLOSE", "proposed_root_cause_text": "root", "declared_failure_class_ids": ["G-001"], "resolved_root_cause_code": "root", "closure_controls_proven": ["control"]}]
++        self.assertEqual("PASS", resolve_failure_classes(candidate, _closed_ledger(), {"synonyms": {}})[0].status)
++        candidate["failure_classes"][0]["closure_controls_proven"] = []
++        self.assertEqual("NOT_PROVEN", resolve_failure_classes(candidate, _closed_ledger(), {"synonyms": {}})[0].status)
++
++    def test_closed_evidence_ledger_hash_must_match_candidate_lock(self) -> None:
++        candidate = _candidate()
++        candidate["failure_classes"] = [{"action": "USE", "proposed_root_cause_text": "root", "declared_failure_class_ids": ["G-001"], "resolved_root_cause_code": "root"}]
++        ledger = _closed_ledger()
++        ledger["classes"][0]["closure_evidence"]["ledger_sha256"] = "0" * 64
++        self.assertEqual("NOT_PROVEN", resolve_failure_classes(candidate, ledger, {"synonyms": {}})[0].status)
++
+     def test_lifecycle_missing_fails(self) -> None:
+         candidate = _candidate()
+         candidate["evidence_graph"][0]["owner"] = ""
+@@ -224,6 +342,19 @@ class CodexExecutionPreflightGateTest(unittest.TestCase):
+         candidate["candidate_sha256"] = "0" * 64
+         self.assertEqual("FAIL", validate_artifact_identity(Path.cwd(), candidate)[0].status)
+ 
++    def test_agents_hash_must_match_raw_agents_artifact_lock(self) -> None:
++        candidate = _candidate()
++        candidate["agents_sha256"] = "0" * 64
++        payload = dict(candidate)
++        payload.pop("candidate_sha256")
++        candidate["candidate_sha256"] = sha256_bytes(canonical_json_bytes(payload))
++        self.assertEqual("FAIL", validate_artifact_identity(Path.cwd(), candidate)[0].status)
++
++    def test_manifest_command_requires_id_argv_and_flags(self) -> None:
++        candidate = _candidate()
++        candidate["execution_manifest"]["commands"] = [{"via_runner": True}]
++        self.assertEqual("FAIL", validate_candidate_schema(candidate)[0].status)
++
+     def test_candidate_canonicalization_vector_matches(self) -> None:
+         self.assertEqual(b'{"a":"\xe6\x97\xa5\xe6\x9c\xac","b":2}', canonical_json_bytes({"b": 2, "a": "日本"}))
+ 
+@@ -234,6 +365,90 @@ class CodexExecutionPreflightGateTest(unittest.TestCase):
+             self.assertTrue(result.output_limit_exceeded)
+             self.assertNotEqual(0, result.returncode)
+ 
++    def test_governed_runner_unknown_command_does_not_spawn(self) -> None:
++        with tempfile.TemporaryDirectory() as directory:
++            root = Path(directory)
++            candidate_path = root / "candidate.json"
++            report_path = root / "report.json"
++            candidate_path.write_text("{}", encoding="utf-8")
++            report_path.write_text("{}", encoding="utf-8")
++            result = run_governed_command(
++                "missing",
++                candidate_path,
++                report_path,
++                root,
++                root / "stdout.txt",
++                root / "stderr.txt",
++                128,
++                128,
++            )
++            self.assertFalse(result.spawned)
++
++    def test_governed_runner_stale_report_does_not_spawn(self) -> None:
++        with tempfile.TemporaryDirectory() as directory:
++            root = Path(directory)
++            candidate_path = root / "candidate.json"
++            report_path = root / "report.json"
++            candidate_path.write_text("{}", encoding="utf-8")
++            report_path.write_text(json.dumps({"status": "FAIL"}), encoding="utf-8")
++            result = run_governed_command(
++                "echo",
++                candidate_path,
++                report_path,
++                root,
++                root / "stdout.txt",
++                root / "stderr.txt",
++                128,
++                128,
++            )
++            self.assertFalse(result.spawned)
++
++    def test_governed_runner_fresh_gate_spawns(self) -> None:
++        with tempfile.TemporaryDirectory() as directory:
++            root = Path(directory)
++            for path in GOVERNANCE_ARTIFACTS:
++                target = root / path
++                target.parent.mkdir(parents=True, exist_ok=True)
++                source = Path.cwd() / path
++                target.write_bytes(source.read_bytes())
++            candidate = _candidate()
++            candidate["artifact_lock"] = [
++                {"path": path, "sha256": sha256_file(root / path), "existing": True}
++                for path in GOVERNANCE_ARTIFACTS
++            ]
++            candidate["agents_sha256"] = sha256_file(root / "AGENTS.md")
++            payload = dict(candidate)
++            payload.pop("candidate_sha256")
++            candidate["candidate_sha256"] = sha256_bytes(canonical_json_bytes(payload))
++            candidate_path = root / "candidate.json"
++            report_path = root / "report.json"
++            candidate_path.write_bytes(canonical_json_bytes(candidate))
++            from tools.codex_execution_preflight_gate import build_gate_report
++            from dataclasses import asdict
++
++            report = asdict(
++                build_gate_report(
++                    root,
++                    candidate,
++                    root / "AGENTS.md",
++                    root / "knowledge/failure_class_ledger.json",
++                    root / "config/governance/root_cause_synonyms.json",
++                )
++            )
++            report_path.write_bytes(canonical_json_bytes(report))
++            result = run_governed_command(
++                "echo",
++                candidate_path,
++                report_path,
++                root,
++                root / "stdout.txt",
++                root / "stderr.txt",
++                1024,
++                1024,
++            )
++            self.assertTrue(result.spawned)
++            self.assertEqual(0, result.returncode)
++
+     def test_non_redundant_candidate_passes_all_conditions(self) -> None:
+         candidate = _candidate()
+         findings = []
+diff --git a/tools/codex_execution_preflight_gate.py b/tools/codex_execution_preflight_gate.py
+index 19789c0..140a78a 100644
+--- a/tools/codex_execution_preflight_gate.py
++++ b/tools/codex_execution_preflight_gate.py
+@@ -9,7 +9,20 @@ from pathlib import Path
+ from typing import Any
+ 
+ 
+-VALIDATOR_VERSION = "1.0.0"
++VALIDATOR_VERSION = "1.1.0"
++
++GOVERNANCE_ARTIFACTS = (
++    "AGENTS.md",
++    "tools/codex_execution_preflight_gate.py",
++    "tools/governance_command_runner.py",
++    "config/governance/codex_candidate.schema.json",
++    "config/governance/evidence_graph.schema.json",
++    "config/governance/failure_class.schema.json",
++    "config/governance/gate_report.schema.json",
++    "config/governance/root_cause_synonyms.json",
++    "knowledge/failure_class_ledger.json",
++    "tests/test_codex_execution_preflight_gate.py",
++)
+ 
+ 
+ @dataclass(frozen=True)
+@@ -92,9 +105,80 @@ def validate_candidate_schema(candidate: dict[str, Any]) -> list[GateFinding]:
+         return [GateFinding("MG-01", "FAIL", "candidate_type enum is invalid")]
+     if candidate["validator_version"] != VALIDATOR_VERSION:
+         return [GateFinding("MG-01", "FAIL", "validator_version mismatch")]
++    manifest_required = {
++        "read_files",
++        "write_files",
++        "allowed_functions",
++        "allowed_behaviors",
++        "commands",
++        "allowed_tests",
++        "allowed_assertions",
++        "proof_targets",
++        "forbidden_additions",
++    }
++    manifest = candidate["execution_manifest"]
++    if not manifest_required.issubset(manifest):
++        return [GateFinding("MG-01", "FAIL", "execution_manifest scope fields missing")]
++    if not isinstance(manifest.get("commands"), list):
++        return [GateFinding("MG-01", "FAIL", "execution_manifest commands must be a list")]
++    command_ids: set[str] = set()
++    for command in manifest.get("commands", []):
++        if not isinstance(command, dict):
++            return [GateFinding("MG-01", "FAIL", "manifest command must be an object")]
++        if set(command) != {"command_id", "argv", "via_runner", "preflight"}:
++            return [GateFinding("MG-01", "FAIL", "manifest command shape is not strict")]
++        if not isinstance(command.get("command_id"), str) or not command.get("command_id"):
++            return [GateFinding("MG-01", "FAIL", "manifest command_id missing")]
++        if command["command_id"] in command_ids:
++            return [GateFinding("MG-01", "FAIL", "manifest command_id must be unique")]
++        command_ids.add(command["command_id"])
++        argv = command.get("argv")
++        if not isinstance(argv, list) or not all(isinstance(part, str) for part in argv):
++            return [GateFinding("MG-01", "FAIL", "manifest argv must be a string array")]
++        if not isinstance(command.get("via_runner"), bool) or not isinstance(
++            command.get("preflight"), bool
++        ):
++            return [GateFinding("MG-01", "FAIL", "manifest command flags must be booleans")]
++    for declaration in candidate["failure_classes"]:
++        if not isinstance(declaration, dict):
++            return [GateFinding("MG-01", "FAIL", "failure class declaration must be an object")]
++        allowed_keys = {
++            "action",
++            "proposed_root_cause_text",
++            "declared_failure_class_ids",
++            "resolved_root_cause_code",
++            "status",
++            "target_controls",
++            "closure_controls_proven",
++            "proof_targets",
++        }
++        if not set(declaration).issubset(allowed_keys):
++            return [GateFinding("MG-01", "FAIL", "failure class declaration shape is not strict")]
++        if declaration.get("action", "USE") not in {"USE", "REMEDIATE", "REGISTER", "CLOSE"}:
++            return [GateFinding("MG-01", "FAIL", "failure action is invalid")]
+     return [GateFinding("MG-01", "PASS", "required fields and types are present")]
+ 
+ 
++def validate_time_and_workspace(root: Path, candidate: dict[str, Any]) -> list[GateFinding]:
++    try:
++        created = datetime.fromisoformat(candidate["created_at_utc"])
++        expires = datetime.fromisoformat(candidate["expires_at_utc"])
++    except ValueError:
++        return [GateFinding("MG-01", "FAIL", "created/expires timestamp is invalid")]
++    if created.tzinfo is None or expires.tzinfo is None:
++        return [GateFinding("MG-01", "FAIL", "created/expires must be timezone-aware UTC")]
++    if created.utcoffset() != timezone.utc.utcoffset(created):
++        return [GateFinding("MG-01", "FAIL", "created_at_utc must be UTC")]
++    if expires.utcoffset() != timezone.utc.utcoffset(expires):
++        return [GateFinding("MG-01", "FAIL", "expires_at_utc must be UTC")]
++    now = datetime.now(timezone.utc)
++    if not (created <= now < expires):
++        return [GateFinding("MG-01", "FAIL", "candidate is expired or not yet valid")]
++    if str(root.resolve()) != candidate["workspace"]:
++        return [GateFinding("MG-01", "FAIL", "candidate workspace does not match canonical root")]
++    return [GateFinding("MG-01", "PASS", "candidate time window and workspace are valid")]
++
++
+ def validate_proof_binding(candidate: dict[str, Any]) -> list[GateFinding]:
+     for proof in candidate.get("evidence_graph", []):
+         kind = proof.get("evidence_kind")
+@@ -181,6 +265,13 @@ def validate_artifact_identity(root: Path, candidate: dict[str, Any]) -> list[Ga
+     if declared_hash != actual_hash:
+         return [GateFinding("MG-06", "FAIL", "candidate SHA-256 mismatch")]
+     resolved_root = root.resolve()
++    artifact_paths = [str(artifact.get("path", "")) for artifact in candidate.get("artifact_lock", [])]
++    if len(artifact_paths) != len(set(artifact_paths)):
++        return [GateFinding("MG-06", "FAIL", "artifact hash locks must be unique")]
++    artifact_by_path = dict(zip(artifact_paths, candidate.get("artifact_lock", [])))
++    for required_path in GOVERNANCE_ARTIFACTS:
++        if required_path not in artifact_by_path:
++            return [GateFinding("MG-06", "FAIL", "governance artifact hash lock missing")]
+     for artifact in candidate.get("artifact_lock", []):
+         if not artifact.get("existing", True):
+             continue
+@@ -191,6 +282,9 @@ def validate_artifact_identity(root: Path, candidate: dict[str, Any]) -> list[Ga
+             return [GateFinding("MG-06", "FAIL", "artifact path escapes workspace")]
+         if not path.is_file() or sha256_file(path) != artifact.get("sha256"):
+             return [GateFinding("MG-06", "FAIL", "artifact identity mismatch")]
++    agents_lock = artifact_by_path.get("AGENTS.md", {})
++    if candidate.get("agents_sha256") != agents_lock.get("sha256"):
++        return [GateFinding("MG-06", "FAIL", "agents_sha256 does not match raw AGENTS lock")]
+     return [GateFinding("MG-06", "PASS", "candidate and artifacts are hash locked")]
+ 
+ 
+@@ -199,13 +293,51 @@ def resolve_failure_classes(
+ ) -> list[GateFinding]:
+     classes = ledger.get("classes", [])
+     synonym_map = synonyms.get("synonyms", {})
++    candidate_type = candidate.get("candidate_type")
++    artifact_locks = {
++        str(artifact.get("path", "")): str(artifact.get("sha256", ""))
++        for artifact in candidate.get("artifact_lock", [])
++    }
++    ledger_lock = artifact_locks.get("knowledge/failure_class_ledger.json", "")
+     for declaration in candidate.get("failure_classes", []):
++        action = declaration.get("action", "USE")
++        if action not in {"USE", "REMEDIATE", "REGISTER", "CLOSE"}:
++            return [GateFinding("MG-07", "FAIL", "failure action is invalid")]
+         text = str(declaration.get("proposed_root_cause_text", "")).strip().lower()
+         canonical_matches = []
+-        for canonical, aliases in synonym_map.items():
+-            terms = [canonical, *aliases]
++        all_id_aliases: set[str] = set()
++        all_text_aliases: set[str] = set()
++        for item in classes:
++            all_id_aliases.update(str(value) for value in [item.get("canonical_id"), *item.get("aliases", [])])
++            all_text_aliases.update(
++                str(value).strip().lower()
++                for value in [
++                    item.get("root_cause_code"),
++                    *item.get("root_cause_aliases", []),
++                    *synonym_map.get(item.get("root_cause_code"), []),
++                ]
++            )
++            canonical = item.get("root_cause_code")
++            terms = [
++                canonical,
++                *item.get("root_cause_aliases", []),
++                *synonym_map.get(canonical, []),
++            ]
+             if text in {str(term).strip().lower() for term in terms}:
+                 canonical_matches.append(canonical)
++        if action == "REGISTER":
++            if candidate_type != "GOVERNANCE":
++                return [GateFinding("MG-07", "FAIL", "REGISTER requires GOVERNANCE candidate")]
++            if canonical_matches:
++                return [GateFinding("MG-07", "FAIL", "REGISTER cannot duplicate root cause")]
++            declared_ids = {str(value) for value in declaration.get("declared_failure_class_ids", [])}
++            if declared_ids & all_id_aliases:
++                return [GateFinding("MG-07", "FAIL", "REGISTER class id alias collision")]
++            if str(declaration.get("resolved_root_cause_code", "")).strip().lower() in all_text_aliases:
++                return [GateFinding("MG-07", "FAIL", "REGISTER root cause collision")]
++            if declaration.get("status") != "OPEN":
++                return [GateFinding("MG-07", "FAIL", "REGISTER requires new OPEN class")]
++            continue
+         if not canonical_matches:
+             return [GateFinding("MG-07", "NOT_PROVEN", "NEW_UNCLASSIFIED root cause")]
+         if len(canonical_matches) != 1:
+@@ -221,8 +353,34 @@ def resolve_failure_classes(
+             return [GateFinding("MG-07", "FAIL", "declared failure class mismatch")]
+         if declaration.get("resolved_root_cause_code") != root_code:
+             return [GateFinding("MG-07", "FAIL", "resolved root cause mismatch")]
+-        if item.get("status") in {"OPEN", "REOPENED"}:
++        status = item.get("status")
++        if action == "USE" and status != "CLOSED":
++            return [GateFinding("MG-07", "FAIL", "USE requires CLOSED class")]
++        stale_closed = False
++        if action == "REMEDIATE" and status == "CLOSED" and candidate_type == "GOVERNANCE":
++            stale_closed = True
++        elif action == "REMEDIATE" and status not in {"OPEN", "REOPENED"}:
++            return [GateFinding("MG-07", "FAIL", "REMEDIATE requires OPEN or REOPENED class")]
++        if action == "CLOSE":
++            if candidate_type != "GOVERNANCE":
++                return [GateFinding("MG-07", "FAIL", "CLOSE requires GOVERNANCE candidate")]
++            if status not in {"OPEN", "REOPENED"}:
++                return [GateFinding("MG-07", "FAIL", "CLOSE requires OPEN or REOPENED class")]
++            controls = declaration.get("closure_controls_proven", [])
++            required_controls = item.get("required_prevention_controls", [])
++            if not required_controls or sorted(controls) != sorted(required_controls):
++                return [GateFinding("MG-07", "NOT_PROVEN", "CLOSE controls are not fully proven")]
++            if sorted(declaration.get("proof_targets", [])) != sorted(candidate.get("proof_targets", [])):
++                return [GateFinding("MG-07", "NOT_PROVEN", "CLOSE requires all proof targets")]
++        targets = declaration.get("target_controls", item.get("required_prevention_controls", []))
++        required_controls = set(item.get("required_prevention_controls", []))
++        if action in {"REMEDIATE", "CLOSE"}:
++            if not targets or not set(targets).issubset(required_controls):
++                return [GateFinding("MG-07", "FAIL", "target controls must be a non-empty subset")]
++        if action in {"USE", "CLOSE"} and status in {"OPEN", "REOPENED"}:
+             return [GateFinding("MG-07", "FAIL", "failure class is not closed")]
++        if stale_closed:
++            continue
+         evidence = item.get("closure_evidence", {})
+         required = {
+             "validator_version",
+@@ -237,6 +395,11 @@ def resolve_failure_classes(
+             return [GateFinding("MG-07", "NOT_PROVEN", "closure time window is stale")]
+         if not item.get("reopen_condition"):
+             return [GateFinding("MG-07", "NOT_PROVEN", "reopen trigger is missing")]
++        if set(evidence.get("artifact_hashes", {})) != set(artifact_locks):
++            return [GateFinding("MG-07", "NOT_PROVEN", "CLOSED evidence artifact keys differ")]
++        evidence_ledger_hash = evidence.get("ledger_sha256")
++        if evidence_ledger_hash != ledger_lock:
++            return [GateFinding("MG-07", "NOT_PROVEN", "ledger hash is not fresh")]
+     return [GateFinding("MG-07", "PASS", "failure classes are resolved")]
+ 
+ 
+@@ -297,12 +460,29 @@ def derive_gate_status(findings: list[GateFinding], candidate: dict[str, Any]) -
+         return "FAIL"
+     if any(finding.status == "NOT_PROVEN" for finding in findings):
+         return "NOT_PROVEN"
+-    requirements = candidate.get("review_requirements", [])
++    requirements = {"MECHANICAL_REVIEW", "COMPLETENESS_REVIEW"}
++    candidate_requirements = set(candidate.get("review_requirements", []))
++    if not requirements.issubset(candidate_requirements):
++        return "NOT_PROVEN"
++    if candidate.get("candidate_type") == "GOVERNANCE" or any(
++        declaration.get("action") == "REGISTER"
++        for declaration in candidate.get("failure_classes", [])
++        if isinstance(declaration, dict)
++    ):
++        requirements.add("INDEPENDENT_AUDIT")
++    substitute_allowed = (
++        candidate.get("candidate_type") == "GOVERNANCE"
++        and "SUBSTITUTE_COMPLETENESS_REVIEW" in candidate_requirements
++    )
+     completed = {
+         review.get("review_type")
+         for review in candidate.get("review_inputs", [])
+         if review.get("completed")
+     }
++    completed.add("MECHANICAL_REVIEW")
++    if substitute_allowed and "INDEPENDENT_AUDIT" in requirements:
++        requirements.remove("INDEPENDENT_AUDIT")
++        requirements.add("SUBSTITUTE_COMPLETENESS_REVIEW")
+     if any(requirement not in completed for requirement in requirements):
+         return "NOT_PROVEN"
+     return "PASS"
+@@ -319,6 +499,7 @@ def build_gate_report(
+     synonyms = load_json_object(synonyms_path)
+     findings: list[GateFinding] = []
+     findings.extend(validate_candidate_schema(candidate))
++    findings.extend(validate_time_and_workspace(root, candidate))
+     findings.extend(validate_proof_binding(candidate))
+     findings.extend(validate_shell_transport(candidate))
+     findings.extend(validate_output_transport(candidate))
+@@ -330,11 +511,10 @@ def build_gate_report(
+     findings.extend(validate_rollback_stop(candidate))
+     findings.extend(validate_user_operations(candidate))
+     findings.extend(validate_review_separation(candidate))
+-    artifact_hashes = {
+-        "AGENTS.md": sha256_file(agents_path),
+-        str(ledger_path): sha256_file(ledger_path),
+-        str(synonyms_path): sha256_file(synonyms_path),
+-    }
++    artifact_hashes = {path: sha256_file(root / path) for path in GOVERNANCE_ARTIFACTS}
++    candidate_path = candidate.get("candidate_path")
++    if candidate_path:
++        artifact_hashes[str(candidate_path)] = sha256_file(root / str(candidate_path))
+     return GateReport(
+         candidate_id=str(candidate.get("candidate_id", "")),
+         candidate_sha256=str(candidate.get("candidate_sha256", "")),
+@@ -378,6 +558,7 @@ def main(argv: list[str] | None = None) -> int:
+         payload = asdict(report)
+         payload["validator_version"] = VALIDATOR_VERSION
+         payload["created_at_utc"] = datetime.now(timezone.utc).isoformat()
++        payload["artifact_hashes"][args.candidate] = sha256_file(paths["candidate"])
+         paths["report"].parent.mkdir(parents=True, exist_ok=True)
+         paths["report"].write_bytes(canonical_json_bytes(payload) + b"\n")
+         status = report.status
+diff --git a/tools/governance_command_runner.py b/tools/governance_command_runner.py
+index beca5f6..c99623d 100644
+--- a/tools/governance_command_runner.py
++++ b/tools/governance_command_runner.py
+@@ -2,6 +2,8 @@ from __future__ import annotations
+ 
+ import argparse
+ from dataclasses import dataclass
++from datetime import datetime, timezone
++import hashlib
+ import json
+ from pathlib import Path
+ import subprocess
+@@ -9,6 +11,37 @@ import threading
+ from typing import BinaryIO, Sequence
+ 
+ 
++GOVERNANCE_ARTIFACTS = (
++    "AGENTS.md",
++    "tools/codex_execution_preflight_gate.py",
++    "tools/governance_command_runner.py",
++    "config/governance/codex_candidate.schema.json",
++    "config/governance/evidence_graph.schema.json",
++    "config/governance/failure_class.schema.json",
++    "config/governance/gate_report.schema.json",
++    "config/governance/root_cause_synonyms.json",
++    "knowledge/failure_class_ledger.json",
++    "tests/test_codex_execution_preflight_gate.py",
++)
++
++
++def canonical_json_bytes(payload: object) -> bytes:
++    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
++        "utf-8"
++    )
++
++
++def sha256_file(path: Path) -> str:
++    return hashlib.sha256(path.read_bytes()).hexdigest()
++
++
++def load_json_object(path: Path) -> dict[str, object]:
++    payload = json.loads(path.read_text(encoding="utf-8"))
++    if not isinstance(payload, dict):
++        raise ValueError("JSON root must be an object")
++    return payload
++
++
+ @dataclass(frozen=True)
+ class CommandResult:
+     returncode: int
+@@ -17,6 +50,7 @@ class CommandResult:
+     stdout_bytes: int
+     stderr_bytes: int
+     output_limit_exceeded: bool
++    spawned: bool = True
+ 
+ 
+ def run_command(
+@@ -98,29 +132,186 @@ def run_command(
+     )
+ 
+ 
++def _blocked_result(stdout_path: Path, stderr_path: Path, message: str) -> CommandResult:
++    stdout_path = stdout_path.resolve()
++    stderr_path = stderr_path.resolve()
++    stdout_path.parent.mkdir(parents=True, exist_ok=True)
++    stderr_path.parent.mkdir(parents=True, exist_ok=True)
++    stdout_path.write_bytes(b"")
++    payload = message.encode("utf-8")
++    stderr_path.write_bytes(payload)
++    return CommandResult(
++        returncode=1,
++        stdout_path=str(stdout_path),
++        stderr_path=str(stderr_path),
++        stdout_bytes=0,
++        stderr_bytes=len(payload),
++        output_limit_exceeded=False,
++        spawned=False,
++    )
++
++
++def _candidate_hash(candidate: dict[str, object]) -> str:
++    payload = dict(candidate)
++    declared = str(payload.pop("candidate_sha256", ""))
++    actual = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
++    if declared != actual:
++        raise ValueError("candidate hash mismatch")
++    return actual
++
++
++def _fresh_artifact_hashes(root: Path, candidate: dict[str, object]) -> dict[str, str]:
++    artifact_lock = candidate.get("artifact_lock", [])
++    if not isinstance(artifact_lock, list):
++        raise ValueError("artifact_lock must be a list")
++    paths = [str(item.get("path", "")) for item in artifact_lock if isinstance(item, dict)]
++    if len(paths) != len(set(paths)):
++        raise ValueError("artifact paths must be unique")
++    for required in GOVERNANCE_ARTIFACTS:
++        if required not in paths:
++            raise ValueError("governance artifact missing")
++    actual = {path: sha256_file(root / path) for path in paths}
++    for item in artifact_lock:
++        if isinstance(item, dict) and item.get("existing", True):
++            path = str(item.get("path", ""))
++            if item.get("sha256") != actual[path]:
++                raise ValueError("artifact hash mismatch")
++    if candidate.get("agents_sha256") != actual["AGENTS.md"]:
++        raise ValueError("AGENTS hash mismatch")
++    return actual
++
++
++def _fresh_gate(root: Path, candidate: dict[str, object]) -> tuple[str, dict[str, str]]:
++    created = datetime.fromisoformat(str(candidate["created_at_utc"]))
++    expires = datetime.fromisoformat(str(candidate["expires_at_utc"]))
++    if created.tzinfo is None or expires.tzinfo is None:
++        raise ValueError("candidate timestamps must be timezone-aware")
++    if created.utcoffset() != timezone.utc.utcoffset(created):
++        raise ValueError("created_at_utc must be UTC")
++    if expires.utcoffset() != timezone.utc.utcoffset(expires):
++        raise ValueError("expires_at_utc must be UTC")
++    now = datetime.now(timezone.utc)
++    if not (created <= now < expires):
++        raise ValueError("candidate expired")
++    if str(root.resolve()) != candidate.get("workspace"):
++        raise ValueError("workspace mismatch")
++    candidate_hash = _candidate_hash(candidate)
++    artifact_hashes = _fresh_artifact_hashes(root, candidate)
++    return candidate_hash, artifact_hashes
++
++
++def run_governed_command(
++    command_id: str,
++    candidate_path: Path,
++    report_path: Path,
++    cwd: Path,
++    stdout_path: Path,
++    stderr_path: Path,
++    max_stdout_bytes: int,
++    max_stderr_bytes: int,
++    agents_path: Path = Path("AGENTS.md"),
++    ledger_path: Path = Path("knowledge/failure_class_ledger.json"),
++    synonyms_path: Path = Path("config/governance/root_cause_synonyms.json"),
++) -> CommandResult:
++    resolved_cwd = cwd.resolve()
++    try:
++        candidate = load_json_object((resolved_cwd / candidate_path).resolve())
++        report = load_json_object((resolved_cwd / report_path).resolve())
++        commands = candidate.get("execution_manifest", {}).get("commands", [])
++        matches = [
++            command
++            for command in commands
++            if isinstance(command, dict) and command.get("command_id") == command_id
++        ]
++        if len(matches) != 1:
++            return _blocked_result(stdout_path, stderr_path, "UNKNOWN_GOVERNED_COMMAND")
++        command = matches[0]
++        if command.get("preflight") or not command.get("via_runner"):
++            return _blocked_result(stdout_path, stderr_path, "GOVERNED_COMMAND_NOT_RUNNER_ALLOWED")
++        fresh_candidate_hash, fresh_artifact_hashes = _fresh_gate(resolved_cwd, candidate)
++        if report.get("status") != "PASS":
++            return _blocked_result(stdout_path, stderr_path, "GOVERNANCE_GATE_NOT_PASS")
++        if report.get("candidate_sha256") != fresh_candidate_hash:
++            return _blocked_result(stdout_path, stderr_path, "CANDIDATE_REPORT_MISMATCH")
++        report_hashes = report.get("artifact_hashes")
++        if not isinstance(report_hashes, dict):
++            return _blocked_result(stdout_path, stderr_path, "GOVERNANCE_REPORT_INVALID")
++        for path, digest in fresh_artifact_hashes.items():
++            if report_hashes.get(path) != digest:
++                return _blocked_result(stdout_path, stderr_path, "GOVERNANCE_ARTIFACT_STALE")
++        if report.get("validator_version") != candidate.get("validator_version"):
++            return _blocked_result(stdout_path, stderr_path, "GOVERNANCE_VERSION_MISMATCH")
++        if sha256_file((resolved_cwd / ledger_path).resolve()) != fresh_artifact_hashes[
++            "knowledge/failure_class_ledger.json"
++        ]:
++            return _blocked_result(stdout_path, stderr_path, "LEDGER_STALE")
++        if sha256_file((resolved_cwd / synonyms_path).resolve()) != fresh_artifact_hashes[
++            "config/governance/root_cause_synonyms.json"
++        ]:
++            return _blocked_result(stdout_path, stderr_path, "GOVERNANCE_ARTIFACT_STALE")
++        argv = command.get("argv")
++        if not isinstance(argv, list) or not all(isinstance(part, str) for part in argv):
++            return _blocked_result(stdout_path, stderr_path, "GOVERNED_COMMAND_ARGV_INVALID")
++        budget = candidate.get("output_budget", {})
++        if not isinstance(budget, dict):
++            return _blocked_result(stdout_path, stderr_path, "OUTPUT_BUDGET_INVALID")
++        max_stdout_bytes = int(budget.get("max_stdout_bytes", 0))
++        max_stderr_bytes = int(budget.get("max_stderr_bytes", 0))
++        if max_stdout_bytes <= 0 or max_stderr_bytes <= 0:
++            return _blocked_result(stdout_path, stderr_path, "OUTPUT_BUDGET_INVALID")
++    except Exception as error:
++        return _blocked_result(stdout_path, stderr_path, f"GOVERNED_COMMAND_PREFLIGHT_FAILED:{error}")
++    return run_command(
++        argv,
++        resolved_cwd,
++        stdout_path,
++        stderr_path,
++        max_stdout_bytes,
++        max_stderr_bytes,
++    )
++
++
+ def main(argv: list[str] | None = None) -> int:
+     parser = argparse.ArgumentParser()
+-    parser.add_argument("--command", required=True)
++    parser.add_argument("--command")
+     parser.add_argument("--cwd", required=True)
+     parser.add_argument("--stdout", required=True)
+     parser.add_argument("--stderr", required=True)
+     parser.add_argument("--max-stdout-bytes", required=True, type=int)
+     parser.add_argument("--max-stderr-bytes", required=True, type=int)
++    parser.add_argument("--command-id")
++    parser.add_argument("--candidate")
++    parser.add_argument("--report")
+     args = parser.parse_args(argv)
+-    command = json.loads(args.command)
+-    if not isinstance(command, list) or not all(isinstance(item, str) for item in command):
+-        raise ValueError("command must be a JSON string array")
+-    result = run_command(
+-        command,
+-        Path(args.cwd),
+-        Path(args.stdout),
+-        Path(args.stderr),
+-        args.max_stdout_bytes,
+-        args.max_stderr_bytes,
+-    )
++    if args.command_id:
++        if not args.candidate or not args.report:
++            raise ValueError("governed command requires candidate and report")
++        result = run_governed_command(
++            args.command_id,
++            Path(args.candidate),
++            Path(args.report),
++            Path(args.cwd),
++            Path(args.stdout),
++            Path(args.stderr),
++            args.max_stdout_bytes,
++            args.max_stderr_bytes,
++        )
++    else:
++        command = json.loads(args.command)
++        if not isinstance(command, list) or not all(isinstance(item, str) for item in command):
++            raise ValueError("command must be a JSON string array")
++        result = run_command(
++            command,
++            Path(args.cwd),
++            Path(args.stdout),
++            Path(args.stderr),
++            args.max_stdout_bytes,
++            args.max_stderr_bytes,
++        )
+     print(f"COMMAND_RESULT:{'FAIL' if result.returncode else 'PASS'}")
+     print(f"RETURN_CODE:{result.returncode}")
+     print(f"OUTPUT_LIMIT_EXCEEDED:{str(result.output_limit_exceeded).upper()}")
++    print(f"SPAWNED:{str(result.spawned).upper()}")
+     print(f"STDOUT_BYTES:{result.stdout_bytes}")
+     print(f"STDERR_BYTES:{result.stderr_bytes}")
+     return result.returncode

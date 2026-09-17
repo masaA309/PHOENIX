@@ -1,0 +1,74 @@
+TEST_LABEL=PHASE6_TARGETED
+TEST_COMMAND=C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\.venv\Scripts\python.exe -X utf8 -B -m pytest -p no:cacheprovider tests/test_historical_validation_20y.py -q -k phase6_
+RAW_STDOUT_BEGIN
+..F                                                                      [100%]
+================================== FAILURES ===================================
+_ HistoricalValidation20yTest.test_phase6_production_fill_semantics_are_safe_and_restart_idempotent _
+
+self = <tests.test_historical_validation_20y.HistoricalValidation20yTest testMethod=test_phase6_production_fill_semantics_are_safe_and_restart_idempotent>
+
+    def test_phase6_production_fill_semantics_are_safe_and_restart_idempotent(self) -> None:
+        from phoenix_core.models import OrderRequest, OrderSide, OrderStatus, OrderType
+        from phoenix_core.production_rakuten_rss_adapter import (
+            ProductionRakutenRssAdapter,
+            RakutenRssTransportHealth,
+            TRANSPORT_SOURCE_COM_LIVE,
+        )
+        from phoenix_core.rakuten_rss_adapter import RakutenRssOrderUpdate, RakutenRssSubmitAck
+        from phoenix_core.rakuten_rss_broker import RakutenRssBroker
+    
+        class ProductionObservationTransport:
+            def __init__(self) -> None:
+                self.update = RakutenRssOrderUpdate(
+                    status=OrderStatus.PARTIALLY_FILLED,
+                    fill_quantity=40,
+                    fill_price=100.0,
+                    fill_event_id="",
+                    rss_order_id=7,
+                    rss_order_number="ORDER-7",
+                )
+    
+            def health_check(self):
+                return RakutenRssTransportHealth(True, "ready", TRANSPORT_SOURCE_COM_LIVE)
+    
+            def submit_order(self, order, broker_order_id):
+                return RakutenRssSubmitAck(OrderStatus.ACCEPTED, "accepted", rss_order_id=7, rss_order_number="ORDER-7")
+    
+            def poll_order(self, broker_order_id):
+                return (self.update,)
+    
+            def cancel_order(self, broker_order_id):
+                raise AssertionError("cancel is not part of this proof")
+    
+            def executable_buy_price(self, ticker):
+                return 100.0
+    
+        transport = ProductionObservationTransport()
+        adapter = ProductionRakutenRssAdapter(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            transport=transport,
+        )
+        order = OrderRequest("7203.T", OrderSide.BUY, 100, OrderType.LIMIT, 100.0, "phase6-fill")
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = Path(directory) / "rss.json"
+            broker = RakutenRssBroker(state_file=state_file, adapter=adapter, live_enabled=True)
+            broker.submit_order(order)
+            baseline = broker.get_account_snapshot()
+            with self.assertRaisesRegex(RuntimeError, "FILL_EVENT_ID_NOT_PROVEN"):
+                broker.refresh_pending_orders()
+            self.assertEqual(baseline, broker.get_account_snapshot())
+            restarted = RakutenRssBroker(state_file=state_file, adapter=adapter, live_enabled=True)
+            with self.assertRaisesRegex(RuntimeError, "FILL_EVENT_ID_NOT_PROVEN"):
+                restarted.refresh_pending_orders()
+>           self.assertEqual(baseline, restarted.get_account_snapshot())
+E           AssertionError: Accou[137 chars]19, 3, 59, 576711, tzinfo=zoneinfo.ZoneInfo(key='Asia/Tokyo'))) != Accou[137 chars]19, 3, 59, 586712, tzinfo=zoneinfo.ZoneInfo(key='Asia/Tokyo')))
+
+tests\test_historical_validation_20y.py:2451: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_phase6_production_fill_semantics_are_safe_and_restart_idempotent
+1 failed, 2 passed, 67 deselected in 0.87s
+RAW_STDOUT_END
+RAW_STDERR_BEGIN
+RAW_STDERR_END
+RETURN_CODE=1

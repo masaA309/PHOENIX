@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 from threading import RLock
@@ -100,6 +101,7 @@ RSS_CONNECTION_CELL = "B3"
 RSS_CONNECTION_MESSAGE_CELL = "B4"
 RSS_PROBE_CELL = "XFD1"
 RSS_PROBE_FORMULA = "=RSS|'9501.T'!銘柄名称"
+RSS_EXECUTABLE_BUY_ITEM = "最良売気配値"
 RSS_CONNECTED_STATUS = "CONNECTED"
 RSS_NOT_CONNECTED_STATUS = "NOT_CONNECTED"
 REQUIRED_RSS_ADDIN_NAMES = (
@@ -605,6 +607,11 @@ class ExcelComBackend(Protocol):
     def close(self, session: ExcelTransportSession) -> None:
         raise NotImplementedError
 
+    def read_executable_buy_price(
+        self, session: ExcelTransportSession, ticker: str
+    ) -> float | None:
+        raise NotImplementedError
+
 
 @dataclass(slots=True)
 class _MockSession:
@@ -623,6 +630,7 @@ class MockExcelComBackend:
         order_transport_ready: bool = True,
         heartbeat_at: datetime | None = None,
         health_message: str = "MOCK_EXCEL_RSS_READY",
+        executable_prices: Mapping[str, float] | None = None,
     ) -> None:
         self.excel_running = excel_running
         self.workbook_present = workbook_present
@@ -649,6 +657,10 @@ class MockExcelComBackend:
         self._rss_order_status_by_id: dict[int, int] = {}
         self.rss_order_ledger_calls = 0
         self.rss_order_status_calls = 0
+        self._executable_prices = {
+            str(ticker).strip().upper(): float(price)
+            for ticker, price in (executable_prices or {}).items()
+        }
 
     def queue_updates(
         self,
@@ -773,6 +785,11 @@ class MockExcelComBackend:
 
     def close(self, session: ExcelTransportSession) -> None:
         self.closed_calls += 1
+
+    def read_executable_buy_price(
+        self, session: ExcelTransportSession, ticker: str
+    ) -> float | None:
+        return self._executable_prices.get(str(ticker).strip().upper())
 
 
 class Win32ComExcelBackend:
@@ -1091,6 +1108,24 @@ class Win32ComExcelBackend:
         values = self._read_runtime_values(session)
         return _runtime_state_from_values(values, transport_source=TRANSPORT_SOURCE_COM_LIVE)
 
+    def read_only_readiness(
+        self,
+        session: ExcelTransportSession,
+    ) -> tuple[bool, WorkbookRuntimeState | None, str]:
+        try:
+            runtime_state = self.read_runtime_state(session)
+        except Exception as error:
+            return False, None, f"Excel/RSS read-only readiness failed: {error}"
+        if not runtime_state.ready:
+            return False, runtime_state, runtime_state.message
+        try:
+            addins_ok, addins_message = self._has_required_addins(session.application)
+        except Exception as error:
+            return False, runtime_state, f"Excel/RSS read-only readiness failed: {error}"
+        if not addins_ok:
+            return False, runtime_state, addins_message
+        return True, runtime_state, addins_message
+
     def health_check(
         self,
         session: ExcelTransportSession,
@@ -1193,6 +1228,41 @@ class Win32ComExcelBackend:
             ),
         )
 
+    def _read_rss_order_list(self, session: ExcelTransportSession) -> tuple[Any, ...]:
+        try:
+            value = session.application.Run(f"'{session.workbook.Name}'!RssOrderList")
+        except Exception as error:
+            raise ExcelComError(f"Failed to read RssOrderList: {error}") from error
+        if value is None:
+            return ()
+        return tuple(value) if isinstance(value, (list, tuple)) else (value,)
+
+    def _read_rss_execution_list(self, session: ExcelTransportSession) -> tuple[Any, ...]:
+        try:
+            value = session.application.Run(f"'{session.workbook.Name}'!RssExecutionList")
+        except Exception as error:
+            raise ExcelComError(f"Failed to read RssExecutionList: {error}") from error
+        if value is None:
+            return ()
+        return tuple(value) if isinstance(value, (list, tuple)) else (value,)
+
+    def _read_rss_order_id_list(self, session: ExcelTransportSession) -> tuple[RakutenRssOrderIdEntry, ...]:
+        return self.read_rss_order_ledger(session)
+
+    def read_executable_buy_price(
+        self, session: ExcelTransportSession, ticker: str
+    ) -> float | None:
+        normalized = str(ticker).strip().upper()
+        if not normalized:
+            return None
+        formula = f"=RSS|'{normalized}'!最良売気配値"
+        try:
+            value = session.application.Evaluate(formula)
+            price = float(value)
+        except Exception:
+            return None
+        return price if math.isfinite(price) and price > 0 else None
+
     def read_rss_order_ledger(
         self,
         session: ExcelTransportSession,
@@ -1271,6 +1341,7 @@ class ProductionRakutenRssTransport:
         backend: ExcelComBackend | None = None,
         clock: Callable[[], datetime] = _now_jst,
         bridge_root: Path | str | None = None,
+        live_contract_defaults: Mapping[str, Any] | None = None,
     ) -> None:
         self._live_trading_enabled = bool(live_trading_enabled)
         self._production_transport_enabled = bool(production_transport_enabled)
@@ -1287,6 +1358,7 @@ class ProductionRakutenRssTransport:
             if bridge_root is not None
             else (PHOENIX_ROOT / "runtime" / "v7_rss_production" / "order_bridge").resolve()
         )
+        self._live_contract_defaults = dict(live_contract_defaults or {})
         self._session: ExcelTransportSession | None = None
         self._orders: dict[str, _TrackedOrder] = {}
         self._lock = RLock()
@@ -1775,6 +1847,54 @@ class ProductionRakutenRssTransport:
         )
 
     @staticmethod
+    def _select_unique_authoritative_order(
+        orders: tuple[Any, ...], *, order_number: str
+    ) -> Mapping[str, Any]:
+        matches = [row for row in orders if isinstance(row, Mapping) and str(row.get("注文番号", row.get("order_number", ""))).strip() == order_number]
+        if len(matches) != 1:
+            raise ExcelComError("PRODUCTION_FILL_SOURCE_AMBIGUOUS")
+        return matches[0]
+
+    @staticmethod
+    def _aggregate_authoritative_executions(
+        executions: tuple[Any, ...], *, order_number: str, reception_number: str
+    ) -> tuple[int, float]:
+        rows = [row for row in executions if isinstance(row, Mapping) and str(row.get("注文番号", row.get("order_number", ""))).strip() == order_number and str(row.get("受付番号", row.get("reception_number", ""))).strip() == reception_number]
+        quantity = 0
+        notional = 0.0
+        for row in rows:
+            qty = int(row.get("約定数量", row.get("fill_quantity", 0)) or 0)
+            price = float(row.get("約定価格", row.get("fill_price", 0.0)) or 0.0)
+            if qty <= 0 or not math.isfinite(price) or price <= 0:
+                raise ExcelComError("PRODUCTION_FILL_SOURCE_NOT_PROVEN")
+            quantity += qty
+            notional += qty * price
+        return quantity, (notional / quantity if quantity else 0.0)
+
+    @staticmethod
+    def _build_cumulative_order_update(
+        order: Mapping[str, Any], *, cumulative_quantity: int, cumulative_average_price: float
+    ) -> RakutenRssOrderUpdate:
+        source_order_number = str(order.get("注文番号", order.get("order_number", ""))).strip()
+        source_reception_number = str(order.get("受付番号", order.get("reception_number", ""))).strip()
+        if not source_order_number or not source_reception_number:
+            raise ExcelComError("PRODUCTION_FILL_SOURCE_NOT_PROVEN")
+        requested = int(order.get("注文数量", order.get("quantity", 0)) or 0)
+        if cumulative_quantity < 0 or requested <= 0 or cumulative_quantity > requested:
+            raise ExcelComError("PRODUCTION_FILL_QUANTITY_MISMATCH")
+        status = OrderStatus.FILLED if cumulative_quantity == requested else OrderStatus.PARTIALLY_FILLED
+        return RakutenRssOrderUpdate(
+            status=status,
+            fill_accounting_mode="CUMULATIVE_ORDER_EXECUTIONS",
+            source_order_number=source_order_number,
+            source_reception_number=source_reception_number,
+            cumulative_filled_quantity=cumulative_quantity,
+            cumulative_average_fill_price=cumulative_average_price,
+            rss_order_number=source_order_number,
+            message="Authoritative cumulative RSS execution observation.",
+        )
+
+    @staticmethod
     def _tracked_order_status(order: _TrackedOrder) -> OrderStatus:
         try:
             return OrderStatus(order.stage_state)
@@ -1817,9 +1937,36 @@ class ProductionRakutenRssTransport:
         return status
 
     def _live_contract_metadata(self, order: OrderRequest) -> dict[str, Any]:
-        metadata = dict(order.metadata or {})
-        required_names = ("account_category", "sor_category", "execution_condition")
-        missing = [name for name in required_names if str(metadata.get(name, "")).strip() == ""]
+        order_metadata = dict(order.metadata or {})
+        metadata = dict(self._live_contract_defaults)
+        metadata.update(order_metadata)
+        protective_order = order.side is OrderSide.SELL and any(
+            key in order_metadata
+            for key in (
+                "target_price",
+                "take_profit_price",
+                "stop_price",
+                "stop_loss_price",
+                "expiration",
+                "expires_at",
+                "order_category",
+            )
+        )
+        if (
+            protective_order
+            and str(order_metadata.get("execution_condition", "")).strip() == ""
+        ):
+            metadata["execution_condition"] = "\u671f\u9593\u6307\u5b9a"
+        required_names = (
+            "account_category",
+            "sor_category",
+            "execution_condition",
+        )
+        missing = [
+            name
+            for name in required_names
+            if str(metadata.get(name, "")).strip() == ""
+        ]
         if missing:
             raise ExcelComError(
                 "LIVE contract fields missing: " + ", ".join(missing)
@@ -2355,11 +2502,50 @@ class ProductionRakutenRssTransport:
                 self._com_call_count += 1
                 updates = self._backend.read_order_updates(session, broker_order_id)
                 if not updates:
-                    ledger_entry = self._find_rss_order_ledger_entry(
-                        session,
-                        record.rss_order_id,
-                        function_name=ORDER_MACRO_NAME,
-                    )
+                    if isinstance(self._backend, Win32ComExcelBackend):
+                        id_entries = self._backend._read_rss_order_id_list(session)
+                        id_matches = [entry for entry in id_entries if entry.rss_order_id == record.rss_order_id]
+                        if len(id_matches) > 1:
+                            raise ExcelComError("PRODUCTION_FILL_SOURCE_AMBIGUOUS")
+                        if len(id_matches) == 1 and id_matches[0].order_number:
+                            order_rows = self._backend._read_rss_order_list(session)
+                            source_order = self._select_unique_authoritative_order(
+                                order_rows, order_number=id_matches[0].order_number
+                            )
+                            source_reception = str(source_order.get("受付番号", source_order.get("reception_number", ""))).strip()
+                            cumulative_quantity = int(source_order.get("約定数量", source_order.get("filled_quantity", 0)) or 0)
+                            if cumulative_quantity > 0:
+                                execution_rows = self._backend._read_rss_execution_list(session)
+                                execution_quantity, average_price = self._aggregate_authoritative_executions(
+                                    execution_rows,
+                                    order_number=id_matches[0].order_number,
+                                    reception_number=source_reception,
+                                )
+                                if execution_quantity != cumulative_quantity:
+                                    raise ExcelComError("PRODUCTION_FILL_QUANTITY_MISMATCH")
+                                updates = (
+                                    self._build_cumulative_order_update(
+                                        source_order,
+                                        cumulative_quantity=cumulative_quantity,
+                                        cumulative_average_price=average_price,
+                                    ),
+                                )
+                        if updates:
+                            pass
+                        else:
+                            ledger_entry = self._find_rss_order_ledger_entry(
+                                session,
+                                record.rss_order_id,
+                                function_name=ORDER_MACRO_NAME,
+                            )
+                    else:
+                        ledger_entry = self._find_rss_order_ledger_entry(
+                            session,
+                            record.rss_order_id,
+                            function_name=ORDER_MACRO_NAME,
+                        )
+                    if updates:
+                        ledger_entry = None
                     try:
                         rss_order_status = self._observe_rss_order_status(session, record.rss_order_id)
                     except ExcelComError:
@@ -2378,7 +2564,7 @@ class ProductionRakutenRssTransport:
                         "取消済（出来無）",
                         "取消済",
                     }
-                    if rss_order_status in {1, 2, 3}:
+                    if not updates and rss_order_status in {1, 2, 3}:
                         if record.cancel_request_id:
                             if rss_order_status == 3:
                                 synthetic_status = OrderStatus.PENDING
@@ -2459,6 +2645,20 @@ class ProductionRakutenRssTransport:
                 record.updated_at = timeout_update.updated_at
                 return (timeout_update,)
         return ()
+
+    def executable_buy_price(self, ticker: str) -> float | None:
+        normalized = str(ticker).strip().upper()
+        if not normalized or self._gate_message():
+            return None
+        try:
+            health = self.health_check()
+            if not health.connected or health.transport_source != TRANSPORT_SOURCE_COM_LIVE:
+                return None
+            session = self._ensure_session()
+            self._com_call_count += 1
+            return self._backend.read_executable_buy_price(session, normalized)
+        except Exception:
+            return None
 
     def cancel_order(self, broker_order_id: str) -> RakutenRssCancelAck:
         gate_message = self._gate_message()

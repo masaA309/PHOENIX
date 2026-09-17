@@ -1,0 +1,23 @@
+POSTCALLEE_DEFINITION_AUDIT
+POSTCALLEE_DEFINED:phoenix_core/historical_validation_20y.py:314:D1EntryDecision:class D1EntryDecision:
+POSTCALLEE_DEFINED:phoenix_core/strategy_execution_runtime.py:43:StrategyExecutionAdapter.account_snapshot:def account_snapshot(self) -> AccountSnapshot: ...
+POSTCALLEE_DEFINED:phoenix_core/rakuten_rss_broker.py:298:RakutenRssBroker.get_account_snapshot:def get_account_snapshot(self) -> AccountSnapshot:
+POSTCALLEE_DEFINED:phoenix_core/rakuten_rss_broker.py:319:RakutenRssBroker.submit_order:def submit_order(self, order: OrderRequest) -> OrderResult:
+POSTCALLEE_DEFINED:phoenix_core/rakuten_rss_broker.py:498:RakutenRssBroker.refresh_pending_orders:def refresh_pending_orders(
+POSTCALLEE_DEFINED:phoenix_core/rakuten_rss_broker.py:1204:RakutenRssBroker._save_state:def _save_state(self) -> None:
+POSTCALLEE_DEFINED:phoenix_core/rakuten_rss_adapter.py:71:RakutenRssAdapter.poll_order:def poll_order(self, broker_order_id: str) -> tuple[RakutenRssOrderUpdate, ...]:
+POSTCALLEE_DEFINED:phoenix_core/production_rakuten_rss_adapter.py:218:ProductionRakutenRssAdapter.poll_order:def poll_order(self, broker_order_id: str) -> tuple[RakutenRssOrderUpdate, ...]:
+POSTCALLEE_DEFINED:phoenix_core/production_rakuten_rss_transport.py:2361:ProductionRakutenRssTransport.poll_order:def poll_order(self, broker_order_id: str) -> tuple[RakutenRssOrderUpdate, ...]:
+POSTCALLEE_DEFINED:phoenix_core/production_rakuten_rss_transport.py:1192:Win32ComExcelBackend.read_order_updates:def read_order_updates(
+POSTCALLEE_DEFINED:phoenix_core/rakuten_rss_adapter.py:77:RakutenRssAdapter.executable_buy_price:def executable_buy_price(self, ticker: str) -> float | None:
+POSTCALLEE_DEFINED:phoenix_core/rakuten_rss_adapter.py:207:MockRakutenRssAdapter.executable_buy_price:def executable_buy_price(self, ticker: str) -> float | None:
+POSTCALLEE_DEFINED:phoenix_core/rakuten_rss_broker.py:241:RakutenRssBroker.executable_buy_price:def executable_buy_price(self, ticker: str) -> float | None:
+POSTCALLEE_DEFINED:phoenix_core/production_rakuten_rss_adapter.py:235:ProductionRakutenRssAdapter.executable_buy_price:def executable_buy_price(self, ticker: str) -> float | None:
+POSTCALLEE_DEFINED:phoenix_core/production_rakuten_rss_transport.py:2512:ProductionRakutenRssTransport.executable_buy_price:def executable_buy_price(self, ticker: str) -> float | None:
+POSTCALLEE_DEFINED:phoenix_core/production_rakuten_rss_transport.py:1231:Win32ComExcelBackend.read_executable_buy_price:def read_executable_buy_price(
+POSTCALLEE_DEFINED:phoenix_core/strategy_execution_runtime.py:223:RakutenLiveStrategyExecutionAdapter.account_snapshot:def account_snapshot(self) -> AccountSnapshot:
+POSTCALLEE_DEFINED:phoenix_core/strategy_execution_runtime.py:226:RakutenLiveStrategyExecutionAdapter.executable_buy_price:def executable_buy_price(self, ticker: str, execution_date: pd.Timestamp) -> float | None:
+POSTCALLEE_DEFINED:phoenix_core/strategy_execution_runtime.py:229:RakutenLiveStrategyExecutionAdapter.submit_entry:def submit_entry(self, decision: D1EntryDecision, client_order_id: str) -> OrderResult:
+POSTCALLEE_DEFINED:phoenix_core/strategy_execution_runtime.py:262:create_rakuten_live_execution_adapter:def create_rakuten_live_execution_adapter(
+POSTCALLEE_DEFINITION_RESULT=PASS
+RETURN_CODE=0

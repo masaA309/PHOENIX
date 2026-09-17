@@ -1,0 +1,37 @@
+.........................................F.........................      [100%]
+================================== FAILURES ===================================
+_ HistoricalValidation20yTest.test_phase5_partial_fill_updates_strategy_and_protection_from_confirmed_cumulative_fill _
+
+self = <tests.test_historical_validation_20y.HistoricalValidation20yTest testMethod=test_phase5_partial_fill_updates_strategy_and_protection_from_confirmed_cumulative_fill>
+
+    def test_phase5_partial_fill_updates_strategy_and_protection_from_confirmed_cumulative_fill(self) -> None:
+        from phoenix_core.protective_orders import ProtectiveOrderLedger, RECONCILING
+        ledger = ProtectiveOrderLedger()
+        ledger.sync_confirmed_buy_fill("7203.T", 40, 100.0, 120.0, 90.0, buy_order_id="RSS-1")
+        record = ledger.sync_confirmed_buy_fill("7203.T", 100, 101.0, 121.0, 91.0, buy_order_id="RSS-1")
+>       self.assertEqual((100, RECONCILING), (record.quantity, record.protective_order_state))
+E       AssertionError: Tuples differ: (100, 'RECONCILING') != (100, 'PROTECTING')
+E       
+E       First differing element 1:
+E       'RECONCILING'
+E       'PROTECTING'
+E       
+E       - (100, 'RECONCILING')
+E       ?           ^^^^^
+E       
+E       + (100, 'PROTECTING')
+E       ?        + ++  ^
+
+tests\test_historical_validation_20y.py:2376: AssertionError
+============================== warnings summary ===============================
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_cache_hit_fetches_only_missing_range
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_cached_range_skips_network_when_covered
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_legacy_price_date_cache_is_restored_and_fake_row_dropped
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_legacy_tuple_cache_is_migrated_to_five_columns
+  C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\phoenix_core\historical_validation_20y.py:599: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`).Please use a specific unit instead.
+    date_values = np.full(row_count, np.datetime64("NaT"), dtype="datetime64[ns]")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_phase5_partial_fill_updates_strategy_and_protection_from_confirmed_cumulative_fill
+1 failed, 66 passed, 4 warnings in 112.90s (0:01:52)

@@ -119,6 +119,25 @@ def create_broker(
 
     if broker_type == "rakuten_rss":
         if transport_mode == "production":
+            live_order_contract = broker_config.get("live_order_contract", {})
+            if not isinstance(live_order_contract, dict):
+                raise ValueError("broker.live_order_contract must be an object")
+            if production_live_fire_armed:
+                required_contract_fields = (
+                    "account_category",
+                    "sor_category",
+                    "execution_condition",
+                )
+                missing_contract_fields = [
+                    name
+                    for name in required_contract_fields
+                    if str(live_order_contract.get(name, "")).strip() == ""
+                ]
+                if missing_contract_fields:
+                    raise ValueError(
+                        "broker.live_order_contract missing required fields: "
+                        + ", ".join(missing_contract_fields)
+                    )
             return RakutenRssBroker(
                 initial_cash_yen=float(
                     broker_config.get("initial_cash_yen", 300_000)
@@ -138,6 +157,7 @@ def create_broker(
                         timeout_seconds=int(
                             broker_config.get("timeout_seconds", 300)
                         ),
+                        live_contract_defaults=live_order_contract,
                     ),
                 ),
                 live_enabled=live_enabled,

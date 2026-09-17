@@ -1,0 +1,3517 @@
+
+
+===== FILE: phoenix_watchdog.py =====
+
+--- LINES 1-138 ---
+000001: from __future__ import annotations
+000002: 
+000003: from dataclasses import dataclass
+000004: from datetime import datetime
+000005: import argparse
+000006: import json
+000007: import os
+000008: from pathlib import Path
+000009: import signal
+000010: import subprocess
+000011: import sys
+000012: import threading
+000013: import time
+000014: from types import FrameType
+000015: from typing import Any
+000016: from uuid import uuid4
+000017: from zoneinfo import ZoneInfo
+000018: 
+000019: from phoenix_disaster_recovery import (
+000020:     DEFAULT_MAX_RECOVERY_ATTEMPTS,
+000021:     inspect_recovery_state_for_watchdog,
+000022: )
+000023: from phoenix_heartbeat import (
+000024:     HEARTBEAT_TIMEOUT_SECONDS,
+000025:     HeartbeatEventLogger,
+000026:     HeartbeatValidation,
+000027:     inspect_heartbeat,
+000028: )
+000029: from phoenix_core.production_rakuten_rss_transport import ProductionRakutenRssTransport
+000030: 
+000031: 
+000032: ROOT_DIR = Path(__file__).resolve().parent
+000033: LOG_DIR = ROOT_DIR / "logs"
+000034: TARGET_SCRIPT = ROOT_DIR / "run_phoenix.py"
+000035: LOCK_FILE = LOG_DIR / "phoenix_watchdog.lock"
+000036: HEARTBEAT_PATH = ROOT_DIR / "runtime" / "guardian" / "heartbeat.json"
+000037: RECOVERY_STATE_PATH = ROOT_DIR / "runtime" / "guardian" / "recovery_state.json"
+000038: 
+000039: MODE = "PAPER"
+000040: ORDERS_SUBMITTED = 0
+000041: MAX_RESTARTS_HARD_LIMIT = 10
+000042: FILE_READY_HEARTBEAT_SECONDS = 30.0
+000043: STEP44_READY_MAX_AGE_SECONDS = 90.0
+000044: JST = ZoneInfo("Asia/Tokyo")
+000045: 
+000046: EXIT_OK = 0
+000047: EXIT_RESTART_LIMIT = 1
+000048: EXIT_CONFIGURATION_ERROR = 2
+000049: EXIT_ALREADY_RUNNING = 3
+000050: EXIT_HEARTBEAT_FAILURE = 70
+000051: 
+000052: 
+000053: class WatchdogError(RuntimeError):
+000054:     """Base error for fail-safe WatchDog shutdowns."""
+000055: 
+000056: 
+000057: class AlreadyRunningError(WatchdogError):
+000058:     """Raised when another WatchDog owns the lock."""
+000059: 
+000060: 
+000061: class UnsafeLockError(WatchdogError):
+000062:     """Raised when a lock cannot safely be classified as stale."""
+000063: 
+000064: 
+000065: @dataclass(frozen=True)
+000066: class MonitorConfig:
+000067:     max_restarts: int = 3
+000068:     backoff_base_seconds: float = 5.0
+000069:     backoff_max_seconds: float = 60.0
+000070:     startup_grace_seconds: float = 2.0
+000071:     poll_seconds: float = 1.0
+000072:     termination_grace_seconds: float = 10.0
+000073:     stale_lock_seconds: float = 6 * 60 * 60
+000074:     heartbeat_timeout_seconds: float = HEARTBEAT_TIMEOUT_SECONDS
+000075: 
+000076:     def __post_init__(self) -> None:
+000077:         if not 0 <= self.max_restarts <= MAX_RESTARTS_HARD_LIMIT:
+000078:             raise ValueError(
+000079:                 "max_restarts must be between 0 and "
+000080:                 f"{MAX_RESTARTS_HARD_LIMIT}"
+000081:             )
+000082:         if self.backoff_base_seconds < 0:
+000083:             raise ValueError("backoff_base_seconds must be non-negative")
+000084:         if self.backoff_max_seconds < self.backoff_base_seconds:
+000085:             raise ValueError(
+000086:                 "backoff_max_seconds must be greater than or equal to "
+000087:                 "backoff_base_seconds"
+000088:             )
+000089:         if self.startup_grace_seconds < 0:
+000090:             raise ValueError("startup_grace_seconds must be non-negative")
+000091:         if self.poll_seconds <= 0:
+000092:             raise ValueError("poll_seconds must be positive")
+000093:         if self.termination_grace_seconds <= 0:
+000094:             raise ValueError("termination_grace_seconds must be positive")
+000095:         if self.stale_lock_seconds <= 0:
+000096:             raise ValueError("stale_lock_seconds must be positive")
+000097:         if self.heartbeat_timeout_seconds <= 0:
+000098:             raise ValueError("heartbeat_timeout_seconds must be positive")
+000099: 
+000100:     def backoff_seconds(self, restart_number: int) -> float:
+000101:         if restart_number < 1:
+000102:             raise ValueError("restart_number must be at least 1")
+000103:         return min(
+000104:             self.backoff_max_seconds,
+000105:             self.backoff_base_seconds * (2 ** (restart_number - 1)),
+000106:         )
+000107: 
+000108: 
+000109: class EventLogger:
+000110:     """Append-only JSON Lines and text logging under PHOENIX/logs."""
+000111: 
+000112:     def __init__(self, log_dir: Path) -> None:
+000113:         self.log_dir = Path(log_dir)
+000114:         self.log_dir.mkdir(parents=True, exist_ok=True)
+000115:         self._write_lock = threading.Lock()
+000116: 
+000117:     @property
+000118:     def text_path(self) -> Path:
+000119:         return self.log_dir / f"phoenix_watchdog_{datetime.now():%Y%m%d}.txt"
+000120: 
+000121:     @property
+000122:     def json_path(self) -> Path:
+000123:         return self.log_dir / f"phoenix_watchdog_{datetime.now():%Y%m%d}.jsonl"
+000124: 
+000125:     def emit(self, event: str, **details: Any) -> None:
+000126:         now = datetime.now().astimezone()
+000127:         payload: dict[str, Any] = {
+000128:             "timestamp": now.isoformat(timespec="seconds"),
+000129:             "event": event,
+000130:             "mode": MODE,
+000131:             "orders_submitted": ORDERS_SUBMITTED,
+000132:         }
+000133:         payload.update(details)
+000134:         json_line = json.dumps(
+000135:             payload,
+000136:             ensure_ascii=False,
+000137:             sort_keys=True,
+000138:             default=str,
+
+--- LINES 278-855 ---
+000278:             age_seconds=round(age_seconds, 3),
+000279:             lock_file=str(self.path),
+000280:             owner_pid=pid,
+000281:         )
+000282:         return True
+000283: 
+000284:     def release(self) -> None:
+000285:         if not self.acquired:
+000286:             return
+000287:         try:
+000288:             payload = json.loads(self.path.read_text(encoding="utf-8"))
+000289:         except (FileNotFoundError, OSError, json.JSONDecodeError):
+000290:             self.acquired = False
+000291:             return
+000292: 
+000293:         if payload.get("token") != self.token:
+000294:             self.logger.emit(
+000295:                 "LOCK_RELEASE_SKIPPED",
+000296:                 reason="ownership_changed",
+000297:                 lock_file=str(self.path),
+000298:             )
+000299:             self.acquired = False
+000300:             return
+000301: 
+000302:         try:
+000303:             self.path.unlink()
+000304:         except FileNotFoundError:
+000305:             pass
+000306:         self.acquired = False
+000307:         self.logger.emit("LOCK_RELEASED", lock_file=str(self.path))
+000308: 
+000309: 
+000310: class PhoenixWatchdog:
+000311:     def __init__(
+000312:         self,
+000313:         target_script: Path,
+000314:         root_dir: Path,
+000315:         log_dir: Path,
+000316:         lock_file: Path,
+000317:         config: MonitorConfig | None = None,
+000318:         heartbeat_path: Path | None = None,
+000319:         recovery_state_path: Path | None = None,
+000320:         enable_file_ready_heartbeat: bool = False,
+000321:         file_ready_transport: Any | None = None,
+000322:         file_ready_heartbeat_seconds: float = FILE_READY_HEARTBEAT_SECONDS,
+000323:         step44_audit_path: Path | None = None,
+000324:     ) -> None:
+000325:         self.target_script = Path(target_script).resolve()
+000326:         self.root_dir = Path(root_dir).resolve()
+000327:         self.config = config or MonitorConfig()
+000328:         self.logger = EventLogger(Path(log_dir))
+000329:         self.heartbeat_logger = HeartbeatEventLogger(Path(log_dir))
+000330:         self.heartbeat_path = Path(
+000331:             heartbeat_path
+000332:             or (self.root_dir / "runtime" / "guardian" / "heartbeat.json")
+000333:         )
+000334:         self.recovery_state_path = Path(
+000335:             recovery_state_path
+000336:             or (self.root_dir / "runtime" / "guardian" / "recovery_state.json")
+000337:         )
+000338:         self.enable_file_ready_heartbeat = bool(enable_file_ready_heartbeat)
+000339:         self.file_ready_heartbeat_seconds = float(file_ready_heartbeat_seconds)
+000340:         if self.file_ready_heartbeat_seconds <= 0:
+000341:             raise ValueError("file_ready_heartbeat_seconds must be positive")
+000342:         self._step44_audit_path = Path(
+000343:             step44_audit_path
+000344:             or (self.root_dir / "reports" / "v7_vba_bridge_step44_audit.jsonl")
+000345:         )
+000346:         self._file_ready_transport = file_ready_transport
+000347:         if self.enable_file_ready_heartbeat and self._file_ready_transport is None:
+000348:             self._file_ready_transport = ProductionRakutenRssTransport()
+000349:         self.lock = ProcessLock(
+000350:             Path(lock_file),
+000351:             self.logger,
+000352:             self.config.stale_lock_seconds,
+000353:         )
+000354:         self.stop_event = threading.Event()
+000355:         self._heartbeat_stop_event = threading.Event()
+000356:         self._heartbeat_thread: threading.Thread | None = None
+000357:         self.stop_reason = "requested"
+000358:         self._process: subprocess.Popen[Any] | None = None
+000359:         self._process_lock = threading.Lock()
+000360:         self._last_heartbeat_failure: HeartbeatValidation | None = None
+000361: 
+000362:     @property
+000363:     def child_pid(self) -> int | None:
+000364:         with self._process_lock:
+000365:             return None if self._process is None else self._process.pid
+000366: 
+000367:     def request_stop(self, reason: str = "requested") -> None:
+000368:         self.stop_reason = reason
+000369:         self.stop_event.set()
+000370:         self._heartbeat_stop_event.set()
+000371: 
+000372:     @staticmethod
+000373:     def _parse_step44_timestamp(value: str) -> datetime | None:
+000374:         text = str(value).strip()
+000375:         if not text:
+000376:             return None
+000377:         try:
+000378:             parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+000379:         except ValueError:
+000380:             return None
+000381:         if parsed.tzinfo is None:
+000382:             parsed = parsed.replace(tzinfo=JST)
+000383:         return parsed.astimezone(JST)
+000384: 
+000385:     def _step44_consumer_ready(self) -> tuple[bool, str]:
+000386:         path = self._step44_audit_path
+000387:         if not path.is_file():
+000388:             return False, f"Step44 audit missing: {path}"
+000389: 
+000390:         try:
+000391:             lines = path.read_text(encoding="utf-8").splitlines()
+000392:         except OSError as error:
+000393:             return False, f"Step44 audit unreadable: {error}"
+000394: 
+000395:         for raw_line in reversed(lines):
+000396:             line = raw_line.strip()
+000397:             if not line:
+000398:                 continue
+000399:             try:
+000400:                 record = json.loads(line)
+000401:             except json.JSONDecodeError:
+000402:                 continue
+000403:             if str(record.get("kind", "")).strip().lower() != "summary":
+000404:                 continue
+000405: 
+000406:             result = str(record.get("result", "")).strip().upper()
+000407:             if result != "READY":
+000408:                 return False, f"Step44 summary not READY: {result or 'missing'}"
+000409: 
+000410:             recorded_at_text = str(record.get("recorded_at", "")).strip()
+000411:             recorded_at = self._parse_step44_timestamp(recorded_at_text)
+000412:             if recorded_at is None:
+000413:                 return False, (
+000414:                     "Step44 summary has invalid recorded_at: "
+000415:                     f"{recorded_at_text!r}"
+000416:                 )
+000417: 
+000418:             now = datetime.now(JST)
+000419:             age_seconds = (now - recorded_at).total_seconds()
+000420:             if age_seconds < -5:
+000421:                 return False, (
+000422:                     "Step44 summary timestamp is in the future: "
+000423:                     f"{recorded_at_text!r}"
+000424:                 )
+000425:             if age_seconds > STEP44_READY_MAX_AGE_SECONDS:
+000426:                 return False, (
+000427:                     "Step44 summary is stale "
+000428:                     f"({int(age_seconds)}s > {int(STEP44_READY_MAX_AGE_SECONDS)}s)"
+000429:                 )
+000430:             return True, f"Step44 READY summary fresh ({int(age_seconds)}s)"
+000431: 
+000432:         return False, f"Step44 READY summary not found: {path}"
+000433: 
+000434:     def _publish_file_ready_heartbeat_once(self) -> bool:
+000435:         if not self.enable_file_ready_heartbeat:
+000436:             return False
+000437:         if self._file_ready_transport is None:
+000438:             self.logger.emit(
+000439:                 "FILE_READY_HEARTBEAT_SKIPPED",
+000440:                 reason="file_ready_transport_unavailable",
+000441:             )
+000442:             return False
+000443: 
+000444:         consumer_ready, consumer_message = self._step44_consumer_ready()
+000445:         if not consumer_ready:
+000446:             self.logger.emit(
+000447:                 "FILE_READY_HEARTBEAT_SKIPPED",
+000448:                 consumer_ready=False,
+000449:                 reason=consumer_message,
+000450:             )
+000451:             return False
+000452: 
+000453:         try:
+000454:             health = self._file_ready_transport.publish_file_ready_heartbeat()
+000455:         except Exception as error:
+000456:             self.logger.emit(
+000457:                 "FILE_READY_HEARTBEAT_BLOCKED",
+000458:                 consumer_message=consumer_message,
+000459:                 reason=str(error),
+000460:             )
+000461:             return False
+000462: 
+000463:         if health.connected:
+000464:             self.logger.emit(
+000465:                 "FILE_READY_HEARTBEAT_PUBLISHED",
+000466:                 consumer_message=consumer_message,
+000467:                 transport_message=health.message,
+000468:                 transport_source=health.transport_source,
+000469:             )
+000470:             return True
+000471: 
+000472:         self.logger.emit(
+000473:             "FILE_READY_HEARTBEAT_BLOCKED",
+000474:             consumer_message=consumer_message,
+000475:             reason=health.message,
+000476:             transport_source=health.transport_source,
+000477:         )
+000478:         return False
+000479: 
+000480:     def _start_file_ready_heartbeat_thread(self) -> None:
+000481:         if not self.enable_file_ready_heartbeat:
+000482:             return
+000483:         if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
+000484:             return
+000485:         self._heartbeat_stop_event.clear()
+000486:         self._heartbeat_thread = threading.Thread(
+000487:             target=self._run_file_ready_heartbeat_loop,
+000488:             name="phoenix-file-ready-heartbeat",
+000489:             daemon=True,
+000490:         )
+000491:         self._heartbeat_thread.start()
+000492:         self.logger.emit(
+000493:             "FILE_READY_HEARTBEAT_OWNER_STARTED",
+000494:             interval_seconds=self.file_ready_heartbeat_seconds,
+000495:         )
+000496: 
+000497:     def _stop_file_ready_heartbeat_thread(self) -> None:
+000498:         self._heartbeat_stop_event.set()
+000499:         thread = self._heartbeat_thread
+000500:         if thread is None:
+000501:             return
+000502:         if thread.is_alive():
+000503:             thread.join(timeout=min(1.0, self.file_ready_heartbeat_seconds))
+000504:         self._heartbeat_thread = None
+000505: 
+000506:     def _run_file_ready_heartbeat_loop(self) -> None:
+000507:         while not self._heartbeat_stop_event.is_set():
+000508:             self._publish_file_ready_heartbeat_once()
+000509:             if self._heartbeat_stop_event.wait(self.file_ready_heartbeat_seconds):
+000510:                 break
+000511: 
+000512:     def run(self) -> int:
+000513:         if not self.target_script.is_file():
+000514:             self.logger.emit(
+000515:                 "CONFIGURATION_ERROR",
+000516:                 reason="target_not_found",
+000517:                 target=str(self.target_script),
+000518:             )
+000519:             return EXIT_CONFIGURATION_ERROR
+000520: 
+000521:         self.logger.emit(
+000522:             "WATCHDOG_STARTING",
+000523:             max_restarts=self.config.max_restarts,
+000524:             target=str(self.target_script),
+000525:         )
+000526:         self.logger.emit(
+000527:             "PAPER_MODE_FIXED",
+000528:             live_trading=False,
+000529:             order_capability=False,
+000530:         )
+000531: 
+000532:         try:
+000533:             self.lock.acquire()
+000534:         except (AlreadyRunningError, UnsafeLockError) as error:
+000535:             self.logger.emit("WATCHDOG_START_BLOCKED", reason=str(error))
+000536:             return EXIT_ALREADY_RUNNING
+000537: 
+000538:         exit_code = EXIT_OK
+000539:         try:
+000540:             self._start_file_ready_heartbeat_thread()
+000541:             exit_code = self._monitor()
+000542:             return exit_code
+000543:         finally:
+000544:             self._stop_file_ready_heartbeat_thread()
+000545:             self._safe_stop_child()
+000546:             self.lock.release()
+000547:             self.logger.emit(
+000548:                 "WATCHDOG_STOPPED",
+000549:                 exit_code=exit_code,
+000550:                 reason=self.stop_reason if self.stop_event.is_set() else "completed",
+000551:                 restarts_are_bounded=True,
+000552:             )
+000553: 
+000554:     def _monitor(self) -> int:
+000555:         restart_count = 0
+000556:         while not self.stop_event.is_set():
+000557:             exit_code = self._launch_and_monitor(
+000558:                 restart_attempt=restart_count,
+000559:             )
+000560:             if self.stop_event.is_set():
+000561:                 self.logger.emit("SAFE_STOP", reason=self.stop_reason)
+000562:                 return EXIT_OK
+000563:             heartbeat_failure = self._last_heartbeat_failure
+000564:             if (
+000565:                 heartbeat_failure is not None
+000566:                 and heartbeat_failure.restart_suppressed
+000567:             ):
+000568:                 self.logger.emit(
+000569:                     "HEARTBEAT_SAFETY_STOP",
+000570:                     reason=heartbeat_failure.reason,
+000571:                     restart_suppressed=True,
+000572:                 )
+000573:                 return EXIT_CONFIGURATION_ERROR
+000574:             if exit_code == 0:
+000575:                 self.logger.emit("PROCESS_EXITED", exit_code=0)
+000576:                 return EXIT_OK
+000577:             if exit_code == EXIT_CONFIGURATION_ERROR:
+000578:                 self.logger.emit(
+000579:                     "REPOSITORY_GUARDIAN_BLOCKED",
+000580:                     exit_code=exit_code,
+000581:                     reason="startup_safety_gate_exit_2",
+000582:                     restart_suppressed=True,
+000583:                 )
+000584:                 self.heartbeat_logger.emit(
+000585:                     "STARTUP_GATE_BLOCKED",
+000586:                     status="BLOCKED",
+000587:                     reason="STARTUP_SAFETY_GATE_EXIT_2",
+000588:                     pid=None,
+000589:                     sequence=None,
+000590:                     heartbeat_age_seconds=None,
+000591:                     repository_root=str(self.root_dir),
+000592:                     action="SAFE_STOP",
+000593:                     restart_attempt=restart_count,
+000594:                 )
+000595:                 return EXIT_CONFIGURATION_ERROR
+000596: 
+000597:             if self.target_script.name.casefold() == "run_phoenix.py":
+000598:                 recovery_gate = inspect_recovery_state_for_watchdog(
+000599:                     self.recovery_state_path,
+000600:                     expected_repository_root=self.root_dir,
+000601:                     max_recovery_attempts=min(
+000602:                         DEFAULT_MAX_RECOVERY_ATTEMPTS,
+000603:                         max(1, self.config.max_restarts),
+000604:                     ),
+000605:                 )
+000606:                 self.logger.emit(
+000607:                     "DISASTER_RECOVERY_STATE_CHECKED",
+000608:                     recovery_status=recovery_gate.status,
+000609:                     reason=recovery_gate.reason,
+000610:                     recovery_attempt=recovery_gate.recovery_attempt,
+000611:                     restart_allowed=recovery_gate.restart_allowed,
+000612:                 )
+000613:                 if not recovery_gate.restart_allowed:
+000614:                     self.logger.emit(
+000615:                         "DISASTER_RECOVERY_RESTART_BLOCKED",
+000616:                         reason=recovery_gate.reason,
+000617:                         restart_suppressed=True,
+000618:                     )
+000619:                     return EXIT_CONFIGURATION_ERROR
+000620: 
+000621:             self.logger.emit(
+000622:                 "ABNORMAL_EXIT",
+000623:                 exit_code=exit_code,
+000624:                 restarts_used=restart_count,
+000625:             )
+000626:             if restart_count >= self.config.max_restarts:
+000627:                 self.logger.emit(
+000628:                     "RESTART_LIMIT_REACHED",
+000629:                     max_restarts=self.config.max_restarts,
+000630:                 )
+000631:                 if heartbeat_failure is not None:
+000632:                     self.heartbeat_logger.emit(
+000633:                         "HEARTBEAT_RESTART_LIMIT_REACHED",
+000634:                         status="FAILED",
+000635:                         reason=heartbeat_failure.reason,
+000636:                         pid=heartbeat_failure.pid,
+000637:                         sequence=heartbeat_failure.sequence,
+000638:                         heartbeat_age_seconds=(
+000639:                             heartbeat_failure.heartbeat_age_seconds
+000640:                         ),
+000641:                         mode=heartbeat_failure.mode,
+000642:                         orders_submitted=heartbeat_failure.orders_submitted,
+000643:                         repository_root=heartbeat_failure.repository_root,
+000644:                         action="SAFE_STOP",
+000645:                         restart_attempt=restart_count,
+000646:                     )
+000647:                 return EXIT_RESTART_LIMIT
+000648: 
+000649:             restart_number = restart_count + 1
+000650:             delay = self.config.backoff_seconds(restart_number)
+000651:             self.logger.emit(
+000652:                 "RESTART_SCHEDULED",
+000653:                 backoff_seconds=delay,
+000654:                 restart_number=restart_number,
+000655:             )
+000656:             if heartbeat_failure is not None:
+000657:                 self.heartbeat_logger.emit(
+000658:                     "HEARTBEAT_RESTART_SCHEDULED",
+000659:                     status="RESTARTING",
+000660:                     reason=heartbeat_failure.reason,
+000661:                     pid=heartbeat_failure.pid,
+000662:                     sequence=heartbeat_failure.sequence,
+000663:                     heartbeat_age_seconds=(
+000664:                         heartbeat_failure.heartbeat_age_seconds
+000665:                     ),
+000666:                     mode=heartbeat_failure.mode,
+000667:                     orders_submitted=heartbeat_failure.orders_submitted,
+000668:                     repository_root=heartbeat_failure.repository_root,
+000669:                     action="RESTART",
+000670:                     restart_attempt=restart_number,
+000671:                 )
+000672:             if self.stop_event.wait(delay):
+000673:                 self.logger.emit("SAFE_STOP", reason=self.stop_reason)
+000674:                 return EXIT_OK
+000675:             restart_count = restart_number
+000676: 
+000677:         self.logger.emit("SAFE_STOP", reason=self.stop_reason)
+000678:         return EXIT_OK
+000679: 
+000680:     def _launch_and_monitor(self, restart_attempt: int = 0) -> int:
+000681:         self._last_heartbeat_failure = None
+000682:         command = [
+000683:             sys.executable,
+000684:             "-X",
+000685:             "utf8",
+000686:             str(self.target_script),
+000687:         ]
+000688:         environment = os.environ.copy()
+000689:         environment.update(
+000690:             {
+000691:                 "PYTHONIOENCODING": "utf-8",
+000692:                 "PYTHONUTF8": "1",
+000693:                 "PHOENIX_MODE": MODE,
+000694:                 "PHOENIX_EXECUTION_MODE": MODE,
+000695:                 "PHOENIX_LIVE_TRADING": "0",
+000696:                 "PHOENIX_ALLOW_LIVE_TRADING": "0",
+000697:                 "PHOENIX_WATCHDOG_RESTART_ATTEMPT": str(restart_attempt),
+000698:             }
+000699:         )
+000700:         popen_options: dict[str, Any] = {
+000701:             "cwd": self.root_dir,
+000702:             "env": environment,
+000703:         }
+000704:         if os.name == "nt":
+000705:             popen_options["creationflags"] = getattr(
+000706:                 subprocess,
+000707:                 "CREATE_NEW_PROCESS_GROUP",
+000708:                 0,
+000709:             )
+000710:         else:
+000711:             popen_options["start_new_session"] = True
+000712: 
+000713:         try:
+000714:             process = subprocess.Popen(command, **popen_options)
+000715:         except OSError as error:
+000716:             self.logger.emit("PROCESS_START_FAILED", reason=str(error))
+000717:             return 127
+000718: 
+000719:         with self._process_lock:
+000720:             self._process = process
+000721:         self.logger.emit("PROCESS_LAUNCHED", pid=process.pid)
+000722: 
+000723:         startup_deadline = time.monotonic() + self.config.startup_grace_seconds
+000724:         while time.monotonic() < startup_deadline:
+000725:             exit_code = process.poll()
+000726:             if exit_code is not None:
+000727:                 self._clear_process(process)
+000728:                 return int(exit_code)
+000729:             remaining = max(0.0, startup_deadline - time.monotonic())
+000730:             if self.stop_event.wait(min(self.config.poll_seconds, remaining)):
+000731:                 self._safe_stop_child()
+000732:                 return 0
+000733: 
+000734:         exit_code = process.poll()
+000735:         if exit_code is not None:
+000736:             self._clear_process(process)
+000737:             return int(exit_code)
+000738: 
+000739:         self.logger.emit(
+000740:             "PROCESS_STARTED",
+000741:             pid=process.pid,
+000742:             startup_grace_seconds=self.config.startup_grace_seconds,
+000743:         )
+000744:         heartbeat_deadline = (
+000745:             time.monotonic() + self.config.heartbeat_timeout_seconds
+000746:         )
+000747:         heartbeat_seen = False
+000748:         previous_sequence: int | None = None
+000749:         previous_timestamp: datetime | None = None
+000750:         while not self.stop_event.wait(self.config.poll_seconds):
+000751:             exit_code = process.poll()
+000752:             if exit_code is not None:
+000753:                 self._clear_process(process)
+000754:                 return int(exit_code)
+000755: 
+000756:             heartbeat = inspect_heartbeat(
+000757:                 self.heartbeat_path,
+000758:                 expected_pid=process.pid,
+000759:                 expected_repository_root=self.root_dir,
+000760:                 timeout_seconds=self.config.heartbeat_timeout_seconds,
+000761:                 previous_sequence=previous_sequence,
+000762:                 previous_timestamp=previous_timestamp,
+000763:             )
+000764:             if heartbeat.healthy:
+000765:                 heartbeat_seen = True
+000766:                 if heartbeat.sequence != previous_sequence:
+000767:                     self.heartbeat_logger.emit(
+000768:                         "HEARTBEAT_HEALTHY",
+000769:                         status="HEALTHY",
+000770:                         reason=heartbeat.reason,
+000771:                         pid=heartbeat.pid,
+000772:                         sequence=heartbeat.sequence,
+000773:                         heartbeat_age_seconds=(
+000774:                             heartbeat.heartbeat_age_seconds
+000775:                         ),
+000776:                         mode=heartbeat.mode,
+000777:                         orders_submitted=heartbeat.orders_submitted,
+000778:                         repository_root=heartbeat.repository_root,
+000779:                         action="MONITOR",
+000780:                         restart_attempt=restart_attempt,
+000781:                     )
+000782:                 previous_sequence = heartbeat.sequence
+000783:                 previous_timestamp = heartbeat.timestamp
+000784:                 continue
+000785: 
+000786:             before_deadline = time.monotonic() < heartbeat_deadline
+000787:             belongs_to_child = heartbeat.pid == process.pid
+000788:             if not heartbeat_seen and not belongs_to_child and before_deadline:
+000789:                 continue
+000790: 
+000791:             self._last_heartbeat_failure = heartbeat
+000792:             safety_stop = heartbeat.restart_suppressed
+000793:             event = (
+000794:                 "HEARTBEAT_LOST"
+000795:                 if heartbeat.reason in {"HEARTBEAT_MISSING", "HEARTBEAT_STALE"}
+000796:                 else "HEARTBEAT_INVALID"
+000797:             )
+000798:             self.heartbeat_logger.emit(
+000799:                 event,
+000800:                 status="BLOCKED" if safety_stop else "ABNORMAL",
+000801:                 reason=heartbeat.reason,
+000802:                 pid=heartbeat.pid,
+000803:                 sequence=heartbeat.sequence,
+000804:                 heartbeat_age_seconds=heartbeat.heartbeat_age_seconds,
+000805:                 mode=heartbeat.mode,
+000806:                 orders_submitted=heartbeat.orders_submitted,
+000807:                 repository_root=heartbeat.repository_root,
+000808:                 action="SAFE_STOP" if safety_stop else "RESTART_PENDING",
+000809:                 restart_attempt=restart_attempt,
+000810:             )
+000811:             self._terminate_process(process, heartbeat.reason)
+000812:             return (
+000813:                 EXIT_CONFIGURATION_ERROR
+000814:                 if safety_stop
+000815:                 else EXIT_HEARTBEAT_FAILURE
+000816:             )
+000817: 
+000818:         self._safe_stop_child()
+000819:         return 0
+000820: 
+000821:     def _clear_process(self, process: subprocess.Popen[Any]) -> None:
+000822:         with self._process_lock:
+000823:             if self._process is process:
+000824:                 self._process = None
+000825: 
+000826:     def _safe_stop_child(self) -> None:
+000827:         with self._process_lock:
+000828:             process = self._process
+000829:         if process is None:
+000830:             return
+000831:         self._terminate_process(process, self.stop_reason)
+000832: 
+000833:     def _terminate_process(
+000834:         self,
+000835:         process: subprocess.Popen[Any],
+000836:         reason: str,
+000837:     ) -> None:
+000838:         if process.poll() is not None:
+000839:             self._clear_process(process)
+000840:             return
+000841: 
+000842:         self.logger.emit(
+000843:             "PROCESS_TERMINATING",
+000844:             pid=process.pid,
+000845:             reason=reason,
+000846:         )
+000847:         process.terminate()
+000848:         try:
+000849:             process.wait(timeout=self.config.termination_grace_seconds)
+000850:         except subprocess.TimeoutExpired:
+000851:             self.logger.emit("PROCESS_KILLING", pid=process.pid)
+000852:             process.kill()
+000853:             process.wait(timeout=self.config.termination_grace_seconds)
+000854:         finally:
+000855:             self._clear_process(process)
+
+--- LINES 909-992 ---
+000909:     parser = argparse.ArgumentParser(
+000910:         description="PHOENIX Step36 WatchDog (PAPER only)",
+000911:     )
+000912:     parser.add_argument(
+000913:         "--max-restarts",
+000914:         type=_restart_count,
+000915:         default=3,
+000916:         help=f"restart limit, 0-{MAX_RESTARTS_HARD_LIMIT} (default: 3)",
+000917:     )
+000918:     parser.add_argument(
+000919:         "--backoff-base-seconds",
+000920:         type=_non_negative_float,
+000921:         default=5.0,
+000922:     )
+000923:     parser.add_argument(
+000924:         "--backoff-max-seconds",
+000925:         type=_non_negative_float,
+000926:         default=60.0,
+000927:     )
+000928:     parser.add_argument(
+000929:         "--startup-grace-seconds",
+000930:         type=_non_negative_float,
+000931:         default=2.0,
+000932:     )
+000933:     parser.add_argument(
+000934:         "--poll-seconds",
+000935:         type=_positive_float,
+000936:         default=1.0,
+000937:     )
+000938:     parser.add_argument(
+000939:         "--termination-grace-seconds",
+000940:         type=_positive_float,
+000941:         default=10.0,
+000942:     )
+000943:     parser.add_argument(
+000944:         "--stale-lock-seconds",
+000945:         type=_positive_float,
+000946:         default=6 * 60 * 60,
+000947:     )
+000948:     parser.add_argument(
+000949:         "--heartbeat-timeout-seconds",
+000950:         type=_positive_float,
+000951:         default=HEARTBEAT_TIMEOUT_SECONDS,
+000952:     )
+000953:     return parser.parse_args(argv)
+000954: 
+000955: 
+000956: def main(argv: list[str] | None = None) -> int:
+000957:     args = parse_args(argv)
+000958:     try:
+000959:         config = MonitorConfig(
+000960:             max_restarts=args.max_restarts,
+000961:             backoff_base_seconds=args.backoff_base_seconds,
+000962:             backoff_max_seconds=args.backoff_max_seconds,
+000963:             startup_grace_seconds=args.startup_grace_seconds,
+000964:             poll_seconds=args.poll_seconds,
+000965:             termination_grace_seconds=args.termination_grace_seconds,
+000966:             stale_lock_seconds=args.stale_lock_seconds,
+000967:             heartbeat_timeout_seconds=args.heartbeat_timeout_seconds,
+000968:         )
+000969:     except ValueError as error:
+000970:         print(f"WatchDog configuration error: {error}", file=sys.stderr)
+000971:         return EXIT_CONFIGURATION_ERROR
+000972: 
+000973:     watchdog = PhoenixWatchdog(
+000974:         target_script=TARGET_SCRIPT,
+000975:         root_dir=ROOT_DIR,
+000976:         log_dir=LOG_DIR,
+000977:         lock_file=LOCK_FILE,
+000978:         config=config,
+000979:         enable_file_ready_heartbeat=True,
+000980:     )
+000981:     previous = _install_signal_handlers(watchdog)
+000982:     try:
+000983:         return watchdog.run()
+000984:     except KeyboardInterrupt:
+000985:         watchdog.request_stop("keyboard_interrupt")
+000986:         return EXIT_OK
+000987:     finally:
+000988:         _restore_signal_handlers(previous)
+000989: 
+000990: 
+000991: if __name__ == "__main__":
+000992:     raise SystemExit(main())
+
+
+===== FILE: phoenix_core/production_rakuten_rss_transport.py =====
+
+--- LINES 1-87 ---
+000001: from __future__ import annotations
+000002: 
+000003: from dataclasses import dataclass, field
+000004: from datetime import datetime, timedelta
+000005: import hashlib
+000006: import importlib.util
+000007: import json
+000008: from pathlib import Path
+000009: from threading import RLock
+000010: from typing import Any, Callable, Mapping, Protocol, runtime_checkable
+000011: from zoneinfo import ZoneInfo
+000012: import zipfile
+000013: from xml.etree import ElementTree as ET
+000014: 
+000015: from phoenix_core.models import OrderRequest, OrderSide, OrderStatus, OrderType
+000016: from phoenix_core.production_rakuten_rss_adapter import RakutenRssTransportHealth
+000017: from phoenix_core.rss_order_bridge import FileBridgeReceipt, FileBridgeStageResult, read_receipt, stage_request
+000018: from phoenix_core.rakuten_rss_adapter import (
+000019:     RakutenRssCancelAck,
+000020:     RakutenRssOrderUpdate,
+000021:     RakutenRssSubmitAck,
+000022: )
+000023: 
+000024: 
+000025: JST = ZoneInfo("Asia/Tokyo")
+000026: ORDER_MACRO_NAME = "RssStockOrder_V"
+000027: CANCEL_MACRO_NAME = "RssCancelOrder_V"
+000028: DEFAULT_WORKBOOK_NAME = "PHOENIX_RSS_PRODUCTION.xlsm"
+000029: PHOENIX_ROOT = Path(__file__).resolve().parents[1]
+000030: DEFAULT_WORKBOOK_PATH = (PHOENIX_ROOT / "runtime" / "v7_rss_production" / DEFAULT_WORKBOOK_NAME).resolve()
+000031: TRANSPORT_SHEET_NAME = "PHOENIX_RSS_TRANSPORT"
+000032: TRANSPORT_SOURCE_COM_LIVE = "COM_LIVE"
+000033: TRANSPORT_SOURCE_FILE_READY = "FILE_READY"
+000034: TRANSPORT_SOURCE_FILE_FALLBACK = "FILE_FALLBACK"
+000035: TRANSPORT_SOURCE_DISCONNECTED = "DISCONNECTED"
+000036: 
+000037: WORKBOOK_STATE_EXCEL_ALIVE_CELL = "J2"
+000038: WORKBOOK_STATE_RSS_CONNECTED_CELL = "J3"
+000039: WORKBOOK_STATE_ADDIN_READY_CELL = "J4"
+000040: WORKBOOK_STATE_ORDER_TRANSPORT_READY_CELL = "J5"
+000041: WORKBOOK_STATE_HEARTBEAT_CELL = "J6"
+000042: WORKBOOK_STATE_CELL_MAP = (
+000043:     WORKBOOK_STATE_EXCEL_ALIVE_CELL,
+000044:     WORKBOOK_STATE_RSS_CONNECTED_CELL,
+000045:     WORKBOOK_STATE_ADDIN_READY_CELL,
+000046:     WORKBOOK_STATE_ORDER_TRANSPORT_READY_CELL,
+000047:     WORKBOOK_STATE_HEARTBEAT_CELL,
+000048: )
+000049: WORKBOOK_STATE_MAX_AGE = timedelta(seconds=90)
+000050: 
+000051: SUBMIT_CELL_MAP = {
+000052:     "schema_version": "B2",
+000053:     "request_kind": "B3",
+000054:     "broker_order_id": "B4",
+000055:     "client_order_id": "B5",
+000056:     "strategy_name": "B6",
+000057:     "ticker": "B7",
+000058:     "side": "B8",
+000059:     "quantity": "B9",
+000060:     "order_type": "B10",
+000061:     "limit_price": "B11",
+000062:     "live_trading_enabled": "B12",
+000063:     "production_transport_enabled": "B13",
+000064:     "armed": "B14",
+000065:     "submitted_at": "B15",
+000066:     "timeout_seconds": "B16",
+000067:     "payload_sha256": "B17",
+000068:     "macro_name": "B18",
+000069:     "message": "B19",
+000070: }
+000071: RESULT_CELL_MAP = {
+000072:     "status": "D2",
+000073:     "broker_order_id": "D3",
+000074:     "filled_quantity": "D4",
+000075:     "filled_price": "D5",
+000076:     "message": "D6",
+000077:     "updated_at": "D7",
+000078: }
+000079: CANCEL_CELL_MAP = {
+000080:     "schema_version": "B22",
+000081:     "request_kind": "B23",
+000082:     "broker_order_id": "B24",
+000083:     "client_order_id": "B25",
+000084:     "action": "B26",
+000085:     "submitted_at": "B27",
+000086:     "payload_sha256": "B28",
+000087:     "macro_name": "B29",
+
+--- LINES 220-533 ---
+000220:         }
+000221: 
+000222:         sheet_target: str | None = None
+000223:         for sheet in workbook_root.findall(f"{MAIN_NS}sheets/{MAIN_NS}sheet"):
+000224:             if str(sheet.get("name") or "") == sheet_name:
+000225:                 rel_id = sheet.get(f"{REL_NS}id")
+000226:                 if rel_id:
+000227:                     sheet_target = rel_targets.get(rel_id)
+000228:                 break
+000229: 
+000230:         if not sheet_target:
+000231:             raise RssNotConnectedError(f"Workbook sheet missing: {sheet_name}")
+000232: 
+000233:         sheet_path = sheet_target.lstrip("/")
+000234:         if not sheet_path.startswith("xl/"):
+000235:             sheet_path = f"xl/{sheet_path}"
+000236:         sheet_root = ET.fromstring(archive.read(sheet_path))
+000237: 
+000238:         values: dict[str, str] = {}
+000239:         for cell_ref in cell_refs:
+000240:             cell = sheet_root.find(f".//{MAIN_NS}c[@r='{cell_ref}']")
+000241:             values[cell_ref] = "" if cell is None else _cell_text_from_sheet_xml(cell, shared_strings)
+000242:         return values
+000243: 
+000244: 
+000245: @dataclass(frozen=True, slots=True)
+000246: class ExcelTransportSession:
+000247:     application: Any
+000248:     workbook: Any
+000249:     workbook_path: Path
+000250:     workbook_name: str
+000251: 
+000252: 
+000253: @dataclass(frozen=True, slots=True)
+000254: class WorkbookRuntimeState:
+000255:     transport_source: str
+000256:     excel_alive: bool
+000257:     rss_connected: bool
+000258:     addin_ready: bool
+000259:     order_transport_ready: bool
+000260:     heartbeat_at: datetime | None
+000261:     heartbeat_age_seconds: float | None
+000262:     ready: bool
+000263:     message: str
+000264: 
+000265: 
+000266: def _runtime_truthy_cell(value: Any) -> bool:
+000267:     if isinstance(value, bool):
+000268:         return value
+000269:     text = str(value).strip().upper()
+000270:     return text in {"1", "TRUE", "YES", "ON", "READY", "CONNECTED", "RSS_CONNECTED"}
+000271: 
+000272: 
+000273: def _runtime_parse_heartbeat(value: Any) -> datetime | None:
+000274:     if value is None:
+000275:         return None
+000276:     if isinstance(value, datetime):
+000277:         parsed = value
+000278:     elif isinstance(value, (int, float)) and not isinstance(value, bool):
+000279:         parsed = datetime(1899, 12, 30, tzinfo=JST) + timedelta(days=float(value))
+000280:     else:
+000281:         text = str(value).strip()
+000282:         if not text:
+000283:             return None
+000284:         try:
+000285:             parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+000286:         except ValueError:
+000287:             if text.replace(".", "", 1).isdigit():
+000288:                 parsed = datetime(1899, 12, 30, tzinfo=JST) + timedelta(days=float(text))
+000289:             else:
+000290:                 return None
+000291:     if parsed.tzinfo is None or parsed.utcoffset() is None:
+000292:         return parsed.replace(tzinfo=JST)
+000293:     return parsed.astimezone(JST)
+000294: 
+000295: 
+000296: def _runtime_state_from_values(values: Mapping[str, Any], *, transport_source: str, now: datetime | None = None) -> WorkbookRuntimeState:
+000297:     now_jst = _now_jst() if now is None else now.astimezone(JST) if now.tzinfo is not None and now.utcoffset() is not None else now.replace(tzinfo=JST)
+000298:     excel_alive = _runtime_truthy_cell(values.get(WORKBOOK_STATE_EXCEL_ALIVE_CELL, ""))
+000299:     rss_connected = _runtime_truthy_cell(values.get(WORKBOOK_STATE_RSS_CONNECTED_CELL, ""))
+000300:     addin_ready = _runtime_truthy_cell(values.get(WORKBOOK_STATE_ADDIN_READY_CELL, ""))
+000301:     order_transport_ready = _runtime_truthy_cell(values.get(WORKBOOK_STATE_ORDER_TRANSPORT_READY_CELL, ""))
+000302:     heartbeat_at = _runtime_parse_heartbeat(values.get(WORKBOOK_STATE_HEARTBEAT_CELL, ""))
+000303:     heartbeat_age_seconds: float | None = None
+000304:     heartbeat_fresh = False
+000305:     blockers: list[str] = []
+000306: 
+000307:     if not excel_alive:
+000308:         blockers.append("Excel alive is false")
+000309:     if not rss_connected:
+000310:         blockers.append("RSS is not connected")
+000311:     if not addin_ready:
+000312:         blockers.append("RSS add-in is not ready")
+000313:     if not order_transport_ready:
+000314:         blockers.append("Order transport is not ready")
+000315:     if heartbeat_at is None:
+000316:         blockers.append("Heartbeat is missing")
+000317:     else:
+000318:         heartbeat_age = now_jst - heartbeat_at
+000319:         heartbeat_age_seconds = heartbeat_age.total_seconds()
+000320:         if heartbeat_age < timedelta(0):
+000321:             blockers.append("Heartbeat timestamp is in the future")
+000322:         elif heartbeat_age <= WORKBOOK_STATE_MAX_AGE:
+000323:             heartbeat_fresh = True
+000324:         else:
+000325:             blockers.append(
+000326:                 f"Heartbeat is stale ({int(heartbeat_age.total_seconds())}s > {int(WORKBOOK_STATE_MAX_AGE.total_seconds())}s)"
+000327:             )
+000328: 
+000329:     ready = not blockers and heartbeat_fresh
+000330:     if ready:
+000331:         message = "Workbook transport READY."
+000332:         transport_source = transport_source if transport_source != TRANSPORT_SOURCE_FILE_FALLBACK else TRANSPORT_SOURCE_FILE_READY
+000333:     else:
+000334:         message = "; ".join(blockers) if blockers else "Workbook transport is not READY."
+000335: 
+000336:     return WorkbookRuntimeState(
+000337:         transport_source=transport_source,
+000338:         excel_alive=excel_alive,
+000339:         rss_connected=rss_connected,
+000340:         addin_ready=addin_ready,
+000341:         order_transport_ready=order_transport_ready,
+000342:         heartbeat_at=heartbeat_at,
+000343:         heartbeat_age_seconds=heartbeat_age_seconds,
+000344:         ready=ready,
+000345:         message=message,
+000346:     )
+000347: 
+000348: 
+000349: class ExcelComError(RuntimeError):
+000350:     pass
+000351: 
+000352: 
+000353: class ExcelNotRunningError(ExcelComError):
+000354:     pass
+000355: 
+000356: 
+000357: class WorkbookNotFoundError(ExcelComError):
+000358:     pass
+000359: 
+000360: 
+000361: class RssNotConnectedError(ExcelComError):
+000362:     pass
+000363: 
+000364: 
+000365: @runtime_checkable
+000366: class ExcelComBackend(Protocol):
+000367:     def connect(self, workbook_path: Path, workbook_name: str) -> ExcelTransportSession:
+000368:         raise NotImplementedError
+000369: 
+000370:     def read_runtime_state(self, session: ExcelTransportSession) -> WorkbookRuntimeState:
+000371:         raise NotImplementedError
+000372: 
+000373:     def health_check(
+000374:         self,
+000375:         session: ExcelTransportSession,
+000376:         publish: bool = False,
+000377:     ) -> tuple[bool, str]:
+000378:         raise NotImplementedError
+000379: 
+000380:     def stage_submit_payload(
+000381:         self,
+000382:         session: ExcelTransportSession,
+000383:         payload: Mapping[str, Any],
+000384:     ) -> None:
+000385:         raise NotImplementedError
+000386: 
+000387:     def invoke_submit_macro(self, session: ExcelTransportSession, macro_name: str) -> None:
+000388:         raise NotImplementedError
+000389: 
+000390:     def read_order_updates(
+000391:         self,
+000392:         session: ExcelTransportSession,
+000393:         broker_order_id: str,
+000394:     ) -> tuple[RakutenRssOrderUpdate, ...]:
+000395:         raise NotImplementedError
+000396: 
+000397:     def stage_cancel_payload(
+000398:         self,
+000399:         session: ExcelTransportSession,
+000400:         payload: Mapping[str, Any],
+000401:     ) -> None:
+000402:         raise NotImplementedError
+000403: 
+000404:     def invoke_cancel_macro(self, session: ExcelTransportSession, macro_name: str) -> None:
+000405:         raise NotImplementedError
+000406: 
+000407:     def close(self, session: ExcelTransportSession) -> None:
+000408:         raise NotImplementedError
+000409: 
+000410: 
+000411: @dataclass(slots=True)
+000412: class _MockSession:
+000413:     application: object = field(default_factory=object)
+000414:     workbook: object = field(default_factory=object)
+000415: 
+000416: 
+000417: class MockExcelComBackend:
+000418:     def __init__(
+000419:         self,
+000420:         *,
+000421:         excel_running: bool = True,
+000422:         workbook_present: bool = True,
+000423:         rss_connected: bool = True,
+000424:         addin_ready: bool = True,
+000425:         order_transport_ready: bool = True,
+000426:         heartbeat_at: datetime | None = None,
+000427:         health_message: str = "MOCK_EXCEL_RSS_READY",
+000428:     ) -> None:
+000429:         self.excel_running = excel_running
+000430:         self.workbook_present = workbook_present
+000431:         self.rss_connected = rss_connected
+000432:         self.addin_ready = addin_ready
+000433:         self.order_transport_ready = order_transport_ready
+000434:         self.heartbeat_at = heartbeat_at
+000435:         self.health_message = health_message
+000436:         self.connect_calls = 0
+000437:         self.health_calls = 0
+000438:         self.submit_stage_calls = 0
+000439:         self.submit_macro_calls = 0
+000440:         self.poll_calls = 0
+000441:         self.cancel_stage_calls = 0
+000442:         self.cancel_macro_calls = 0
+000443:         self.closed_calls = 0
+000444:         self.submitted_payloads: list[dict[str, Any]] = []
+000445:         self.cancel_payloads: list[dict[str, Any]] = []
+000446:         self.publish_calls = 0
+000447:         self._updates_by_broker_order_id: dict[str, list[RakutenRssOrderUpdate]] = {}
+000448: 
+000449:     def queue_updates(
+000450:         self,
+000451:         broker_order_id: str,
+000452:         updates: list[RakutenRssOrderUpdate],
+000453:     ) -> None:
+000454:         self._updates_by_broker_order_id[broker_order_id] = list(updates)
+000455: 
+000456:     def connect(self, workbook_path: Path, workbook_name: str) -> ExcelTransportSession:
+000457:         self.connect_calls += 1
+000458:         if not self.excel_running:
+000459:             raise ExcelNotRunningError("Excel is not running.")
+000460:         if not self.workbook_present:
+000461:             raise WorkbookNotFoundError(f"Workbook not found: {workbook_path}")
+000462:         return ExcelTransportSession(
+000463:             application=_MockSession().application,
+000464:             workbook=_MockSession().workbook,
+000465:             workbook_path=workbook_path,
+000466:             workbook_name=workbook_name,
+000467:         )
+000468: 
+000469:     def read_runtime_state(self, session: ExcelTransportSession) -> WorkbookRuntimeState:
+000470:         heartbeat_at = self.heartbeat_at or _now_jst()
+000471:         values = {
+000472:             WORKBOOK_STATE_EXCEL_ALIVE_CELL: self.excel_running and self.workbook_present,
+000473:             WORKBOOK_STATE_RSS_CONNECTED_CELL: self.rss_connected,
+000474:             WORKBOOK_STATE_ADDIN_READY_CELL: self.addin_ready,
+000475:             WORKBOOK_STATE_ORDER_TRANSPORT_READY_CELL: self.order_transport_ready,
+000476:             WORKBOOK_STATE_HEARTBEAT_CELL: heartbeat_at,
+000477:         }
+000478:         return _runtime_state_from_values(values, transport_source=TRANSPORT_SOURCE_COM_LIVE, now=heartbeat_at)
+000479: 
+000480:     def health_check(
+000481:         self,
+000482:         session: ExcelTransportSession,
+000483:         publish: bool = False,
+000484:     ) -> tuple[bool, str]:
+000485:         self.health_calls += 1
+000486:         runtime_state = self.read_runtime_state(session)
+000487:         if not runtime_state.ready:
+000488:             return False, runtime_state.message
+000489:         if not self.rss_connected:
+000490:             return False, "RSS is not connected."
+000491:         if publish:
+000492:             self.publish_calls += 1
+000493:             self.heartbeat_at = _now_jst()
+000494:         return True, self.health_message
+000495: 
+000496:     def stage_submit_payload(
+000497:         self,
+000498:         session: ExcelTransportSession,
+000499:         payload: Mapping[str, Any],
+000500:     ) -> None:
+000501:         self.submit_stage_calls += 1
+000502:         self.submitted_payloads.append(dict(payload))
+000503: 
+000504:     def invoke_submit_macro(self, session: ExcelTransportSession, macro_name: str) -> None:
+000505:         self.submit_macro_calls += 1
+000506: 
+000507:     def read_order_updates(
+000508:         self,
+000509:         session: ExcelTransportSession,
+000510:         broker_order_id: str,
+000511:     ) -> tuple[RakutenRssOrderUpdate, ...]:
+000512:         self.poll_calls += 1
+000513:         updates = self._updates_by_broker_order_id.get(broker_order_id, [])
+000514:         if not updates:
+000515:             return ()
+000516:         self._updates_by_broker_order_id[broker_order_id] = []
+000517:         return tuple(updates)
+000518: 
+000519:     def stage_cancel_payload(
+000520:         self,
+000521:         session: ExcelTransportSession,
+000522:         payload: Mapping[str, Any],
+000523:     ) -> None:
+000524:         self.cancel_stage_calls += 1
+000525:         self.cancel_payloads.append(dict(payload))
+000526: 
+000527:     def invoke_cancel_macro(self, session: ExcelTransportSession, macro_name: str) -> None:
+000528:         self.cancel_macro_calls += 1
+000529: 
+000530:     def close(self, session: ExcelTransportSession) -> None:
+000531:         self.closed_calls += 1
+000532: 
+000533: 
+
+--- LINES 676-786 ---
+000676:             probe_cell.Formula = RSS_PROBE_FORMULA
+000677:             try:
+000678:                 application.CalculateFull()
+000679:             except Exception:
+000680:                 try:
+000681:                     application.Calculate()
+000682:                 except Exception:
+000683:                     pass
+000684:             probe_value = probe_cell.Value2
+000685:             text = str(probe_value).strip()
+000686:             if text and not text.startswith("#"):
+000687:                 return True, text
+000688:             return False, f"RSS probe returned {text!r}"
+000689:         except Exception as error:
+000690:             return False, f"RSS probe failed: {error}"
+000691:         finally:
+000692:             try:
+000693:                 probe_cell.ClearContents()
+000694:             except Exception:
+000695:                 pass
+000696: 
+000697:     def _write_rss_status(self, session: ExcelTransportSession, value: str) -> None:
+000698:         sheet = self._sheet(session)
+000699:         try:
+000700:             sheet.Range(RSS_CONNECTION_MESSAGE_CELL).Value2 = value
+000701:         except Exception as error:
+000702:             raise RssNotConnectedError(f"Failed to write RSS status: {error}") from error
+000703: 
+000704:     def _write_runtime_state(self, session: ExcelTransportSession, values: Mapping[str, Any]) -> None:
+000705:         sheet = self._sheet(session)
+000706:         for cell_ref in WORKBOOK_STATE_CELL_MAP:
+000707:             try:
+000708:                 sheet.Range(cell_ref).Value2 = _sheet_value(values.get(cell_ref, ""))
+000709:             except Exception as error:
+000710:                 raise RssNotConnectedError(f"Failed to write transport runtime state to {cell_ref}: {error}") from error
+000711: 
+000712:     def read_runtime_state(self, session: ExcelTransportSession) -> WorkbookRuntimeState:
+000713:         values = self._read_runtime_values(session)
+000714:         return _runtime_state_from_values(values, transport_source=TRANSPORT_SOURCE_COM_LIVE)
+000715: 
+000716:     def health_check(
+000717:         self,
+000718:         session: ExcelTransportSession,
+000719:         publish: bool = False,
+000720:     ) -> tuple[bool, str]:
+000721:         try:
+000722:             armed_value, ready_value, status_value = self._read_status_values(session)
+000723:             if self._is_truthy_cell(armed_value):
+000724:                 return False, "armed=true; production transport must stay fail-closed."
+000725:             if not self._is_truthy_cell(ready_value):
+000726:                 return False, f"Workbook is not READY: {ready_value!r}"
+000727: 
+000728:             addins_ok, addins_message = self._has_required_addins(session.application)
+000729:             if not addins_ok:
+000730:                 return False, addins_message
+000731: 
+000732:             probe_ok, probe_message = self._probe_rss_connection(session)
+000733:             if not probe_ok:
+000734:                 return False, probe_message
+000735: 
+000736:             if publish:
+000737:                 heartbeat_at = _now_jst()
+000738:                 self._write_rss_status(session, RSS_CONNECTED_STATUS)
+000739:                 self._write_runtime_state(
+000740:                     session,
+000741:                     {
+000742:                         WORKBOOK_STATE_EXCEL_ALIVE_CELL: True,
+000743:                         WORKBOOK_STATE_RSS_CONNECTED_CELL: True,
+000744:                         WORKBOOK_STATE_ADDIN_READY_CELL: True,
+000745:                         WORKBOOK_STATE_ORDER_TRANSPORT_READY_CELL: True,
+000746:                         WORKBOOK_STATE_HEARTBEAT_CELL: heartbeat_at.isoformat(timespec="seconds"),
+000747:                     },
+000748:                 )
+000749:             live_message = str(probe_message).strip() or RSS_CONNECTED_STATUS
+000750:             return True, f"{live_message}; {addins_message}"
+000751:         except RssNotConnectedError as error:
+000752:             return False, str(error)
+000753:         except Exception as error:  # pragma: no cover - defensive fail-close
+000754:             return False, f"Excel/RSS transport health failed: {error}"
+000755: 
+000756:     def _write_payload(
+000757:         self,
+000758:         session: ExcelTransportSession,
+000759:         cell_map: Mapping[str, str],
+000760:         payload: Mapping[str, Any],
+000761:     ) -> None:
+000762:         sheet = self._sheet(session)
+000763:         for key, cell in cell_map.items():
+000764:             try:
+000765:                 sheet.Range(cell).Value2 = _sheet_value(payload.get(key, ""))
+000766:             except Exception as error:
+000767:                 raise ExcelComError(f"Failed to write {key} to {cell}") from error
+000768: 
+000769:     def stage_submit_payload(
+000770:         self,
+000771:         session: ExcelTransportSession,
+000772:         payload: Mapping[str, Any],
+000773:     ) -> None:
+000774:         self._write_payload(session, SUBMIT_CELL_MAP, payload)
+000775: 
+000776:     def invoke_submit_macro(self, session: ExcelTransportSession, macro_name: str) -> None:
+000777:         try:
+000778:             session.application.Run(f"'{session.workbook.Name}'!{macro_name}")
+000779:         except Exception as error:
+000780:             raise ExcelComError(f"Submit macro failed: {error}") from error
+000781: 
+000782:     def read_order_updates(
+000783:         self,
+000784:         session: ExcelTransportSession,
+000785:         broker_order_id: str,
+000786:     ) -> tuple[RakutenRssOrderUpdate, ...]:
+
+--- LINES 927-1120 ---
+000927:         return ""
+000928: 
+000929:     def _ensure_session(self) -> ExcelTransportSession:
+000930:         if self._session is not None:
+000931:             return self._session
+000932:         self._com_call_count += 1
+000933:         session = self._backend.connect(self._workbook_path, self._workbook_name)
+000934:         self._session = session
+000935:         return session
+000936: 
+000937:     def _refresh_session(self) -> ExcelTransportSession:
+000938:         self._session = None
+000939:         return self._ensure_session()
+000940: 
+000941:     @staticmethod
+000942:     def _should_retry_live_recovery(message: str) -> bool:
+000943:         text = str(message).lower()
+000944:         return "probe" in text or "not connected" in text
+000945: 
+000946:     def _health_after_recovery(self) -> RakutenRssTransportHealth | None:
+000947:         try:
+000948:             session = self._refresh_session()
+000949:             return self._health_from_backend(session)
+000950:         except ExcelComError:
+000951:             return None
+000952: 
+000953:     def _read_runtime_state_from_file(self) -> WorkbookRuntimeState:
+000954:         try:
+000955:             values = _read_workbook_health_cells(
+000956:                 self._workbook_path,
+000957:                 TRANSPORT_SHEET_NAME,
+000958:                 WORKBOOK_STATE_CELL_MAP,
+000959:             )
+000960:         except ExcelComError as error:
+000961:             return WorkbookRuntimeState(
+000962:                 transport_source=TRANSPORT_SOURCE_DISCONNECTED,
+000963:                 excel_alive=False,
+000964:                 rss_connected=False,
+000965:                 addin_ready=False,
+000966:                 order_transport_ready=False,
+000967:                 heartbeat_at=None,
+000968:                 heartbeat_age_seconds=None,
+000969:                 ready=False,
+000970:                 message=str(error),
+000971:             )
+000972:         except Exception as error:  # pragma: no cover - defensive fail-close
+000973:             return WorkbookRuntimeState(
+000974:                 transport_source=TRANSPORT_SOURCE_DISCONNECTED,
+000975:                 excel_alive=False,
+000976:                 rss_connected=False,
+000977:                 addin_ready=False,
+000978:                 order_transport_ready=False,
+000979:                 heartbeat_at=None,
+000980:                 heartbeat_age_seconds=None,
+000981:                 ready=False,
+000982:                 message=f"Excel/RSS workbook state failed: {error}",
+000983:             )
+000984:         return _runtime_state_from_values(values, transport_source=TRANSPORT_SOURCE_FILE_FALLBACK)
+000985: 
+000986:     def read_runtime_state(self) -> WorkbookRuntimeState:
+000987:         gate_message = self._gate_message()
+000988:         if gate_message:
+000989:             return WorkbookRuntimeState(
+000990:                 transport_source=TRANSPORT_SOURCE_DISCONNECTED,
+000991:                 excel_alive=False,
+000992:                 rss_connected=False,
+000993:                 addin_ready=False,
+000994:                 order_transport_ready=False,
+000995:                 heartbeat_at=None,
+000996:                 heartbeat_age_seconds=None,
+000997:                 ready=False,
+000998:                 message=gate_message,
+000999:             )
+001000:         try:
+001001:             session = self._ensure_session()
+001002:         except ExcelComError:
+001003:             return self._read_runtime_state_from_file()
+001004: 
+001005:         try:
+001006:             return self._backend.read_runtime_state(session)
+001007:         except ExcelComError:
+001008:             return self._read_runtime_state_from_file()
+001009:         except Exception as error:  # pragma: no cover - defensive fail-close
+001010:             file_state = self._read_runtime_state_from_file()
+001011:             if file_state.transport_source != TRANSPORT_SOURCE_DISCONNECTED:
+001012:                 return file_state
+001013:             return WorkbookRuntimeState(
+001014:                 transport_source=TRANSPORT_SOURCE_DISCONNECTED,
+001015:                 excel_alive=False,
+001016:                 rss_connected=False,
+001017:                 addin_ready=False,
+001018:                 order_transport_ready=False,
+001019:                 heartbeat_at=None,
+001020:                 heartbeat_age_seconds=None,
+001021:                 ready=False,
+001022:                 message=f"Excel/RSS transport state failed: {error}",
+001023:             )
+001024: 
+001025:     def _health_from_backend(self, session: ExcelTransportSession) -> RakutenRssTransportHealth:
+001026:         self._com_call_count += 1
+001027:         connected, message = self._backend.health_check(session)
+001028:         return RakutenRssTransportHealth(
+001029:             connected=connected,
+001030:             message=message,
+001031:             transport_source=TRANSPORT_SOURCE_COM_LIVE,
+001032:         )
+001033: 
+001034:     def publish_file_ready_heartbeat(self) -> RakutenRssTransportHealth:
+001035:         try:
+001036:             session = self._ensure_session()
+001037:             connected, message = self._backend.health_check(session, publish=True)
+001038:             transport_source = (
+001039:                 TRANSPORT_SOURCE_COM_LIVE if connected else TRANSPORT_SOURCE_DISCONNECTED
+001040:             )
+001041:             return RakutenRssTransportHealth(
+001042:                 connected=connected,
+001043:                 message=message,
+001044:                 transport_source=transport_source,
+001045:             )
+001046:         except ExcelComError as error:
+001047:             self._session = None
+001048:             return RakutenRssTransportHealth(
+001049:                 connected=False,
+001050:                 message=f"Excel/RSS transport health failed: {error}",
+001051:                 transport_source=TRANSPORT_SOURCE_DISCONNECTED,
+001052:             )
+001053:         except Exception as error:  # pragma: no cover - defensive fail-close
+001054:             self._session = None
+001055:             return RakutenRssTransportHealth(
+001056:                 connected=False,
+001057:                 message=f"Excel/RSS transport health failed: {error}",
+001058:                 transport_source=TRANSPORT_SOURCE_DISCONNECTED,
+001059:             )
+001060: 
+001061:     def _health_from_workbook_file(self) -> RakutenRssTransportHealth:
+001062:         state = self._read_runtime_state_from_file()
+001063:         return RakutenRssTransportHealth(
+001064:             connected=state.ready,
+001065:             message=state.message,
+001066:             transport_source=state.transport_source,
+001067:         )
+001068: 
+001069:     def health_check(self) -> RakutenRssTransportHealth:
+001070:         gate_message = self._gate_message()
+001071:         if gate_message:
+001072:             return RakutenRssTransportHealth(
+001073:                 connected=False,
+001074:                 message=gate_message,
+001075:                 transport_source=TRANSPORT_SOURCE_DISCONNECTED,
+001076:             )
+001077: 
+001078:         try:
+001079:             session = self._ensure_session()
+001080:             connected, message = self._backend.health_check(session)
+001081:             runtime_state = self._backend.read_runtime_state(session)
+001082:             return RakutenRssTransportHealth(
+001083:                 connected=bool(connected and runtime_state.ready),
+001084:                 message=message,
+001085:                 transport_source=runtime_state.transport_source,
+001086:             )
+001087:         except ExcelComError:
+001088:             runtime_state = self._read_runtime_state_from_file()
+001089:             return RakutenRssTransportHealth(
+001090:                 connected=runtime_state.ready,
+001091:                 message=runtime_state.message,
+001092:                 transport_source=runtime_state.transport_source,
+001093:             )
+001094:         except Exception as error:  # pragma: no cover - defensive fail-close
+001095:             runtime_state = self._read_runtime_state_from_file()
+001096:             if runtime_state.transport_source != TRANSPORT_SOURCE_DISCONNECTED:
+001097:                 return RakutenRssTransportHealth(
+001098:                     connected=runtime_state.ready,
+001099:                     message=runtime_state.message,
+001100:                     transport_source=runtime_state.transport_source,
+001101:                 )
+001102:             return RakutenRssTransportHealth(
+001103:                 connected=False,
+001104:                 message=f"Excel/RSS transport health failed: {error}",
+001105:                 transport_source=TRANSPORT_SOURCE_DISCONNECTED,
+001106:             )
+001107: 
+001108:     def _build_submit_payload(
+001109:         self,
+001110:         order: OrderRequest,
+001111:         broker_order_id: str,
+001112:         submitted_at: datetime,
+001113:     ) -> dict[str, Any]:
+001114:         metadata = dict(order.metadata or {})
+001115:         protective_order = order.side is OrderSide.SELL and any(
+001116:             key in metadata
+001117:             for key in (
+001118:                 "target_price",
+001119:                 "take_profit_price",
+001120:                 "stop_price",
+
+--- LINES 1267-1453 ---
+001267:             now=self._clock(),
+001268:         )
+001269: 
+001270:     def _file_bridge_update_from_receipt(self, receipt: FileBridgeReceipt) -> RakutenRssOrderUpdate:
+001271:         try:
+001272:             status = _parse_order_status(receipt.result)
+001273:         except Exception as error:
+001274:             raise ExcelComError(f"Invalid bridge receipt result: {error}") from error
+001275:         return RakutenRssOrderUpdate(
+001276:             status=status,
+001277:             fill_quantity=receipt.fill_quantity,
+001278:             fill_price=receipt.fill_price,
+001279:             message=receipt.message or receipt.result,
+001280:             updated_at=receipt.received_at,
+001281:             rss_order_status=receipt.rss_order_status,
+001282:         )
+001283: 
+001284:     def submit_order(self, order: OrderRequest, broker_order_id: str) -> RakutenRssSubmitAck:
+001285:         order.validate()
+001286:         gate_message = self._gate_message()
+001287:         if gate_message:
+001288:             return RakutenRssSubmitAck(
+001289:                 status=OrderStatus.REJECTED,
+001290:                 message=gate_message,
+001291:             )
+001292: 
+001293:         submitted_at = self._clock()
+001294:         payload = self._build_submit_payload(order, broker_order_id, submitted_at)
+001295:         with self._lock:
+001296:             self._last_submit_payload = dict(payload)
+001297:             record = _TrackedOrder(
+001298:                 order=order,
+001299:                 broker_order_id=broker_order_id,
+001300:                 submitted_at=submitted_at,
+001301:                 submit_payload=dict(payload),
+001302:                 submit_request_id=self._file_bridge_request_id("SUBMIT", broker_order_id),
+001303:             )
+001304:             self._orders[broker_order_id] = record
+001305: 
+001306:         try:
+001307:             health = self.health_check()
+001308:             if not health.connected:
+001309:                 return RakutenRssSubmitAck(
+001310:                     status=OrderStatus.REJECTED,
+001311:                     message=health.message,
+001312:                 )
+001313:             if health.transport_source == TRANSPORT_SOURCE_FILE_READY:
+001314:                 request_id = self._file_bridge_request_id("SUBMIT", broker_order_id)
+001315:                 try:
+001316:                     bridge_result = self._stage_file_bridge_request(
+001317:                         request_kind="SUBMIT",
+001318:                         request_id=request_id,
+001319:                         payload=payload,
+001320:                         submitted_at=submitted_at,
+001321:                     )
+001322:                 except Exception as error:
+001323:                     with self._lock:
+001324:                         record.stage_state = OrderStatus.REJECTED.value
+001325:                         record.last_message = f"FILE_READY bridge staging failed: {error}"
+001326:                         record.updated_at = self._clock()
+001327:                     return RakutenRssSubmitAck(
+001328:                         status=OrderStatus.REJECTED,
+001329:                         message=f"FILE_READY bridge staging failed: {error}",
+001330:                         submitted_at=submitted_at,
+001331:                     )
+001332:                 with self._lock:
+001333:                     record.submit_request_id = request_id
+001334:                     record.stage_state = OrderStatus.PENDING.value
+001335:                     record.last_message = (
+001336:                         "FILE_READY request staged."
+001337:                         if not bridge_result.duplicate
+001338:                         else "FILE_READY request already staged."
+001339:                     )
+001340:                     record.updated_at = self._clock()
+001341:                 return RakutenRssSubmitAck(
+001342:                     status=OrderStatus.PENDING,
+001343:                     message=record.last_message,
+001344:                     submitted_at=submitted_at,
+001345:                 )
+001346:             if health.transport_source != TRANSPORT_SOURCE_COM_LIVE:
+001347:                 return RakutenRssSubmitAck(
+001348:                     status=OrderStatus.REJECTED,
+001349:                     message=health.message,
+001350:                 )
+001351:             session = self._ensure_session()
+001352:             backend_health = self._health_from_backend(session)
+001353:             if not backend_health.connected or backend_health.transport_source != TRANSPORT_SOURCE_COM_LIVE:
+001354:                 return RakutenRssSubmitAck(
+001355:                     status=OrderStatus.REJECTED,
+001356:                     message=backend_health.message,
+001357:                 )
+001358:             self._com_call_count += 1
+001359:             self._backend.stage_submit_payload(session, payload)
+001360:             if not self._armed:
+001361:                 return RakutenRssSubmitAck(
+001362:                     status=OrderStatus.REJECTED,
+001363:                     message="armed=false; RssStockOrder_V not called.",
+001364:                 )
+001365:             self._com_call_count += 1
+001366:             self._submit_macro_call_count += 1
+001367:             self._backend.invoke_submit_macro(session, ORDER_MACRO_NAME)
+001368:             with self._lock:
+001369:                 record.stage_state = OrderStatus.ACCEPTED.value
+001370:                 record.last_message = "RssStockOrder_V invoked."
+001371:                 record.updated_at = self._clock()
+001372:             return RakutenRssSubmitAck(
+001373:                 status=OrderStatus.ACCEPTED,
+001374:                 message="RssStockOrder_V invoked.",
+001375:                 submitted_at=submitted_at,
+001376:             )
+001377:         except ExcelComError as error:
+001378:             with self._lock:
+001379:                 record.stage_state = OrderStatus.REJECTED.value
+001380:                 record.last_message = str(error)
+001381:                 record.updated_at = self._clock()
+001382:             return RakutenRssSubmitAck(
+001383:                 status=OrderStatus.REJECTED,
+001384:                 message=str(error),
+001385:                 submitted_at=submitted_at,
+001386:             )
+001387:         except Exception as error:  # pragma: no cover - defensive fail-close
+001388:             with self._lock:
+001389:                 record.stage_state = OrderStatus.REJECTED.value
+001390:                 record.last_message = f"Excel/RSS submit failed: {error}"
+001391:                 record.updated_at = self._clock()
+001392:             return RakutenRssSubmitAck(
+001393:                 status=OrderStatus.REJECTED,
+001394:                 message=f"Excel/RSS submit failed: {error}",
+001395:                 submitted_at=submitted_at,
+001396:             )
+001397: 
+001398:     def poll_order(self, broker_order_id: str) -> tuple[RakutenRssOrderUpdate, ...]:
+001399:         gate_message = self._gate_message()
+001400:         if gate_message:
+001401:             return ()
+001402: 
+001403:         with self._lock:
+001404:             record = self._orders.get(broker_order_id)
+001405:         if record is None:
+001406:             return ()
+001407: 
+001408:         updates: tuple[RakutenRssOrderUpdate, ...] = ()
+001409:         try:
+001410:             health = self.health_check()
+001411:             if not health.connected:
+001412:                 return ()
+001413:             if health.transport_source == TRANSPORT_SOURCE_FILE_READY:
+001414:                 request_ids: list[tuple[str, str]] = []
+001415:                 if record.cancel_request_id:
+001416:                     request_ids.append(("CANCEL", record.cancel_request_id))
+001417:                 if record.submit_request_id:
+001418:                     request_ids.append(("SUBMIT", record.submit_request_id))
+001419:                 for request_kind, request_id in request_ids:
+001420:                     receipt = self._read_file_bridge_receipt(
+001421:                         request_id=request_id,
+001422:                         request_kind=request_kind,
+001423:                     )
+001424:                     if receipt is None:
+001425:                         continue
+001426:                     update = self._file_bridge_update_from_receipt(receipt)
+001427:                     with self._lock:
+001428:                         record.updated_at = self._clock()
+001429:                         record.last_message = update.message
+001430:                         record.stage_state = update.status.value
+001431:                         if update.status in {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED}:
+001432:                             record.filled_quantity = update.fill_quantity
+001433:                             record.filled_price = update.fill_price
+001434:                     return (update,)
+001435:             elif health.transport_source == TRANSPORT_SOURCE_COM_LIVE:
+001436:                 session = self._ensure_session()
+001437:                 backend_health = self._health_from_backend(session)
+001438:                 if not backend_health.connected or backend_health.transport_source != TRANSPORT_SOURCE_COM_LIVE:
+001439:                     return ()
+001440:                 self._com_call_count += 1
+001441:                 updates = self._backend.read_order_updates(session, broker_order_id)
+001442:             else:
+001443:                 return ()
+001444:         except ExcelComError as error:
+001445:             with self._lock:
+001446:                 record.stage_state = OrderStatus.REJECTED.value
+001447:                 record.last_message = str(error)
+001448:                 record.updated_at = self._clock()
+001449:             return ()
+001450: 
+001451:         if updates:
+001452:             with self._lock:
+001453:                 record.updated_at = self._clock()
+
+--- LINES 1464-1575 ---
+001464: 
+001465:         with self._lock:
+001466:             age = self._clock() - record.submitted_at
+001467:             if self._timeout_seconds == 0 or age >= timedelta(seconds=self._timeout_seconds):
+001468:                 timeout_update = RakutenRssOrderUpdate(
+001469:                     status=OrderStatus.TIMED_OUT,
+001470:                     message="Order timed out waiting for Excel/RSS result.",
+001471:                     updated_at=self._clock(),
+001472:                     rss_order_status="TIMED_OUT",
+001473:                 )
+001474:                 record.stage_state = OrderStatus.TIMED_OUT.value
+001475:                 record.last_message = timeout_update.message
+001476:                 record.updated_at = timeout_update.updated_at
+001477:                 return (timeout_update,)
+001478:         return ()
+001479: 
+001480:     def cancel_order(self, broker_order_id: str) -> RakutenRssCancelAck:
+001481:         gate_message = self._gate_message()
+001482:         if gate_message:
+001483:             return RakutenRssCancelAck(
+001484:                 status=OrderStatus.REJECTED,
+001485:                 message=gate_message,
+001486:             )
+001487: 
+001488:         with self._lock:
+001489:             record = self._orders.get(broker_order_id)
+001490:         if record is None:
+001491:             return RakutenRssCancelAck(
+001492:                 status=OrderStatus.REJECTED,
+001493:                 message=f"Unknown broker_order_id: {broker_order_id}",
+001494:             )
+001495: 
+001496:         submitted_at = self._clock()
+001497:         payload = self._build_cancel_payload(record, submitted_at)
+001498:         with self._lock:
+001499:             self._last_cancel_payload = dict(payload)
+001500:             record.cancel_payload = dict(payload)
+001501:             record.cancel_request_id = self._file_bridge_request_id("CANCEL", broker_order_id)
+001502: 
+001503:         try:
+001504:             health = self.health_check()
+001505:             if not health.connected:
+001506:                 return RakutenRssCancelAck(
+001507:                     status=OrderStatus.REJECTED,
+001508:                     message=health.message,
+001509:                 )
+001510:             if health.transport_source == TRANSPORT_SOURCE_FILE_READY:
+001511:                 request_id = self._file_bridge_request_id("CANCEL", broker_order_id)
+001512:                 try:
+001513:                     bridge_result = self._stage_file_bridge_request(
+001514:                         request_kind="CANCEL",
+001515:                         request_id=request_id,
+001516:                         payload=payload,
+001517:                         submitted_at=submitted_at,
+001518:                     )
+001519:                 except Exception as error:
+001520:                     with self._lock:
+001521:                         record.stage_state = OrderStatus.REJECTED.value
+001522:                         record.last_message = f"FILE_READY cancel staging failed: {error}"
+001523:                         record.updated_at = self._clock()
+001524:                     return RakutenRssCancelAck(
+001525:                         status=OrderStatus.REJECTED,
+001526:                         message=f"FILE_READY cancel staging failed: {error}",
+001527:                         canceled_at=submitted_at,
+001528:                     )
+001529:                 with self._lock:
+001530:                     record.cancel_request_id = request_id
+001531:                     record.stage_state = OrderStatus.PENDING.value
+001532:                     record.last_message = (
+001533:                         "FILE_READY cancel request staged."
+001534:                         if not bridge_result.duplicate
+001535:                         else "FILE_READY cancel request already staged."
+001536:                     )
+001537:                     record.updated_at = self._clock()
+001538:                 return RakutenRssCancelAck(
+001539:                     status=OrderStatus.PENDING,
+001540:                     message=record.last_message,
+001541:                     canceled_at=submitted_at,
+001542:                 )
+001543:             if health.transport_source != TRANSPORT_SOURCE_COM_LIVE:
+001544:                 return RakutenRssCancelAck(
+001545:                     status=OrderStatus.REJECTED,
+001546:                     message=health.message,
+001547:                 )
+001548:             session = self._ensure_session()
+001549:             backend_health = self._health_from_backend(session)
+001550:             if not backend_health.connected or backend_health.transport_source != TRANSPORT_SOURCE_COM_LIVE:
+001551:                 return RakutenRssCancelAck(
+001552:                     status=OrderStatus.REJECTED,
+001553:                     message=backend_health.message,
+001554:                 )
+001555:             self._com_call_count += 1
+001556:             self._backend.stage_cancel_payload(session, payload)
+001557:             if self._armed:
+001558:                 self._com_call_count += 1
+001559:                 self._cancel_macro_call_count += 1
+001560:                 self._backend.invoke_cancel_macro(session, CANCEL_MACRO_NAME)
+001561:             with self._lock:
+001562:                 record.stage_state = OrderStatus.CANCELED.value
+001563:                 record.last_message = "Cancel staged."
+001564:                 record.updated_at = self._clock()
+001565:             return RakutenRssCancelAck(
+001566:                 status=OrderStatus.CANCELED,
+001567:                 message="Cancel staged." if not self._armed else "RssCancelOrder_V invoked.",
+001568:                 canceled_at=submitted_at,
+001569:             )
+001570:         except ExcelComError as error:
+001571:             with self._lock:
+001572:                 record.stage_state = OrderStatus.REJECTED.value
+001573:                 record.last_message = str(error)
+001574:                 record.updated_at = self._clock()
+001575:             return RakutenRssCancelAck(
+
+
+===== FILE: vba/PHOENIX_RSS_ORDER_BRIDGE.bas =====
+
+--- LINES 61-363 ---
+000061:     Private Declare Function CryptAcquireContextW Lib "advapi32.dll" ( _
+000062:         ByRef phProv As Long, _
+000063:         ByVal pszContainer As Long, _
+000064:         ByVal pszProvider As Long, _
+000065:         ByVal dwProvType As Long, _
+000066:         ByVal dwFlags As Long) As Long
+000067:     Private Declare Function CryptCreateHash Lib "advapi32.dll" ( _
+000068:         ByVal hProv As Long, _
+000069:         ByVal Algid As Long, _
+000070:         ByVal hKey As Long, _
+000071:         ByVal dwFlags As Long, _
+000072:         ByRef phHash As Long) As Long
+000073:     Private Declare Function CryptHashData Lib "advapi32.dll" ( _
+000074:         ByVal hHash As Long, _
+000075:         ByRef pbData As Any, _
+000076:         ByVal dwDataLen As Long, _
+000077:         ByVal dwFlags As Long) As Long
+000078:     Private Declare Function CryptGetHashParam Lib "advapi32.dll" ( _
+000079:         ByVal hHash As Long, _
+000080:         ByVal dwParam As Long, _
+000081:         ByRef pbData As Any, _
+000082:         ByRef pdwDataLen As Long, _
+000083:         ByVal dwFlags As Long) As Long
+000084:     Private Declare Function CryptDestroyHash Lib "advapi32.dll" ( _
+000085:         ByVal hHash As Long) As Long
+000086:     Private Declare Function CryptReleaseContext Lib "advapi32.dll" ( _
+000087:         ByVal hProv As Long, _
+000088:         ByVal dwFlags As Long) As Long
+000089: #End If
+000090: 
+000091: Private Const OBR_MODULE_NAME As String = "PHOENIX_RSS_ORDER_BRIDGE"
+000092: Private Const OBR_BRIDGE_ARMED As Boolean = False
+000093: Private Const OBR_BRIDGE_ROOT_RELATIVE As String = "runtime/v7_rss_production/order_bridge"
+000094: Private Const OBR_ONEDRIVE_WEB_PREFIX As String = "https://d.docs.live.net/"
+000095: Private Const OBR_PENDING_RELATIVE As String = "outbox/pending"
+000096: Private Const OBR_PROCESSING_RELATIVE As String = "outbox/processing"
+000097: Private Const OBR_PROCESSED_RELATIVE As String = "outbox/processed"
+000098: Private Const OBR_FAILED_RELATIVE As String = "outbox/failed"
+000099: Private Const OBR_INBOX_RELATIVE As String = "inbox"
+000100: Private Const OBR_TRANSPORT_SHEET_NAME As String = "PHOENIX_RSS_TRANSPORT"
+000101: Private Const OBR_HEARTBEAT_MAX_AGE_SECONDS As Long = 90
+000102: Private Const OBR_READY_ERROR_MESSAGE As String = "heartbeat/rss/add-in/order transport not ready"
+000103: Private Const OBR_READY_BRIDGE_MESSAGE As String = "bridge not ready"
+000104: Private Const OBR_DUPLICATE_MESSAGE As String = "duplicate request"
+000105: Private Const OBR_REQUEST_READ_FAILED_MESSAGE As String = "request read failed"
+000106: Private Const OBR_SUBMIT_ACCEPTED_MESSAGE As String = "submit accepted"
+000107: Private Const OBR_CANCEL_ACCEPTED_MESSAGE As String = "cancel accepted"
+000108: Private Const OBR_DISCONNECTED_STATUS As String = "DISCONNECTED"
+000109: Private Const OBR_VALID_STATUS As String = "有効"
+000110: Private Const OBR_INVALID_STATUS As String = "無効"
+000111: Private Const OBR_DUPLICATE_STATUS As String = "DUPLICATE"
+000112: Private Const OBR_CORRUPT_STATUS As String = "CORRUPT"
+000113: Private Const OBR_UTF8_CODE_PAGE As Long = 65001
+000114: Private Const OBR_RSA_AES_PROV_TYPE As Long = 24
+000115: Private Const OBR_CRYPT_VERIFYCONTEXT As Long = &HF0000000
+000116: Private Const OBR_CALG_SHA_256 As Long = &H800C&
+000117: Private Const OBR_HP_HASHVAL As Long = &H2
+000118: 
+000119: Private Const OBR_REQ_SCHEMA_VERSION As Long = 0
+000120: Private Const OBR_REQ_REQUEST_ID As Long = 1
+000121: Private Const OBR_REQ_REQUEST_KIND As Long = 2
+000122: Private Const OBR_REQ_BROKER_ORDER_ID As Long = 3
+000123: Private Const OBR_REQ_CLIENT_ORDER_ID As Long = 4
+000124: Private Const OBR_REQ_STRATEGY_NAME As Long = 5
+000125: Private Const OBR_REQ_TICKER As Long = 6
+000126: Private Const OBR_REQ_SIDE As Long = 7
+000127: Private Const OBR_REQ_QUANTITY As Long = 8
+000128: Private Const OBR_REQ_ORDER_TYPE As Long = 9
+000129: Private Const OBR_REQ_LIMIT_PRICE As Long = 10
+000130: Private Const OBR_REQ_TARGET_PRICE As Long = 11
+000131: Private Const OBR_REQ_STOP_PRICE As Long = 12
+000132: Private Const OBR_REQ_STOP_TRIGGER_PRICE As Long = 13
+000133: Private Const OBR_REQ_ORDER_CATEGORY As Long = 14
+000134: Private Const OBR_REQ_EXECUTION_CONDITION As Long = 15
+000135: Private Const OBR_REQ_EXPIRATION As Long = 16
+000136: Private Const OBR_REQ_TRIGGER_CONDITION As Long = 17
+000137: Private Const OBR_REQ_POST_TRIGGER_ORDER_TYPE As Long = 18
+000138: Private Const OBR_REQ_LIVE_TRADING_ENABLED As Long = 19
+000139: Private Const OBR_REQ_PRODUCTION_TRANSPORT_ENABLED As Long = 20
+000140: Private Const OBR_REQ_ARMED As Long = 21
+000141: Private Const OBR_REQ_SUBMITTED_AT As Long = 22
+000142: Private Const OBR_REQ_TIMEOUT_SECONDS As Long = 23
+000143: Private Const OBR_REQ_MACRO_NAME As Long = 24
+000144: Private Const OBR_REQ_MESSAGE As Long = 25
+000145: Private Const OBR_REQ_BRIDGE_STATUS As Long = 26
+000146: Private Const OBR_REQ_PAYLOAD_SHA256 As Long = 27
+000147: Private Const OBR_REQ_CHECKSUM As Long = 28
+000148: 
+000149: Private Const OBR_REC_SCHEMA_VERSION As Long = 0
+000150: Private Const OBR_REC_REQUEST_ID As Long = 1
+000151: Private Const OBR_REC_REQUEST_KIND As Long = 2
+000152: Private Const OBR_REC_BROKER_ORDER_ID As Long = 3
+000153: Private Const OBR_REC_CLIENT_ORDER_ID As Long = 4
+000154: Private Const OBR_REC_BRIDGE_STATUS As Long = 5
+000155: Private Const OBR_REC_RESULT As Long = 6
+000156: Private Const OBR_REC_RSS_ORDER_STATUS As Long = 7
+000157: Private Const OBR_REC_RSS_ORDER_NUMBER As Long = 8
+000158: Private Const OBR_REC_TICKER As Long = 9
+000159: Private Const OBR_REC_QUANTITY As Long = 10
+000160: Private Const OBR_REC_TARGET_PRICE As Long = 11
+000161: Private Const OBR_REC_STOP_PRICE As Long = 12
+000162: Private Const OBR_REC_EXPIRATION As Long = 13
+000163: Private Const OBR_REC_TIMESTAMP As Long = 14
+000164: Private Const OBR_REC_MESSAGE As Long = 15
+000165: Private Const OBR_REC_ERROR_CODE As Long = 16
+000166: Private Const OBR_REC_ERROR_MESSAGE As Long = 17
+000167: Private Const OBR_REC_FILL_QUANTITY As Long = 18
+000168: Private Const OBR_REC_FILL_PRICE As Long = 19
+000169: Private Const OBR_REC_ORDERS_SUBMITTED As Long = 20
+000170: Private Const OBR_REC_REQUEST_CHECKSUM As Long = 21
+000171: Private Const OBR_REC_CHECKSUM As Long = 22
+000172: 
+000173: Private Type OBRBridgeReadyState
+000174:     ExcelAlive As Boolean
+000175:     RssConnected As Boolean
+000176:     AddInReady As Boolean
+000177:     OrderTransportReady As Boolean
+000178:     ArmedFalse As Boolean
+000179:     HeartbeatAgeSeconds As Long
+000180:     Ready As Boolean
+000181:     Reason As String
+000182: End Type
+000183: 
+000184: Public Sub RunPhoenixRssOrderBridgeConsumer()
+000185:     Dim rootPath As String
+000186:     Dim bridgeRoot As String
+000187: 
+000188:     rootPath = OBR_FindRepositoryRoot(ThisWorkbook.Path)
+000189:     bridgeRoot = OBR_BridgePath(rootPath, OBR_BRIDGE_ROOT_RELATIVE)
+000190:     OBR_EnsureBridgeDirectories bridgeRoot
+000191:     OBR_ReconcileBridgeState bridgeRoot
+000192:     OBR_ProcessBridgePendingRequests bridgeRoot
+000193: End Sub
+000194: 
+000195: Private Sub OBR_ProcessBridgePendingRequests(ByVal bridgeRoot As String)
+000196:     Dim pendingFolder As String
+000197:     Dim pendingFiles As Collection
+000198:     Dim pendingPath As Variant
+000199:     Dim cancelQueue As Collection
+000200: 
+000201:     pendingFolder = OBR_BridgePath(bridgeRoot, OBR_PENDING_RELATIVE)
+000202:     Set pendingFiles = OBR_PendingRequestFiles(pendingFolder)
+000203:     Set cancelQueue = New Collection
+000204: 
+000205:     For Each pendingPath In pendingFiles
+000206:         If FileExists(CStr(pendingPath)) Then
+000207:             OBR_ProcessPendingRequestPath bridgeRoot, CStr(pendingPath), cancelQueue
+000208:         End If
+000209:     Next pendingPath
+000210: 
+000211:     For Each pendingPath In cancelQueue
+000212:         If TypeName(pendingPath) = "Dictionary" Then
+000213:             OBR_ProcessQueuedCancelRecord bridgeRoot, pendingPath
+000214:         End If
+000215:     Next pendingPath
+000216: End Sub
+000217: 
+000218: Private Sub OBR_ReconcileBridgeState(ByVal bridgeRoot As String)
+000219:     OBR_ReconcileBridgeProcessing bridgeRoot
+000220:     OBR_ReconcileArchivedRequestFolder bridgeRoot, OBR_PROCESSED_RELATIVE
+000221:     OBR_ReconcileArchivedRequestFolder bridgeRoot, OBR_FAILED_RELATIVE
+000222: End Sub
+000223: 
+000224: Private Sub OBR_ReconcileBridgeProcessing(ByVal bridgeRoot As String)
+000225:     Dim processingFolder As String
+000226:     Dim processingFiles As Collection
+000227:     Dim filePath As Variant
+000228:     Dim fileStem As String
+000229: 
+000230:     processingFolder = OBR_BridgePath(bridgeRoot, OBR_PROCESSING_RELATIVE)
+000231:     Set processingFiles = OBR_FolderCsvFiles(processingFolder)
+000232:     For Each filePath In processingFiles
+000233:         fileStem = OBR_FileBaseName(CStr(filePath))
+000234:         If StrComp(Left$(fileStem, 9), "receipt__", vbTextCompare) <> 0 Then
+000235:             OBR_ReconcileProcessingRequestPath bridgeRoot, CStr(filePath)
+000236:         End If
+000237:     Next filePath
+000238: 
+000239:     Set processingFiles = OBR_FolderCsvFiles(processingFolder)
+000240:     For Each filePath In processingFiles
+000241:         fileStem = OBR_FileBaseName(CStr(filePath))
+000242:         If StrComp(Left$(fileStem, 9), "receipt__", vbTextCompare) = 0 Then
+000243:             OBR_ReconcileProcessingReceiptStagePath bridgeRoot, CStr(filePath)
+000244:         End If
+000245:     Next filePath
+000246: End Sub
+000247: 
+000248: Private Sub OBR_ReconcileProcessingRequestPath(ByVal bridgeRoot As String, ByVal requestPath As String)
+000249:     Dim requestId As String
+000250:     Dim requestRow As Variant
+000251:     Dim requestChecksum As String
+000252:     Dim historyPath As String
+000253:     Dim historyStatus As String
+000254:     Dim stagePath As String
+000255:     Dim archivePath As String
+000256:     Dim stageIsSuccess As Boolean
+000257: 
+000258:     requestId = OBR_FileBaseName(requestPath)
+000259: 
+000260:     On Error GoTo RequestRecoverFail
+000261:     requestRow = ReadSingleCsvRecord(requestPath, OBR_RequestColumns())
+000262:     requestId = ValidateRequiredText(requestRow(OBR_REQ_REQUEST_ID), "request_id")
+000263:     requestChecksum = NormalizeText(requestRow(OBR_REQ_CHECKSUM))
+000264:     stagePath = OBR_BridgePath(bridgeRoot, OBR_PROCESSING_RELATIVE & "\receipt__" & requestId & ".csv")
+000265: 
+000266:     If FileExists(stagePath) Then
+000267:         stageIsSuccess = OBR_ReceiptIsSuccessfulRequest(stagePath, requestId, requestChecksum)
+000268:         If stageIsSuccess Then
+000269:             archivePath = OBR_RequestArchivePath(bridgeRoot, requestId, "processed")
+000270:         Else
+000271:             archivePath = OBR_RequestArchivePath(bridgeRoot, requestId, "failed")
+000272:         End If
+000273:         OBR_MoveFileOrDeleteIfExists requestPath, archivePath
+000274:         Exit Sub
+000275:     End If
+000276: 
+000277:     historyStatus = OBR_RequestHistoryStatus(bridgeRoot, requestId, requestChecksum, historyPath)
+000278:     If historyStatus = "MATCH" Then
+000279:         OBR_MoveFileOrDeleteIfExists requestPath, historyPath
+000280:         Exit Sub
+000281:     End If
+000282: 
+000283:     archivePath = OBR_RequestArchivePath(bridgeRoot, requestId, "failed")
+000284:     OBR_MoveFileOrDeleteIfExists requestPath, archivePath
+000285:     Exit Sub
+000286: 
+000287: RequestRecoverFail:
+000288:     On Error Resume Next
+000289:     OBR_MoveFileOrDeleteIfExists requestPath, OBR_RequestArchivePath(bridgeRoot, requestId, "failed")
+000290:     On Error GoTo 0
+000291: End Sub
+000292: 
+000293: Private Sub OBR_ReconcileProcessingReceiptStagePath(ByVal bridgeRoot As String, ByVal receiptStagePath As String)
+000294:     Dim requestId As String
+000295:     Dim receiptPath As String
+000296: 
+000297:     requestId = OBR_ReceiptStageRequestId(receiptStagePath)
+000298:     If Len(requestId) = 0 Then Exit Sub
+000299:     receiptPath = OBR_BridgePath(bridgeRoot, OBR_INBOX_RELATIVE & "\" & requestId & ".csv")
+000300:     OBR_FinalizePublishReceiptStage receiptStagePath, receiptPath, requestId
+000301: End Sub
+000302: 
+000303: Private Function OBR_ReceiptStageRequestId(ByVal receiptStagePath As String) As String
+000304:     Dim fileStem As String
+000305: 
+000306:     fileStem = OBR_FileBaseName(receiptStagePath)
+000307:     If StrComp(Left$(fileStem, 9), "receipt__", vbTextCompare) <> 0 Then Exit Function
+000308:     OBR_ReceiptStageRequestId = Mid$(fileStem, 10)
+000309: End Function
+000310: 
+000311: Private Sub OBR_ReconcileArchivedRequestFolder(ByVal bridgeRoot As String, ByVal archiveRelative As String)
+000312:     Dim archiveFolder As String
+000313:     Dim archiveFiles As Collection
+000314:     Dim archivePath As Variant
+000315: 
+000316:     archiveFolder = OBR_BridgePath(bridgeRoot, archiveRelative)
+000317:     Set archiveFiles = OBR_FolderCsvFiles(archiveFolder)
+000318:     For Each archivePath In archiveFiles
+000319:         OBR_ReconcileArchivedRequestPath bridgeRoot, CStr(archivePath), archiveRelative
+000320:     Next archivePath
+000321: End Sub
+000322: 
+000323: Private Sub OBR_ReconcileArchivedRequestPath(ByVal bridgeRoot As String, ByVal archivePath As String, ByVal archiveRelative As String)
+000324:     Dim requestRow As Variant
+000325:     Dim requestId As String
+000326:     Dim requestKind As String
+000327:     Dim receiptPath As String
+000328:     Dim receiptStagePath As String
+000329:     Dim receiptValues As Variant
+000330:     Dim submitFields As Variant
+000331:     Dim mergedRow As Variant
+000332: 
+000333:     On Error GoTo ArchiveRecoverFail
+000334:     requestRow = ReadSingleCsvRecord(archivePath, OBR_RequestColumns())
+000335:     requestId = ValidateRequiredText(requestRow(OBR_REQ_REQUEST_ID), "request_id")
+000336:     receiptPath = OBR_BridgePath(bridgeRoot, OBR_INBOX_RELATIVE & "\" & requestId & ".csv")
+000337:     receiptStagePath = OBR_BridgePath(bridgeRoot, OBR_PROCESSING_RELATIVE & "\receipt__" & requestId & ".csv")
+000338:     If StrComp(archiveRelative, OBR_PROCESSED_RELATIVE, vbTextCompare) = 0 Then
+000339:         requestKind = UCase$(ValidateRequiredText(requestRow(OBR_REQ_REQUEST_KIND), "request_kind"))
+000340:         If requestKind = "CANCEL" Then
+000341:             submitFields = OBR_LoadSubmitHistoryFields(bridgeRoot, NormalizeText(requestRow(OBR_REQ_BROKER_ORDER_ID)), NormalizeText(requestRow(OBR_REQ_CLIENT_ORDER_ID)))
+000342:             mergedRow = requestRow
+000343:             If Not IsEmpty(submitFields) Then
+000344:                 mergedRow = OBR_MergeCancelRequestRow(requestRow, submitFields)
+000345:             End If
+000346:             receiptValues = OBR_BuildReceiptValues( _
+000347:                 mergedRow, _
+000348:                 CurrentJst(), _
+000349:                 "ACCEPTED", _
+000350:                 "CANCELED", _
+000351:                 OBR_INVALID_STATUS, _
+000352:                 NormalizeText(mergedRow(OBR_REQ_BROKER_ORDER_ID)), _
+000353:                 OBR_CANCEL_ACCEPTED_MESSAGE, _
+000354:                 "", _
+000355:                 OBR_CANCEL_ACCEPTED_MESSAGE)
+000356:         ElseIf requestKind = "SUBMIT" Then
+000357:             receiptValues = OBR_BuildReceiptValues( _
+000358:                 requestRow, _
+000359:                 CurrentJst(), _
+000360:                 "ACCEPTED", _
+000361:                 "ACCEPTED", _
+000362:                 OBR_VALID_STATUS, _
+000363:                 NormalizeText(requestRow(OBR_REQ_BROKER_ORDER_ID)), _
+
+--- LINES 451-583 ---
+000451: 
+000452: ReadFail:
+000453:     On Error GoTo 0
+000454:     OBR_FinalizeRejectedRequest bridgeRoot, requestPath, OBR_SyntheticRequestRow(OBR_FileBaseName(requestPath), "", "", ""), OBR_REQUEST_READ_FAILED_MESSAGE, "REQUEST_READ_FAILED", "Could not read request CSV: " & OBR_FileBaseName(requestPath)
+000455: End Sub
+000456: 
+000457: Private Sub OBR_ProcessQueuedCancelRecord(ByVal bridgeRoot As String, ByVal cancelRecord As Object)
+000458:     Dim requestPath As String
+000459:     Dim requestRow As Variant
+000460: 
+000461:     requestPath = CStr(cancelRecord("path"))
+000462:     requestRow = cancelRecord("row")
+000463:     OBR_ProcessCancelRequestRow bridgeRoot, requestPath, requestRow
+000464: End Sub
+000465: 
+000466: Private Sub OBR_ProcessSubmitRequestRow(ByVal bridgeRoot As String, ByVal requestPath As String, ByVal requestRow As Variant)
+000467:     Dim requestId As String
+000468:     Dim requestChecksum As String
+000469:     Dim historyPath As String
+000470:     Dim historyStatus As String
+000471:     Dim readyState As OBRBridgeReadyState
+000472:     Dim receiptValues As Variant
+000473: 
+000474:     On Error GoTo SubmitFail
+000475:     requestId = ValidateRequiredText(requestRow(OBR_REQ_REQUEST_ID), "request_id")
+000476:     requestChecksum = NormalizeText(requestRow(OBR_REQ_CHECKSUM))
+000477:     historyStatus = OBR_RequestHistoryStatus(bridgeRoot, requestId, requestChecksum, historyPath)
+000478:     If historyStatus = "MATCH" Then
+000479:         OBR_FinalizeAcceptedDuplicate bridgeRoot, requestPath, requestRow
+000480:         Exit Sub
+000481:     End If
+000482:     If historyStatus = "FAILED" Then
+000483:         OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, "failed request history", "FAILED_HISTORY_MATCH", "failed request history match"
+000484:         Exit Sub
+000485:     End If
+000486:     If historyStatus = "MISMATCH" Then
+000487:         OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, "request checksum conflict", "REQUEST_CHECKSUM_CONFLICT", "request_id checksum conflict"
+000488:         Exit Sub
+000489:     End If
+000490: 
+000491:     OBR_ReadBridgeReadyState readyState
+000492:     If Not readyState.Ready Then
+000493:         OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, OBR_READY_BRIDGE_MESSAGE, "READY_STATE_FALSE", OBR_READY_ERROR_MESSAGE, OBR_DISCONNECTED_STATUS
+000494:         Exit Sub
+000495:     End If
+000496: 
+000497:     receiptValues = OBR_BuildReceiptValues( _
+000498:         requestRow, _
+000499:         CurrentJst(), _
+000500:         "ACCEPTED", _
+000501:         "ACCEPTED", _
+000502:         OBR_VALID_STATUS, _
+000503:         NormalizeText(requestRow(OBR_REQ_BROKER_ORDER_ID)), _
+000504:         OBR_SUBMIT_ACCEPTED_MESSAGE, _
+000505:         "", _
+000506:         OBR_SUBMIT_ACCEPTED_MESSAGE)
+000507: 
+000508:     OBR_FinalizeAcceptedRequest bridgeRoot, requestPath, receiptValues, "processed"
+000509:     Exit Sub
+000510: 
+000511: SubmitFail:
+000512:     On Error GoTo 0
+000513:     OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, "processing failed", Err.Source, Err.Description
+000514: End Sub
+000515: 
+000516: Private Sub OBR_ProcessCancelRequestRow(ByVal bridgeRoot As String, ByVal requestPath As String, ByVal requestRow As Variant)
+000517:     Dim requestId As String
+000518:     Dim requestChecksum As String
+000519:     Dim historyPath As String
+000520:     Dim historyStatus As String
+000521:     Dim readyState As OBRBridgeReadyState
+000522:     Dim submitFields As Variant
+000523:     Dim mergedRow As Variant
+000524:     Dim receiptValues As Variant
+000525: 
+000526:     On Error GoTo CancelFail
+000527:     requestId = ValidateRequiredText(requestRow(OBR_REQ_REQUEST_ID), "request_id")
+000528:     requestChecksum = NormalizeText(requestRow(OBR_REQ_CHECKSUM))
+000529:     historyStatus = OBR_RequestHistoryStatus(bridgeRoot, requestId, requestChecksum, historyPath)
+000530:     If historyStatus = "MATCH" Then
+000531:         OBR_FinalizeAcceptedDuplicate bridgeRoot, requestPath, requestRow
+000532:         Exit Sub
+000533:     End If
+000534:     If historyStatus = "FAILED" Then
+000535:         OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, "failed request history", "FAILED_HISTORY_MATCH", "failed request history match"
+000536:         Exit Sub
+000537:     End If
+000538:     If historyStatus = "MISMATCH" Then
+000539:         OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, "request checksum conflict", "REQUEST_CHECKSUM_CONFLICT", "request_id checksum conflict"
+000540:         Exit Sub
+000541:     End If
+000542: 
+000543:     OBR_ReadBridgeReadyState readyState
+000544:     If Not readyState.Ready Then
+000545:         OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, OBR_READY_BRIDGE_MESSAGE, "READY_STATE_FALSE", OBR_READY_ERROR_MESSAGE, OBR_DISCONNECTED_STATUS
+000546:         Exit Sub
+000547:     End If
+000548: 
+000549:     submitFields = OBR_LoadSubmitHistoryFields(bridgeRoot, NormalizeText(requestRow(OBR_REQ_BROKER_ORDER_ID)), NormalizeText(requestRow(OBR_REQ_CLIENT_ORDER_ID)))
+000550:     If IsEmpty(submitFields) Then
+000551:         OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, "related submit not found", "RELATED_SUBMIT_NOT_FOUND", "related submit not found"
+000552:         Exit Sub
+000553:     End If
+000554: 
+000555:     mergedRow = OBR_MergeCancelRequestRow(requestRow, submitFields)
+000556:     receiptValues = OBR_BuildReceiptValues( _
+000557:         mergedRow, _
+000558:         CurrentJst(), _
+000559:         "ACCEPTED", _
+000560:         "CANCELED", _
+000561:         OBR_INVALID_STATUS, _
+000562:         NormalizeText(mergedRow(OBR_REQ_BROKER_ORDER_ID)), _
+000563:         OBR_CANCEL_ACCEPTED_MESSAGE, _
+000564:         "", _
+000565:         OBR_CANCEL_ACCEPTED_MESSAGE)
+000566: 
+000567:     OBR_FinalizeAcceptedRequest bridgeRoot, requestPath, receiptValues, "processed"
+000568:     Exit Sub
+000569: 
+000570: CancelFail:
+000571:     On Error GoTo 0
+000572:     OBR_FinalizeRejectedRequest bridgeRoot, requestPath, requestRow, "processing failed", Err.Source, Err.Description
+000573: End Sub
+000574: 
+000575: Private Sub OBR_FinalizeAcceptedDuplicate(ByVal bridgeRoot As String, ByVal requestPath As String, ByVal requestRow As Variant)
+000576:     Dim requestId As String
+000577:     Dim processingPath As String
+000578:     Dim archivePath As String
+000579: 
+000580:     requestId = NormalizeText(requestRow(OBR_REQ_REQUEST_ID))
+000581:     processingPath = OBR_BridgePath(bridgeRoot, OBR_PROCESSING_RELATIVE & "\" & requestId & ".csv")
+000582:     archivePath = OBR_RequestArchivePath(bridgeRoot, requestId, "processed")
+000583:     On Error GoTo DuplicateFail
+
+--- LINES 653-756 ---
+000653:         If StrComp(existingChecksum, receiptChecksum, vbBinaryCompare) = 0 Then
+000654:             stagedReceipt = True
+000655:         Else
+000656:             Err.Raise vbObjectError + 7816, OBR_MODULE_NAME, "Receipt stage already exists: " & receiptStagePath
+000657:         End If
+000658:     ElseIf FileExists(receiptPath) Then
+000659:         existingChecksum = OBR_ReceiptChecksumAtPath(receiptPath)
+000660:         If StrComp(existingChecksum, receiptChecksum, vbBinaryCompare) = 0 Then
+000661:             stagedReceipt = False
+000662:         Else
+000663:             Err.Raise vbObjectError + 7817, OBR_MODULE_NAME, "Receipt path already exists: " & receiptPath
+000664:         End If
+000665:     Else
+000666:         WriteCsvRecordAtomic receiptStagePath, OBR_ReceiptColumns(), receiptValues
+000667:         stagedReceipt = True
+000668:     End If
+000669: 
+000670:     OBR_MoveFileOrDeleteIfExists processingPath, archivePath
+000671: 
+000672:     If stagedReceipt Then
+000673:         OBR_FinalizePublishReceiptStage receiptStagePath, receiptPath, requestId
+000674:     End If
+000675:     Exit Sub
+000676: 
+000677: FinalizeFail:
+000678:     errorNumber = Err.Number
+000679:     errorSource = Err.Source
+000680:     errorDescription = Err.Description
+000681:     On Error GoTo 0
+000682:     Err.Raise errorNumber, errorSource, errorDescription
+000683: End Sub
+000684: 
+000685: Private Function OBR_RequestArchivePath(ByVal bridgeRoot As String, ByVal requestId As String, ByVal archiveStatus As String) As String
+000686:     If LCase$(archiveStatus) = "failed" Then
+000687:         OBR_RequestArchivePath = OBR_BridgePath(bridgeRoot, OBR_FAILED_RELATIVE & "\" & requestId & ".csv")
+000688:     Else
+000689:         OBR_RequestArchivePath = OBR_BridgePath(bridgeRoot, OBR_PROCESSED_RELATIVE & "\" & requestId & ".csv")
+000690:     End If
+000691: End Function
+000692: 
+000693: Private Sub OBR_ReadBridgeReadyState(ByRef readyState As OBRBridgeReadyState)
+000694:     Dim sheet As Object
+000695:     Dim addInReason As String
+000696:     Dim heartbeatText As String
+000697:     Dim heartbeatAt As Date
+000698:     Dim ageSeconds As Long
+000699: 
+000700:     On Error GoTo ReadyFail
+000701:     Set sheet = ThisWorkbook.Worksheets(OBR_TRANSPORT_SHEET_NAME)
+000702:     readyState.ArmedFalse = Not IsTruthyValue(sheet.Range("B2").Value2)
+000703:     readyState.ExcelAlive = IsTruthyValue(sheet.Range("J2").Value2)
+000704:     readyState.RssConnected = IsTruthyValue(sheet.Range("J3").Value2)
+000705:     readyState.AddInReady = IsTruthyValue(sheet.Range("J4").Value2)
+000706:     readyState.OrderTransportReady = IsTruthyValue(sheet.Range("J5").Value2)
+000707:     heartbeatText = NormalizeText(sheet.Range("J6").Value2)
+000708:     heartbeatAt = ParseJstTimestamp(heartbeatText, "heartbeat")
+000709:     ageSeconds = DateDiff("s", heartbeatAt, CurrentJst())
+000710:     readyState.HeartbeatAgeSeconds = ageSeconds
+000711:     If Not OBR_CheckRequiredAddIns(addInReason) Then
+000712:         readyState.Reason = addInReason
+000713:         readyState.Ready = False
+000714:         Exit Sub
+000715:     End If
+000716:     readyState.Ready = readyState.ExcelAlive And readyState.RssConnected And readyState.AddInReady And readyState.OrderTransportReady And readyState.ArmedFalse And (Not OBR_BRIDGE_ARMED) And ageSeconds >= 0 And ageSeconds <= OBR_HEARTBEAT_MAX_AGE_SECONDS
+000717:     If Not readyState.Ready Then
+000718:         readyState.Reason = OBR_READY_ERROR_MESSAGE
+000719:     End If
+000720:     Exit Sub
+000721: 
+000722: ReadyFail:
+000723:     readyState.Ready = False
+000724:     readyState.Reason = "Transport sheet status is unreadable."
+000725: End Sub
+000726: 
+000727: Private Function OBR_CheckRequiredAddIns(ByRef reason As String) As Boolean
+000728:     Dim addInNames As Variant
+000729:     Dim addInName As Variant
+000730:     Dim addIn As Object
+000731:     Dim installed As Boolean
+000732: 
+000733:     addInNames = Array("MarketSpeed2_RSS_64bit.xll", "MarketSpeed2_RSS_VBA.xlam")
+000734:     On Error GoTo AddInFail
+000735:     For Each addInName In addInNames
+000736:         installed = False
+000737:         For Each addIn In Application.AddIns
+000738:             If StrComp(NormalizeText(addIn.Name), CStr(addInName), vbTextCompare) = 0 Then
+000739:                 installed = CBool(addIn.Installed)
+000740:                 Exit For
+000741:             End If
+000742:         Next addIn
+000743:         If Not installed Then
+000744:             reason = "Missing RSS add-in: " & CStr(addInName)
+000745:             OBR_CheckRequiredAddIns = False
+000746:             Exit Function
+000747:         End If
+000748:     Next addInName
+000749:     OBR_CheckRequiredAddIns = True
+000750:     Exit Function
+000751: 
+000752: AddInFail:
+000753:     reason = "RSS add-in list is unavailable."
+000754:     OBR_CheckRequiredAddIns = False
+000755: End Function
+000756: 
+
+
+===== FILE: run_phoenix.py =====
+
+--- LINES 1-88 ---
+000001: # run_phoenix.py
+000002: 
+000003: from __future__ import annotations
+000004: 
+000005: from datetime import datetime
+000006: from pathlib import Path
+000007: import argparse
+000008: import os
+000009: import subprocess
+000010: import sys
+000011: import time
+000012: from typing import Any
+000013: 
+000014: from phoenix_disaster_recovery import (
+000015:     MAX_RECOVERY_ATTEMPTS_HARD_LIMIT,
+000016:     RecoveryRequiredExit,
+000017:     RecoverySession,
+000018:     run_disaster_recovery,
+000019: )
+000020: from phoenix_fail_safe import FailSafeController, FailSafeExit
+000021: from phoenix_heartbeat import PhoenixHeartbeat
+000022: from phoenix_core.virtual_rss_paper import prepare_quote_environment
+000023: from position_reconciliation import run_position_reconciliation
+000024: from repository_guardian import run_repository_guardian
+000025: from weekly_signal_comparison import run_latest_weekly_signal_comparison
+000026: 
+000027: 
+000028: # =========================================================
+000029: # 基本設定
+000030: # =========================================================
+000031: 
+000032: ROOT_DIR = Path(__file__).resolve().parent
+000033: LOG_DIR = ROOT_DIR / "logs"
+000034: REPORT_DIR = ROOT_DIR / "reports"
+000035: DATA_DIR = ROOT_DIR / "data"
+000036: 
+000037: LOG_FILE = LOG_DIR / (
+000038:     "phoenix_"
+000039:     + datetime.now().strftime("%Y%m%d")
+000040:     + ".log"
+000041: )
+000042: 
+000043: PROCESS_TIMEOUT_SECONDS = 1800
+000044: MAX_POSITION_STATE_AGE_SECONDS = 24 * 60 * 60
+000045: 
+000046: STOP_ON_REQUIRED_FAILURE = True
+000047: 
+000048: _ACTIVE_HEARTBEAT: PhoenixHeartbeat | None = None
+000049: _ACTIVE_FAIL_SAFE: FailSafeController | None = None
+000050: _ACTIVE_RECOVERY_SESSION: RecoverySession | None = None
+000051: 
+000052: 
+000053: # =========================================================
+000054: # 実行タスク
+000055: # =========================================================
+000056: #
+000057: # required=True
+000058: #   失敗した場合、後続処理を停止します。
+000059: #
+000060: # required=False
+000061: #   ファイルが存在しない場合や処理が失敗した場合も、
+000062: #   後続処理を続行します。
+000063: #
+000064: # enabled=False
+000065: #   一時的に実行対象から外せます。
+000066: #
+000067: # PHOENIX v2.8 実行順
+000068: #
+000069: # 1. Market Risk AI
+000070: # 2. Price Monitor
+000071: # 3. 日経225構成銘柄更新
+000072: # 4. 日次スキャン・レポート
+000073: # 5. Learning Engine
+000074: # 6. AI売買判断
+000075: # 7. ランキングAI
+000076: # 8. チャート生成
+000077: # 9. LINE・Discord通知
+000078: #
+000079: 
+000080: TASKS: list[dict[str, Any]] = [
+000081:     {
+000082:         "name": "Market Risk AI",
+000083:         "script": "market_risk_ai.py",
+000084:         "required": True,
+000085:         "enabled": True,
+000086:     },
+000087:     {
+000088:         "name": "Price Monitor",
+
+--- LINES 867-1002 ---
+000867:         )
+000868:     )
+000869:     write_log(
+000870:         "Market Guard : "
+000871:         + phase_status(
+000872:             {"market_risk_ai.py"},
+000873:             "READY",
+000874:         )
+000875:     )
+000876:     write_log(
+000877:         "AI           : "
+000878:         + phase_status(
+000879:             {
+000880:                 "learning_engine.py",
+000881:                 "ai_judgement.py",
+000882:                 "trade_engine.py",
+000883:                 "ranking_ai.py",
+000884:             },
+000885:             "OK",
+000886:         )
+000887:     )
+000888:     write_log(
+000889:         "Notify       : "
+000890:         + phase_status(
+000891:             {"notify.py"},
+000892:             "SUCCESS",
+000893:         )
+000894:     )
+000895:     write_log(
+000896:         "Scheduler    : MONITORING"
+000897:         if monitor_only
+000898:         else "Scheduler    : READY"
+000899:     )
+000900:     if commit is not None:
+000901:         write_log(f"Git Commit   : {commit}")
+000902:     write_log(f"Elapsed      : {elapsed_total:.1f} s")
+000903:     write_log(f"Exit Code    : {exit_code}")
+000904:     write_log("=" * 90)
+000905: 
+000906: 
+000907: def _parse_reconciliation_timestamp(value: object) -> datetime | None:
+000908:     if not isinstance(value, str) or not value.strip():
+000909:         return None
+000910:     try:
+000911:         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+000912:     except ValueError:
+000913:         return None
+000914:     if parsed.tzinfo is None or parsed.utcoffset() is None:
+000915:         return None
+000916:     return parsed
+000917: 
+000918: 
+000919: def _is_monitor_only_reconciliation(
+000920:     reconciliation_result: object,
+000921:     *,
+000922:     guardian_status: object,
+000923: ) -> bool:
+000924:     if guardian_status != "READY":
+000925:         return False
+000926:     if getattr(reconciliation_result, "status", None) != "WARNING":
+000927:         return False
+000928:     if getattr(reconciliation_result, "reasons", None) != (
+000929:         "POSITIONS_PRESENT",
+000930:     ):
+000931:         return False
+000932:     if getattr(reconciliation_result, "mode", None) != "PAPER":
+000933:         return False
+000934:     orders_submitted = getattr(
+000935:         reconciliation_result,
+000936:         "orders_submitted",
+000937:         None,
+000938:     )
+000939:     if (
+000940:         isinstance(orders_submitted, bool)
+000941:         or not isinstance(orders_submitted, int)
+000942:         or orders_submitted != 0
+000943:     ):
+000944:         return False
+000945:     positions_count = getattr(reconciliation_result, "positions_count", None)
+000946:     if (
+000947:         isinstance(positions_count, bool)
+000948:         or not isinstance(positions_count, int)
+000949:         or positions_count <= 0
+000950:     ):
+000951:         return False
+000952:     if getattr(reconciliation_result, "guardian_status", None) != "READY":
+000953:         return False
+000954:     if getattr(reconciliation_result, "report_error", None) is not None:
+000955:         return False
+000956:     if getattr(reconciliation_result, "exit_code", None) != 0:
+000957:         return False
+000958:     checked_at = _parse_reconciliation_timestamp(
+000959:         getattr(reconciliation_result, "checked_at", None)
+000960:     )
+000961:     source_timestamp = _parse_reconciliation_timestamp(
+000962:         getattr(reconciliation_result, "source_timestamp", None)
+000963:     )
+000964:     if checked_at is None or source_timestamp is None:
+000965:         return False
+000966:     age_seconds = (checked_at - source_timestamp).total_seconds()
+000967:     return 0 <= age_seconds <= MAX_POSITION_STATE_AGE_SECONDS
+000968: 
+000969: 
+000970: def _format_weekly_signal_comparison_counts(counts: dict[str, int]) -> str:
+000971:     ordered_keys = ("new", "continued", "upgraded", "downgraded", "excluded")
+000972:     return ", ".join(
+000973:         f"{key}={counts.get(key, 0)}"
+000974:         for key in ordered_keys
+000975:     )
+000976: 
+000977: 
+000978: def _log_weekly_signal_comparison_result(result: dict[str, Any]) -> None:
+000979:     write_log("=" * 90)
+000980:     write_log("WEEKLY SIGNAL COMPARISON")
+000981:     status = str(result.get("status", "READY"))
+000982:     write_log(f"Status       : {status}")
+000983: 
+000984:     if status == "SKIPPED":
+000985:         selection = result.get("selection")
+000986:         if isinstance(selection, dict):
+000987:             write_log(
+000988:                 "Source date  : "
+000989:                 f"{selection.get('source_report_date') or '-'}"
+000990:             )
+000991:             write_log(
+000992:                 "Target date  : "
+000993:                 f"{selection.get('target_report_date') or '-'}"
+000994:             )
+000995:         reason = result.get("reason")
+000996:         if reason is not None:
+000997:             write_log(f"Reason       : {reason}")
+000998:         return
+000999: 
+001000:     source = result["source"]
+001001:     target = result["target"]
+001002:     write_log(
+
+--- LINES 1013-1294 ---
+001013:             result.get("signal_change_counts", {})
+001014:         )
+001015:     )
+001016:     safety = result["safety"]
+001017:     write_log(
+001018:         "Safety       : "
+001019:         f"broker_mode={safety['broker_mode']}, "
+001020:         f"orders_submitted={safety['orders_submitted']}, "
+001021:         f"trading_actions=DISABLED, "
+001022:         f"external_connections={safety['external_connections']}, "
+001023:         f"notification_sent={safety['notification_sent']}"
+001024:     )
+001025:     paths = result.get("paths")
+001026:     if isinstance(paths, dict) and paths:
+001027:         write_log(
+001028:             "Saved to     : "
+001029:             + ", ".join(f"{name.upper()}={path}" for name, path in paths.items())
+001030:         )
+001031: 
+001032: 
+001033: def _run_weekly_signal_comparison() -> dict[str, Any] | None:
+001034:     target_date = datetime.now().date()
+001035:     try:
+001036:         result = run_latest_weekly_signal_comparison(
+001037:             target_date,
+001038:             report_dir=REPORT_DIR,
+001039:             output_dir=REPORT_DIR,
+001040:         )
+001041:     except Exception as error:
+001042:         write_log("=" * 90)
+001043:         write_log("WEEKLY SIGNAL COMPARISON OPTIONAL FAILURE")
+001044:         write_log(f"Target date  : {target_date.isoformat()}")
+001045:         write_log(f"{type(error).__name__}: {error}")
+001046:         return None
+001047: 
+001048:     _log_weekly_signal_comparison_result(result)
+001049:     return result
+001050: 
+001051: 
+001052: def _run_main() -> None:
+001053:     global _ACTIVE_FAIL_SAFE, _ACTIVE_HEARTBEAT, _ACTIVE_RECOVERY_SESSION
+001054:     fail_safe = FailSafeController(
+001055:         repository_root=ROOT_DIR,
+001056:         log_dir=LOG_DIR,
+001057:     )
+001058:     _ACTIVE_FAIL_SAFE = fail_safe
+001059:     configure_console()
+001060:     guardian_result = run_repository_guardian(report_dir=LOG_DIR)
+001061:     guardian_status = getattr(
+001062:         guardian_result,
+001063:         "status",
+001064:         "READY" if guardian_result.ready else "BLOCKED",
+001065:     )
+001066:     fail_safe.update_statuses(guardian_status=guardian_status)
+001067:     if not guardian_result.ready:
+001068:         reasons = ", ".join(guardian_result.reasons) or "unknown"
+001069:         print(
+001070:             "PHOENIX START BLOCKED BY REPOSITORY GUARDIAN: " + reasons,
+001071:             file=sys.stderr,
+001072:             flush=True,
+001073:         )
+001074:         if guardian_result.report_error:
+001075:             print(
+001076:                 "Repository Guardian report error: "
+001077:                 + guardian_result.report_error,
+001078:                 file=sys.stderr,
+001079:                 flush=True,
+001080:             )
+001081:         fail_safe.fail_and_exit(
+001082:             "GUARDIAN_BLOCKED",
+001083:             guardian_status=guardian_status,
+001084:         )
+001085:     reconciliation_result = run_position_reconciliation(
+001086:         guardian_status=guardian_status,
+001087:         report_dir=LOG_DIR,
+001088:     )
+001089:     fail_safe.update_statuses(position_status=reconciliation_result.status)
+001090:     monitor_only = _is_monitor_only_reconciliation(
+001091:         reconciliation_result,
+001092:         guardian_status=guardian_status,
+001093:     )
+001094:     if reconciliation_result.status != "READY" and not monitor_only:
+001095:         reasons = ", ".join(reconciliation_result.reasons) or "unknown"
+001096:         print(
+001097:             "PHOENIX START BLOCKED BY POSITION RECONCILIATION: " + reasons,
+001098:             file=sys.stderr,
+001099:             flush=True,
+001100:         )
+001101:         if reconciliation_result.report_error:
+001102:             print(
+001103:                 "Position Reconciliation report error: "
+001104:                 + reconciliation_result.report_error,
+001105:                 file=sys.stderr,
+001106:                 flush=True,
+001107:             )
+001108:         fail_safe.fail_and_exit(
+001109:             "POSITION_BLOCKED",
+001110:             position_status=reconciliation_result.status,
+001111:         )
+001112:     if monitor_only:
+001113:         fail_safe.enable_monitor_only()
+001114:     raw_restart_attempt = os.environ.get("PHOENIX_WATCHDOG_RESTART_ATTEMPT", "0")
+001115:     try:
+001116:         watchdog_restart_attempt = int(raw_restart_attempt)
+001117:     except ValueError as error:
+001118:         raise RuntimeError("WatchDog restart attempt is invalid") from error
+001119:     if not 0 <= watchdog_restart_attempt <= MAX_RECOVERY_ATTEMPTS_HARD_LIMIT:
+001120:         raise RuntimeError("WatchDog restart attempt is outside the safety limit")
+001121:     recovery_result = run_disaster_recovery(
+001122:         guardian_status=guardian_status,
+001123:         position_status=reconciliation_result.status,
+001124:         repository_root=ROOT_DIR,
+001125:         expected_repository_root=getattr(
+001126:             guardian_result, "expected_root", ROOT_DIR
+001127:         ),
+001128:         state_path=ROOT_DIR / "runtime" / "guardian" / "recovery_state.json",
+001129:         report_dir=LOG_DIR,
+001130:         current_mode=reconciliation_result.mode,
+001131:         current_orders_submitted=reconciliation_result.orders_submitted,
+001132:         watchdog_restart_attempt=watchdog_restart_attempt,
+001133:         monitor_only=monitor_only,
+001134:         position_reasons=tuple(reconciliation_result.reasons),
+001135:     )
+001136:     if recovery_result.blocked:
+001137:         reasons = ", ".join(recovery_result.recovery_reasons) or "unknown"
+001138:         print(
+001139:             "PHOENIX START BLOCKED BY DISASTER RECOVERY: " + reasons,
+001140:             file=sys.stderr,
+001141:             flush=True,
+001142:         )
+001143:         fail_safe.fail_and_exit("DISASTER_RECOVERY_BLOCKED")
+001144:     if recovery_result.recovery_required:
+001145:         reasons = ", ".join(recovery_result.recovery_reasons) or "unknown"
+001146:         print(
+001147:             "PHOENIX RECOVERY CONFIRMATION REQUIRED: " + reasons,
+001148:             file=sys.stderr,
+001149:             flush=True,
+001150:         )
+001151:         raise RecoveryRequiredExit(tuple(recovery_result.recovery_reasons))
+001152:     recovery_session = RecoverySession(
+001153:         state_path=recovery_result.state_path,
+001154:         repository_root=ROOT_DIR,
+001155:         git_commit=str(recovery_result.current_git_commit),
+001156:         guardian_status=guardian_status,
+001157:         position_status=reconciliation_result.status,
+001158:         position_reasons=tuple(reconciliation_result.reasons),
+001159:         monitor_only=monitor_only,
+001160:         recovery_attempt=recovery_result.recovery_attempt,
+001161:         recovered_at=recovery_result.recovered_at,
+001162:     )
+001163:     recovery_session.start()
+001164:     _ACTIVE_RECOVERY_SESSION = recovery_session
+001165:     heartbeat = PhoenixHeartbeat(
+001166:         repository_root=ROOT_DIR,
+001167:         guardian_status=guardian_status,
+001168:         position_reconciliation_status=reconciliation_result.status,
+001169:         position_reconciliation_reasons=tuple(reconciliation_result.reasons),
+001170:         monitor_only=monitor_only,
+001171:     )
+001172:     _ACTIVE_HEARTBEAT = heartbeat
+001173:     fail_safe.register_background_stopper(
+001174:         "heartbeat",
+001175:         lambda: heartbeat.stop(status="FAILED", current_stage="FAIL_SAFE"),
+001176:     )
+001177:     heartbeat.start(
+001178:         current_stage="MONITOR_ONLY" if monitor_only else "OPERATIONAL_READY"
+001179:     )
+001180:     fail_safe.start_monitoring(
+001181:         heartbeat_path=heartbeat.heartbeat_path,
+001182:         expected_pid=heartbeat.pid,
+001183:     )
+001184:     print(
+001185:         "POSITION RECONCILIATION: " + reconciliation_result.status,
+001186:         flush=True,
+001187:     )
+001188:     print("DISASTER RECOVERY: " + recovery_result.recovery_status, flush=True)
+001189:     if monitor_only:
+001190:         print("PHOENIX MONITOR ONLY", flush=True)
+001191:         print("Mode: PAPER", flush=True)
+001192:         print("Orders submitted: 0", flush=True)
+001193:         print("Trading actions: DISABLED", flush=True)
+001194:     else:
+001195:         print("PHOENIX OPERATIONAL READY", flush=True)
+001196:     heartbeat.set_stage("INITIALIZE_DIRECTORIES")
+001197:     fail_safe.raise_if_triggered()
+001198:     initialize_directories()
+001199:     fail_safe.raise_if_triggered()
+001200:     reset_log_file()
+001201: 
+001202:     parser = argparse.ArgumentParser(description="PHOENIX daily automation")
+001203:     parser.add_argument(
+001204:         "--refresh-only",
+001205:         action="store_true",
+001206:         help="Refresh verified market data and trade candidates without charts or notifications.",
+001207:     )
+001208:     args = parser.parse_args()
+001209: 
+001210:     heartbeat.set_stage("QUOTE_TRANSPORT")
+001211:     try:
+001212:         quote_environment = configure_quote_transport()
+001213:     except RuntimeError as error:
+001214:         write_log("PHOENIX QUOTE TRANSPORT FAILED")
+001215:         write_log(str(error))
+001216:         raise SystemExit(1) from error
+001217:     write_log(
+001218:         "Quote transport: "
+001219:         f"{quote_environment.get('status')} / {quote_environment.get('ca_bundle_mode')} / TLS=True"
+001220:     )
+001221: 
+001222:     started_at = time.time()
+001223: 
+001224:     write_log("=" * 90)
+001225:     write_log(
+001226:         "PHOENIX v2.8 DAILY AUTOMATION START"
+001227:     )
+001228:     write_log("=" * 90)
+001229: 
+001230:     write_log(
+001231:         f"Python: {sys.executable}"
+001232:     )
+001233:     write_log(
+001234:         f"作業フォルダ: {ROOT_DIR}"
+001235:     )
+001236:     write_log(
+001237:         f"ログファイル: {LOG_FILE}"
+001238:     )
+001239: 
+001240:     task_results: list[
+001241:         dict[str, Any]
+001242:     ] = []
+001243: 
+001244:     required_task_failed = False
+001245: 
+001246:     selected_tasks = [
+001247:         task
+001248:         for task in TASKS
+001249:         if not args.refresh_only or task["script"] in REFRESH_ONLY_SCRIPTS
+001250:         if not monitor_only or task["script"] in MONITOR_ONLY_ALLOWED_SCRIPTS
+001251:     ]
+001252:     for task in selected_tasks:
+001253:         fail_safe.raise_if_triggered()
+001254:         heartbeat.set_stage(str(task["name"]))
+001255:         enabled = bool(
+001256:             task.get(
+001257:                 "enabled",
+001258:                 True,
+001259:             )
+001260:         )
+001261: 
+001262:         if not enabled:
+001263:             write_log("=" * 90)
+001264:             write_log(
+001265:                 f"DISABLED: {task['name']}"
+001266:             )
+001267: 
+001268:             task_results.append({
+001269:                 "name": task["name"],
+001270:                 "script": task["script"],
+001271:                 "required": task["required"],
+001272:                 "success": True,
+001273:                 "elapsed": 0.0,
+001274:                 "returncode": 0,
+001275:                 "skipped": True,
+001276:                 "disabled": True,
+001277:                 "message": "設定により無効",
+001278:             })
+001279: 
+001280:             continue
+001281: 
+001282:         if (
+001283:             required_task_failed
+001284:             and STOP_ON_REQUIRED_FAILURE
+001285:         ):
+001286:             write_log("=" * 90)
+001287:             write_log(
+001288:                 f"SKIPPED: {task['name']}"
+001289:             )
+001290:             write_log(
+001291:                 "前の必須処理が失敗したため、"
+001292:                 "後続処理を停止しました。"
+001293:             )
+001294: 
+
+--- LINES 1311-1545 ---
+001311:         success, elapsed, returncode, message = (
+001312:             run_script(
+001313:                 task_name=task["name"],
+001314:                 script_name=task["script"],
+001315:                 required=task["required"],
+001316:                 args=task.get("args"),
+001317:                 monitor_only=monitor_only,
+001318:             )
+001319:         )
+001320:         fail_safe.raise_if_triggered()
+001321: 
+001322:         script_exists = (
+001323:             ROOT_DIR
+001324:             / task["script"]
+001325:         ).exists()
+001326: 
+001327:         skipped = (
+001328:             not task["required"]
+001329:             and not script_exists
+001330:         )
+001331: 
+001332:         task_results.append({
+001333:             "name": task["name"],
+001334:             "script": task["script"],
+001335:             "required": task["required"],
+001336:             "success": success,
+001337:             "elapsed": elapsed,
+001338:             "returncode": returncode,
+001339:             "skipped": skipped,
+001340:             "disabled": False,
+001341:             "message": message,
+001342:         })
+001343: 
+001344:         if (
+001345:             task["required"]
+001346:             and not success
+001347:         ):
+001348:             required_task_failed = True
+001349: 
+001350:     fail_safe.raise_if_triggered()
+001351:     heartbeat.set_stage("VERIFY_OUTPUTS")
+001352:     output_results = verify_output_files(refresh_only=args.refresh_only)
+001353: 
+001354:     fail_safe.raise_if_triggered()
+001355:     required_failures = [
+001356:         result
+001357:         for result in task_results
+001358:         if (
+001359:             result["required"]
+001360:             and not result["success"]
+001361:             and not result.get(
+001362:                 "disabled",
+001363:                 False,
+001364:             )
+001365:         )
+001366:     ]
+001367: 
+001368:     missing_outputs = [
+001369:         name
+001370:         for name, exists
+001371:         in output_results.items()
+001372:         if not exists
+001373:     ]
+001374: 
+001375:     if not required_failures and not missing_outputs:
+001376:         _run_weekly_signal_comparison()
+001377: 
+001378:     heartbeat.set_stage("FINAL_SUMMARY")
+001379:     print_final_summary(
+001380:         task_results=task_results,
+001381:         output_results=output_results,
+001382:         started_at=started_at,
+001383:     )
+001384: 
+001385:     print_morning_run_summary(
+001386:         task_results=task_results,
+001387:         output_results=output_results,
+001388:         started_at=started_at,
+001389:         monitor_only=monitor_only,
+001390:     )
+001391: 
+001392:     if (
+001393:         required_failures
+001394:         or missing_outputs
+001395:     ):
+001396:         raise SystemExit(
+001397:             1
+001398:         )
+001399: 
+001400: 
+001401: def _stop_active_heartbeat(
+001402:     status: str,
+001403:     current_stage: str,
+001404:     *,
+001405:     preserve_active_exception: bool,
+001406: ) -> None:
+001407:     heartbeat = _ACTIVE_HEARTBEAT
+001408:     if heartbeat is None:
+001409:         return
+001410:     try:
+001411:         heartbeat.stop(status=status, current_stage=current_stage)
+001412:     except Exception as error:
+001413:         if not preserve_active_exception:
+001414:             raise
+001415:         print(
+001416:             "Heartbeat shutdown failed while preserving the active exception: "
+001417:             f"{type(error).__name__}: {error}",
+001418:             file=sys.stderr,
+001419:             flush=True,
+001420:         )
+001421: 
+001422: 
+001423: def _finish_active_recovery(
+001424:     status: str,
+001425:     heartbeat_status: str,
+001426:     fail_safe_status: str,
+001427:     *,
+001428:     preserve_active_exception: bool,
+001429: ) -> None:
+001430:     session = _ACTIVE_RECOVERY_SESSION
+001431:     if session is None:
+001432:         return
+001433:     try:
+001434:         session.finish(
+001435:             status=status,
+001436:             heartbeat_status=heartbeat_status,
+001437:             fail_safe_status=fail_safe_status,
+001438:         )
+001439:     except Exception as error:
+001440:         if not preserve_active_exception:
+001441:             raise
+001442:         print(
+001443:             "Disaster Recovery finalization failed while preserving the active "
+001444:             f"exception: {type(error).__name__}: {error}",
+001445:             file=sys.stderr,
+001446:             flush=True,
+001447:         )
+001448: 
+001449: 
+001450: def main() -> None:
+001451:     global _ACTIVE_FAIL_SAFE, _ACTIVE_HEARTBEAT, _ACTIVE_RECOVERY_SESSION
+001452:     _ACTIVE_FAIL_SAFE = None
+001453:     _ACTIVE_HEARTBEAT = None
+001454:     _ACTIVE_RECOVERY_SESSION = None
+001455:     try:
+001456:         _run_main()
+001457:     except KeyboardInterrupt:
+001458:         if _ACTIVE_FAIL_SAFE is not None:
+001459:             _ACTIVE_FAIL_SAFE.stop_monitoring()
+001460:         _stop_active_heartbeat(
+001461:             "STOPPED",
+001462:             "INTERRUPTED",
+001463:             preserve_active_exception=True,
+001464:         )
+001465:         _finish_active_recovery(
+001466:             "INTERRUPTED",
+001467:             "STOPPED",
+001468:             "NOT_TRIGGERED",
+001469:             preserve_active_exception=True,
+001470:         )
+001471:         raise
+001472:     except SystemExit:
+001473:         raise
+001474:     except BaseException as error:
+001475:         fail_safe = _ACTIVE_FAIL_SAFE
+001476:         if isinstance(error, RecoveryRequiredExit):
+001477:             if fail_safe is not None:
+001478:                 fail_safe.stop_monitoring()
+001479:             raise
+001480:         if fail_safe is None:
+001481:             _stop_active_heartbeat(
+001482:                 "FAILED",
+001483:                 "FAILED",
+001484:                 preserve_active_exception=True,
+001485:             )
+001486:             _finish_active_recovery(
+001487:                 "FAILED",
+001488:                 "FAILED",
+001489:                 "NOT_TRIGGERED",
+001490:                 preserve_active_exception=True,
+001491:             )
+001492:             raise
+001493:         if isinstance(error, FailSafeExit):
+001494:             fail_safe.stop_monitoring()
+001495:             _finish_active_recovery(
+001496:                 "FAILED",
+001497:                 "FAILED",
+001498:                 "BLOCKED",
+001499:                 preserve_active_exception=True,
+001500:             )
+001501:             raise
+001502:         fail_safe.transition(
+001503:             "UNCAUGHT_EXCEPTION",
+001504:             heartbeat_status="FAILED",
+001505:         )
+001506:         fail_safe.stop_monitoring()
+001507:         _finish_active_recovery(
+001508:             "FAILED",
+001509:             "FAILED",
+001510:             "BLOCKED",
+001511:             preserve_active_exception=True,
+001512:         )
+001513:         raise FailSafeExit("UNCAUGHT_EXCEPTION") from error
+001514:     else:
+001515:         if _ACTIVE_FAIL_SAFE is not None:
+001516:             if _ACTIVE_FAIL_SAFE.triggered:
+001517:                 _finish_active_recovery(
+001518:                     "FAILED",
+001519:                     "FAILED",
+001520:                     "BLOCKED",
+001521:                     preserve_active_exception=True,
+001522:                 )
+001523:                 _ACTIVE_FAIL_SAFE.raise_if_triggered()
+001524:             _ACTIVE_FAIL_SAFE.stop_monitoring()
+001525:         _stop_active_heartbeat(
+001526:             "COMPLETED",
+001527:             "COMPLETED",
+001528:             preserve_active_exception=False,
+001529:         )
+001530:         _finish_active_recovery(
+001531:             "COMPLETED",
+001532:             "COMPLETED",
+001533:             "NOT_TRIGGERED",
+001534:             preserve_active_exception=False,
+001535:         )
+001536:     finally:
+001537:         if _ACTIVE_FAIL_SAFE is not None:
+001538:             _ACTIVE_FAIL_SAFE.stop_monitoring()
+001539:         _ACTIVE_RECOVERY_SESSION = None
+001540:         _ACTIVE_FAIL_SAFE = None
+001541:         _ACTIVE_HEARTBEAT = None
+001542: 
+001543: 
+001544: if __name__ == "__main__":
+001545:     main()
+
+
+===== FILE: tests/test_phoenix_watchdog.py =====
+
+--- LINES 22-102 ---
+000022: )
+000023: from phoenix_core import RakutenRssTransportHealth
+000024: 
+000025: 
+000026: class _FakeFileReadyTransport:
+000027:     def __init__(self, *, connected: bool = True, message: str = "FILE_READY_OK") -> None:
+000028:         self.connected = connected
+000029:         self.message = message
+000030:         self.calls = 0
+000031: 
+000032:     def publish_file_ready_heartbeat(self) -> RakutenRssTransportHealth:
+000033:         self.calls += 1
+000034:         return RakutenRssTransportHealth(
+000035:             connected=self.connected,
+000036:             message=self.message,
+000037:             transport_source="COM_LIVE" if self.connected else "DISCONNECTED",
+000038:         )
+000039: 
+000040: 
+000041: class PhoenixWatchdogStep36Test(unittest.TestCase):
+000042:     def setUp(self) -> None:
+000043:         self.temporary_directory = tempfile.TemporaryDirectory()
+000044:         self.root = Path(self.temporary_directory.name)
+000045:         self.log_dir = self.root / "logs"
+000046:         self.lock_file = self.log_dir / "phoenix_watchdog.lock"
+000047: 
+000048:     def tearDown(self) -> None:
+000049:         self.temporary_directory.cleanup()
+000050: 
+000051:     def write_script(self, name: str, source: str) -> Path:
+000052:         path = self.root / name
+000053:         path.write_text(source, encoding="utf-8")
+000054:         return path
+000055: 
+000056:     def write_step44_summary(
+000057:         self,
+000058:         recorded_at: str,
+000059:         *,
+000060:         result: str = "READY",
+000061:     ) -> Path:
+000062:         path = self.root / "reports" / "v7_vba_bridge_step44_audit.jsonl"
+000063:         path.parent.mkdir(parents=True, exist_ok=True)
+000064:         payload = {
+000065:             "kind": "summary",
+000066:             "recorded_at": recorded_at,
+000067:             "intent_id": "",
+000068:             "idempotency_key": "",
+000069:             "source_checksum": "",
+000070:             "result": result,
+000071:             "reason_codes": "",
+000072:             "source_file": "",
+000073:             "receipt_file": "",
+000074:             "outbox_file": "",
+000075:             "reader_id": "PHOENIX_STEP44_VBA_LOCAL_RECEIVER",
+000076:             "orders_submitted": "0",
+000077:             "note": "accepted=0;rejected=0;duplicate=0;expired=0;corrupt=0",
+000078:             "current_stage": "",
+000079:             "current_file": "",
+000080:             "error_number": "",
+000081:             "error_source": "",
+000082:             "error_description": "",
+000083:             "error_line": "",
+000084:         }
+000085:         path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+000086:         return path
+000087: 
+000088:     def make_watchdog(
+000089:         self,
+000090:         target: Path,
+000091:         *,
+000092:         max_restarts: int = 0,
+000093:         startup_grace_seconds: float = 0.01,
+000094:         enable_file_ready_heartbeat: bool = False,
+000095:         file_ready_transport: object | None = None,
+000096:         file_ready_heartbeat_seconds: float = 0.01,
+000097:     ) -> PhoenixWatchdog:
+000098:         config = MonitorConfig(
+000099:             max_restarts=max_restarts,
+000100:             backoff_base_seconds=0.01,
+000101:             backoff_max_seconds=0.02,
+000102:             startup_grace_seconds=startup_grace_seconds,
+
+--- LINES 181-266 ---
+000181: 
+000182:         self.assertEqual(EXIT_RESTART_LIMIT, watchdog.run())
+000183: 
+000184:         self.assertEqual("3", counter_file.read_text(encoding="utf-8"))
+000185:         events = self.read_events()
+000186:         abnormal = [event for event in events if event["event"] == "ABNORMAL_EXIT"]
+000187:         restarts = [
+000188:             event for event in events if event["event"] == "RESTART_SCHEDULED"
+000189:         ]
+000190:         self.assertEqual(3, len(abnormal))
+000191:         self.assertEqual([1, 2], [event["restart_number"] for event in restarts])
+000192:         self.assertEqual([0.01, 0.02], [event["backoff_seconds"] for event in restarts])
+000193:         self.assertEqual("RESTART_LIMIT_REACHED", events[-3]["event"])
+000194: 
+000195:     def test_repository_guardian_block_does_not_restart(self) -> None:
+000196:         counter_file = self.root / "launch_count.txt"
+000197:         target = self.write_script(
+000198:             "guardian_blocked_child.py",
+000199:             f"""
+000200: from pathlib import Path
+000201: import sys
+000202: 
+000203: counter = Path({str(counter_file)!r})
+000204: count = int(counter.read_text(encoding="utf-8")) if counter.exists() else 0
+000205: counter.write_text(str(count + 1), encoding="utf-8")
+000206: sys.exit(2)
+000207: """.strip()
+000208:             + "\n",
+000209:         )
+000210:         watchdog = self.make_watchdog(
+000211:             target,
+000212:             max_restarts=3,
+000213:             startup_grace_seconds=0.0,
+000214:         )
+000215: 
+000216:         self.assertEqual(EXIT_CONFIGURATION_ERROR, watchdog.run())
+000217:         self.assertEqual("1", counter_file.read_text(encoding="utf-8"))
+000218: 
+000219:         events = self.read_events()
+000220:         names = [event["event"] for event in events]
+000221:         self.assertIn("REPOSITORY_GUARDIAN_BLOCKED", names)
+000222:         self.assertNotIn("RESTART_SCHEDULED", names)
+000223:         blocked = next(
+000224:             event
+000225:             for event in events
+000226:             if event["event"] == "REPOSITORY_GUARDIAN_BLOCKED"
+000227:         )
+000228:         self.assertTrue(blocked["restart_suppressed"])
+000229: 
+000230:     def test_lock_blocks_duplicate_and_recovers_dead_pid(self) -> None:
+000231:         logger = EventLogger(self.log_dir)
+000232:         first = ProcessLock(self.lock_file, logger, stale_after_seconds=1.0)
+000233:         second = ProcessLock(self.lock_file, logger, stale_after_seconds=1.0)
+000234:         first.acquire()
+000235:         try:
+000236:             with self.assertRaises(AlreadyRunningError):
+000237:                 second.acquire()
+000238:         finally:
+000239:             first.release()
+000240: 
+000241:         self.lock_file.write_text(
+000242:             json.dumps({"pid": 999_999_999, "token": "stale"}) + "\n",
+000243:             encoding="utf-8",
+000244:         )
+000245:         recovered = ProcessLock(self.lock_file, logger, stale_after_seconds=1.0)
+000246:         recovered.acquire()
+000247:         recovered.release()
+000248: 
+000249:         names = [event["event"] for event in self.read_events()]
+000250:         self.assertIn("ACTIVE_LOCK_DETECTED", names)
+000251:         self.assertIn("STALE_LOCK_REMOVED", names)
+000252: 
+000253:     def test_stop_request_terminates_child_safely(self) -> None:
+000254:         target = self.write_script(
+000255:             "long_child.py",
+000256:             "import time\ntime.sleep(30)\n",
+000257:         )
+000258:         watchdog = self.make_watchdog(target)
+000259:         results: list[int] = []
+000260:         thread = threading.Thread(target=lambda: results.append(watchdog.run()))
+000261:         thread.start()
+000262:         deadline = time.monotonic() + 3.0
+000263:         while watchdog.child_pid is None and time.monotonic() < deadline:
+000264:             time.sleep(0.01)
+000265:         self.assertIsNotNone(watchdog.child_pid)
+000266: 
+
+
+===== FILE: tests/test_v7_step44.py =====
+
+--- LINES 3-97 ---
+000003: import tempfile
+000004: import unittest
+000005: from datetime import datetime
+000006: from pathlib import Path
+000007: 
+000008: from phoenix_core.data_freshness import JST
+000009: import phoenix_core.vba_bridge_contract as bridge
+000010: 
+000011: 
+000012: ROOT = Path(__file__).resolve().parent.parent
+000013: VBA_DIR = ROOT / "vba"
+000014: 
+000015: 
+000016: class Step44LocalVbaReceiverTest(unittest.TestCase):
+000017:     def test_vba_sources_are_present_and_restricted_to_local_bridge_contract(self) -> None:
+000018:         expected_files = [
+000019:             "PHOENIX_STEP44_Config.bas",
+000020:             "PHOENIX_STEP44_Csv.bas",
+000021:             "PHOENIX_STEP44_State.bas",
+000022:             "PHOENIX_STEP44_Receiver.bas",
+000023:             "STEP44_SETUP.md",
+000024:         ]
+000025:         for file_name in expected_files:
+000026:             self.assertTrue((VBA_DIR / file_name).is_file(), file_name)
+000027: 
+000028:         config_text = (VBA_DIR / "PHOENIX_STEP44_Config.bas").read_text(encoding="utf-8")
+000029:         csv_text = (VBA_DIR / "PHOENIX_STEP44_Csv.bas").read_text(encoding="utf-8")
+000030:         state_text = (VBA_DIR / "PHOENIX_STEP44_State.bas").read_text(encoding="utf-8")
+000031:         receiver_text = (VBA_DIR / "PHOENIX_STEP44_Receiver.bas").read_text(encoding="utf-8")
+000032:         setup_text = (VBA_DIR / "STEP44_SETUP.md").read_text(encoding="utf-8")
+000033: 
+000034:         for text in (config_text, csv_text, state_text, receiver_text):
+000035:             self.assertIn("Attribute VB_Name", text)
+000036:             self.assertIn("Option Explicit", text)
+000037: 
+000038:         self.assertIn('RunPhoenixStep44LocalReceiver', receiver_text)
+000039:         self.assertIn('runtime/v7_vba_bridge/outbox/pending', config_text)
+000040:         self.assertIn('runtime/v7_vba_bridge/outbox/complete', config_text)
+000041:         self.assertIn('runtime/v7_vba_bridge/outbox/rejected', config_text)
+000042:         self.assertIn('runtime/v7_vba_bridge/inbox', config_text)
+000043:         self.assertIn('state/v7_vba_bridge_step44_state.csv', config_text)
+000044:         self.assertIn('reports/v7_vba_bridge_step44_audit.jsonl', config_text)
+000045:         self.assertIn('PHOENIX_STEP44_VBA_LOCAL_RECEIVER', config_text)
+000046: 
+000047:         self.assertIn('Sha256HexUtf8', csv_text)
+000048:         self.assertIn('ParseCsvLine', csv_text)
+000049:         self.assertIn('WriteUtf8TextAtomic', csv_text)
+000050:         self.assertIn('AppendUtf8TextAtomic', state_text)
+000051:         self.assertIn('AcquireStep44Lock', state_text)
+000052:         self.assertIn('ReleaseStep44Lock', state_text)
+000053:         self.assertIn('MoveFileExW', receiver_text)
+000054:         self.assertIn('ADODB.Stream', receiver_text)
+000055:         self.assertIn('PROCESSING', receiver_text)
+000056:         self.assertIn('DUPLICATE', receiver_text)
+000057:         self.assertIn('EXPIRED', receiver_text)
+000058:         self.assertIn('CORRUPT', receiver_text)
+000059:         self.assertIn('REJECTED', receiver_text)
+000060: 
+000061:         forbidden = [
+000062:             "OrderSend",
+000063:             "SendOrder",
+000064:             "BuyMarket",
+000065:             "SellMarket",
+000066:             "WinHttp",
+000067:             "XMLHTTP",
+000068:         ]
+000069:         for word in forbidden:
+000070:             self.assertNotIn(word, config_text + csv_text + state_text + receiver_text)
+000071: 
+000072:         self.assertIn("RunPhoenixStep44LocalReceiver", setup_text)
+000073:         self.assertIn("state/v7_vba_bridge_step44_state.csv", setup_text)
+000074: 
+000075:     def test_step44_receipt_fixture_is_step43_compatible(self) -> None:
+000076:         receipt = {
+000077:             "schema_version": "1",
+000078:             "intent_id": "PHX42-20260805-1301T-BUY-STEP44TEST",
+000079:             "idempotency_key": "step44-test-idempotency-key",
+000080:             "received_at": datetime(2026, 8, 5, 9, 0, 0, tzinfo=JST).isoformat(timespec="seconds"),
+000081:             "result": "ACCEPTED",
+000082:             "reason_codes": "",
+000083:             "vba_instance_id": "PHOENIX_STEP44_VBA_LOCAL_RECEIVER",
+000084:             "source_checksum": "a" * 64,
+000085:             "orders_submitted": "0",
+000086:         }
+000087:         receipt["checksum"] = bridge._checksum_fields(receipt, bridge.RECEIPT_COLUMNS)
+000088: 
+000089:         bridge._validate_receipt_row(receipt)
+000090: 
+000091:         self.assertEqual("ACCEPTED", receipt["result"])
+000092:         self.assertEqual("0", receipt["orders_submitted"])
+000093:         self.assertEqual(64, len(receipt["checksum"]))
+000094: 
+000095: 
+000096: if __name__ == "__main__":
+000097:     unittest.main()
+
+
+===== FILE: vba/PHOENIX_STEP44_Config.bas =====
+
+--- LINES 1-61 ---
+000001: Attribute VB_Name = "PHOENIX_STEP44_Config"
+000002: Option Explicit
+000003: Option Private Module
+000004: 
+000005: Public Const CONTRACT_ID As String = "PHOENIX_STEP44_LOCAL_VBA_RECEIVER"
+000006: Public Const STEP_NAME As String = "PHOENIX v7 Step44"
+000007: Public Const SCHEMA_VERSION As Long = 1
+000008: Public Const TRADING_MODE As String = "PAPER"
+000009: Public Const EXECUTION_MODE As String = "DRY_RUN"
+000010: Public Const TRADING_ACTIONS As String = "DISABLED"
+000011: Public Const ORDERS_SUBMITTED As Long = 0
+000012: Public Const VBA_INSTANCE_ID As String = "PHOENIX_STEP44_VBA_LOCAL_RECEIVER"
+000013: 
+000014: Public Const PENDING_DIR As String = "runtime/v7_vba_bridge/outbox/pending"
+000015: Public Const PROCESSING_DIR As String = "runtime/v7_vba_bridge/outbox/processing"
+000016: Public Const COMPLETE_DIR As String = "runtime/v7_vba_bridge/outbox/complete"
+000017: Public Const REJECTED_DIR As String = "runtime/v7_vba_bridge/outbox/rejected"
+000018: Public Const INBOX_DIR As String = "runtime/v7_vba_bridge/inbox"
+000019: Public Const STATE_FILE As String = "state/v7_vba_bridge_step44_state.csv"
+000020: Public Const LOCK_FILE As String = "state/v7_vba_bridge_step44.lock"
+000021: Public Const AUDIT_FILE As String = "reports/v7_vba_bridge_step44_audit.jsonl"
+000022: 
+000023: Public Const MAX_FUTURE_SKEW_MINUTES As Long = 5
+000024: 
+000025: Public Const OB_SCHEMA_VERSION As Long = 0
+000026: Public Const OB_INTENT_ID As Long = 1
+000027: Public Const OB_IDEMPOTENCY_KEY As Long = 2
+000028: Public Const OB_GENERATED_AT As Long = 3
+000029: Public Const OB_EXPIRES_AT As Long = 4
+000030: Public Const OB_TICKER As Long = 5
+000031: Public Const OB_MARKET As Long = 6
+000032: Public Const OB_SIDE As Long = 7
+000033: Public Const OB_ORDER_TYPE As Long = 8
+000034: Public Const OB_QUANTITY As Long = 9
+000035: Public Const OB_REFERENCE_PRICE As Long = 10
+000036: Public Const OB_LIMIT_PRICE As Long = 11
+000037: Public Const OB_STOP_LOSS_PRICE As Long = 12
+000038: Public Const OB_TAKE_PROFIT_PRICE As Long = 13
+000039: Public Const OB_ESTIMATED_NOTIONAL As Long = 14
+000040: Public Const OB_ESTIMATED_MAX_LOSS As Long = 15
+000041: Public Const OB_TRADING_MODE As Long = 16
+000042: Public Const OB_EXECUTION_MODE As Long = 17
+000043: Public Const OB_BRIDGE_STATUS As Long = 18
+000044: Public Const OB_CHECKSUM As Long = 19
+000045: 
+000046: Public Const RC_SCHEMA_VERSION As Long = 0
+000047: Public Const RC_INTENT_ID As Long = 1
+000048: Public Const RC_IDEMPOTENCY_KEY As Long = 2
+000049: Public Const RC_RECEIVED_AT As Long = 3
+000050: Public Const RC_RESULT As Long = 4
+000051: Public Const RC_REASON_CODES As Long = 5
+000052: Public Const RC_VBA_INSTANCE_ID As Long = 6
+000053: Public Const RC_SOURCE_CHECKSUM As Long = 7
+000054: Public Const RC_ORDERS_SUBMITTED As Long = 8
+000055: Public Const RC_CHECKSUM As Long = 9
+000056: 
+000057: Public Const ST_RECORDED_AT As Long = 0
+000058: Public Const ST_INTENT_ID As Long = 1
+000059: Public Const ST_IDEMPOTENCY_KEY As Long = 2
+000060: Public Const ST_SOURCE_CHECKSUM As Long = 3
+000061: Public Const ST_STATUS As Long = 4
+
+
+===== FILE: vba/STEP44_SETUP.md =====
+
+--- LINES 1-42 ---
+000001: # PHOENIX Step44 Local VBA Receiver
+000002: 
+000003: This directory holds the importable VBA source for the local Step44 receiver.
+000004: 
+000005: ## Import order
+000006: 
+000007: Import these modules into a standard Excel VBA project:
+000008: 
+000009: 1. `PHOENIX_STEP44_Config.bas`
+000010: 2. `PHOENIX_STEP44_Csv.bas`
+000011: 3. `PHOENIX_STEP44_State.bas`
+000012: 4. `PHOENIX_STEP44_Receiver.bas`
+000013: 
+000014: ## Entry point
+000015: 
+000016: Run this single public macro:
+000017: 
+000018: `RunPhoenixStep44LocalReceiver`
+000019: 
+000020: ## Contracted paths
+000021: 
+000022: The VBA receiver reads only the Step43 outbox contract and writes only local receipts and state:
+000023: 
+000024: - `runtime/v7_vba_bridge/outbox/pending`
+000025: - `runtime/v7_vba_bridge/outbox/processing`
+000026: - `runtime/v7_vba_bridge/outbox/complete`
+000027: - `runtime/v7_vba_bridge/outbox/rejected`
+000028: - `runtime/v7_vba_bridge/inbox`
+000029: - `state/v7_vba_bridge_step44_state.csv`
+000030: - `reports/v7_vba_bridge_step44_audit.jsonl`
+000031: 
+000032: ## Safety contract
+000033: 
+000034: - Trading actions are disabled.
+000035: - No RSS order submission is added.
+000036: - Receipts are written as UTF-8 CSV with atomic replacement.
+000037: - The receiver fails closed if checksum, schema, time, state, or file writes do not validate.
+000038: - The local audit log never stores account credentials or other sensitive secrets.
+000039: 
+000040: ## Workbook placement
+000041: 
+000042: Save the workbook somewhere under the PHOENIX repository tree so `ThisWorkbook.Path` can resolve the repository root.

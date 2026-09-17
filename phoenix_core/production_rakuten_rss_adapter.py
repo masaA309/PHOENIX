@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+import math
 from threading import RLock
 from typing import Protocol, runtime_checkable
 from zoneinfo import ZoneInfo
@@ -51,6 +52,9 @@ class RakutenRssTransport(Protocol):
     def cancel_order(self, broker_order_id: str) -> RakutenRssCancelAck:
         raise NotImplementedError
 
+    def executable_buy_price(self, ticker: str) -> float | None:
+        raise NotImplementedError
+
 
 class DisabledProductionRakutenRssTransport:
     """Fail-close transport stub.
@@ -88,6 +92,9 @@ class DisabledProductionRakutenRssTransport:
             status=OrderStatus.REJECTED,
             message="Excel/RSS transport is not connected.",
         )
+
+    def executable_buy_price(self, ticker: str) -> float | None:
+        return None
 
 
 class ProductionRakutenRssAdapter:
@@ -224,6 +231,22 @@ class ProductionRakutenRssAdapter:
                 )
 
             return self._transport.poll_order(broker_order_id)
+
+    def executable_buy_price(self, ticker: str) -> float | None:
+        normalized = str(ticker).strip().upper()
+        if not normalized:
+            return None
+        with self._lock:
+            if self._live_gate_message():
+                return None
+            try:
+                value = self._transport.executable_buy_price(normalized)
+                if value is None:
+                    return None
+                price = float(value)
+            except Exception:
+                return None
+            return price if math.isfinite(price) and price > 0 else None
 
     def cancel_order(self, broker_order_id: str) -> RakutenRssCancelAck:
         with self._lock:

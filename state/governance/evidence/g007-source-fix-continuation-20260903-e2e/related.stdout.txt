@@ -1,0 +1,65 @@
+[2026-09-03 00:43:32] WATCHDOG_STARTING max_restarts=3 target=C:\Users\ashtc\AppData\Local\Temp\tmp5_g1fisn\run_phoenix.py | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LIVE_MODE_FIXED live_trading=True order_capability=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LOCK_ACQUIRED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmp5_g1fisn\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] PROCESS_LAUNCHED pid=5872 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] PROCESS_STARTED pid=5872 startup_grace_seconds=0.0 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] REPOSITORY_GUARDIAN_BLOCKED backoff_seconds=0.0 blocked_attempt=1 exit_code=2 reason=startup_safety_gate_exit_2 restart_suppressed=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LOCK_RELEASED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmp5_g1fisn\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] WATCHDOG_STOPPED exit_code=2 reason=completed restarts_are_bounded=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] WATCHDOG_STARTING max_restarts=2 target=C:\Users\ashtc\AppData\Local\Temp\tmp4otc574u\run_phoenix.py | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LIVE_MODE_FIXED live_trading=True order_capability=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LOCK_ACQUIRED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmp4otc574u\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] PROCESS_LAUNCHED pid=42112 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] PROCESS_STARTED pid=42112 startup_grace_seconds=0.0 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] DISASTER_RECOVERY_STATE_CHECKED reason=RECOVERY_CONFIRMATION_REQUIRED recovery_attempt=1 recovery_status=RECOVERY_REQUIRED restart_allowed=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] ABNORMAL_EXIT exit_code=1 restarts_used=0 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] RESTART_SCHEDULED backoff_seconds=0.0 restart_number=1 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] PROCESS_LAUNCHED pid=2232 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] PROCESS_STARTED pid=2232 startup_grace_seconds=0.0 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] PROCESS_EXITED exit_code=0 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] PROCESS_IDLE exit_code=0 pid=2232 reason=child_exit_code_0 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] SAFE_STOP reason=unit_test | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LOCK_RELEASED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmp4otc574u\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] WATCHDOG_STOPPED exit_code=0 reason=unit_test restarts_are_bounded=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] WATCHDOG_STARTING max_restarts=0 target=C:\Users\ashtc\AppData\Local\Temp\tmpudfok0b2\heartbeat_stops_child.py | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LIVE_MODE_FIXED live_trading=True order_capability=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LOCK_ACQUIRED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmpudfok0b2\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] CONFIGURATION_ERROR error=[Errno 2] No such file or directory: 'C:\\Users\\ashtc\\AppData\\Local\\Temp\\tmpudfok0b2\\config\\v7_direct_pipeline_config.json' reason=operating_mode_config_unavailable target=C:\Users\ashtc\AppData\Local\Temp\tmpudfok0b2\config\v7_direct_pipeline_config.json | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LOCK_RELEASED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmpudfok0b2\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] WATCHDOG_STOPPED exit_code=2 reason=completed restarts_are_bounded=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] WATCHDOG_STARTING max_restarts=1 target=C:\Users\ashtc\AppData\Local\Temp\tmpoh5wfibw\heartbeat_missing_child.py | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LIVE_MODE_FIXED live_trading=True order_capability=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LOCK_ACQUIRED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmpoh5wfibw\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] CONFIGURATION_ERROR error=[Errno 2] No such file or directory: 'C:\\Users\\ashtc\\AppData\\Local\\Temp\\tmpoh5wfibw\\config\\v7_direct_pipeline_config.json' reason=operating_mode_config_unavailable target=C:\Users\ashtc\AppData\Local\Temp\tmpoh5wfibw\config\v7_direct_pipeline_config.json | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LOCK_RELEASED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmpoh5wfibw\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] WATCHDOG_STOPPED exit_code=2 reason=completed restarts_are_bounded=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] WATCHDOG_STARTING max_restarts=3 target=C:\Users\ashtc\AppData\Local\Temp\tmpwi_v0ycs\heartbeat_live_mode_child.py | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LIVE_MODE_FIXED live_trading=True order_capability=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LOCK_ACQUIRED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmpwi_v0ycs\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] CONFIGURATION_ERROR error=[Errno 2] No such file or directory: 'C:\\Users\\ashtc\\AppData\\Local\\Temp\\tmpwi_v0ycs\\config\\v7_direct_pipeline_config.json' reason=operating_mode_config_unavailable target=C:\Users\ashtc\AppData\Local\Temp\tmpwi_v0ycs\config\v7_direct_pipeline_config.json | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] LOCK_RELEASED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmpwi_v0ycs\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:32] WATCHDOG_STOPPED exit_code=2 reason=completed restarts_are_bounded=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:33] WATCHDOG_STARTING max_restarts=3 target=C:\Users\ashtc\AppData\Local\Temp\tmpeyueepz5\position_reconciliation_blocked_child.py | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:33] LIVE_MODE_FIXED live_trading=True order_capability=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:33] LOCK_ACQUIRED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmpeyueepz5\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:33] CONFIGURATION_ERROR error=[Errno 2] No such file or directory: 'C:\\Users\\ashtc\\AppData\\Local\\Temp\\tmpeyueepz5\\config\\v7_direct_pipeline_config.json' reason=operating_mode_config_unavailable target=C:\Users\ashtc\AppData\Local\Temp\tmpeyueepz5\config\v7_direct_pipeline_config.json | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:33] LOCK_RELEASED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmpeyueepz5\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:33] WATCHDOG_STOPPED exit_code=2 reason=completed restarts_are_bounded=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:33] WATCHDOG_STARTING max_restarts=0 target=C:\Users\ashtc\AppData\Local\Temp\tmps0hntu9v\heartbeat_child.py | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:33] LIVE_MODE_FIXED live_trading=True order_capability=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:33] LOCK_ACQUIRED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmps0hntu9v\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:33] CONFIGURATION_ERROR error=[Errno 2] No such file or directory: 'C:\\Users\\ashtc\\AppData\\Local\\Temp\\tmps0hntu9v\\config\\v7_direct_pipeline_config.json' reason=operating_mode_config_unavailable target=C:\Users\ashtc\AppData\Local\Temp\tmps0hntu9v\config\v7_direct_pipeline_config.json | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:33] LOCK_RELEASED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmps0hntu9v\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:33] WATCHDOG_STOPPED exit_code=2 reason=completed restarts_are_bounded=True | Mode: LIVE | Orders submitted: 0
+POSITION RECONCILIATION: READY
+DISASTER RECOVERY: READY
+PHOENIX OPERATIONAL READY
+POSITION RECONCILIATION: WARNING
+DISASTER RECOVERY: READY
+PHOENIX MONITOR ONLY
+Mode: PAPER
+Orders submitted: 0
+Trading actions: DISABLED
+POSITION RECONCILIATION: READY
+DISASTER RECOVERY: READY
+PHOENIX OPERATIONAL READY

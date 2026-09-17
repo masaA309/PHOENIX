@@ -1,0 +1,2268 @@
+
+
+===== FILE: repository_guardian.py =====
+
+--- LINES 207-405 ---
+000207:     }
+000208:     git_errors: dict[str, str] = {}
+000209:     commands: tuple[tuple[str, tuple[str, ...]], ...] = (
+000210:         ("git_root", ("rev-parse", "--show-toplevel")),
+000211:         ("origin_url", ("remote", "get-url", "origin")),
+000212:         ("branch", ("branch", "--show-current")),
+000213:     )
+000214:     for label, command in commands:
+000215:         try:
+000216:             value = reader(command, current_cwd).strip()
+000217:             git_values[label] = value or None
+000218:         except Exception as error:  # fail closed for every Git read failure
+000219:             git_errors[label] = f"{type(error).__name__}: {error}"
+000220: 
+000221:     git_root_raw = git_values["git_root"]
+000222:     git_root = _resolved_path(git_root_raw) if git_root_raw else None
+000223:     origin_url = git_values["origin_url"]
+000224:     branch = git_values["branch"]
+000225:     repository_name = git_root.name if git_root is not None else None
+000226: 
+000227:     codex_copy = _is_codex_path(current_cwd) or (
+000228:         git_root is not None and _is_codex_path(git_root)
+000229:     )
+000230:     onedrive = _is_onedrive_path(git_root or current_cwd)
+000231:     root_mismatch = git_root is not None and not _paths_equal(git_root, expected_root)
+000232:     duplicate_suspected = codex_copy or (
+000233:         root_mismatch
+000234:         and repository_name is not None
+000235:         and repository_name.casefold() == config.expected_repository_name.casefold()
+000236:     )
+000237: 
+000238:     reasons: list[str] = []
+000239:     if not expected_root.is_dir():
+000240:         reasons.append("EXPECTED_ROOT_NOT_FOUND")
+000241:     if git_root is None:
+000242:         reasons.append("GIT_ROOT_UNAVAILABLE")
+000243:     elif root_mismatch:
+000244:         reasons.append("GIT_ROOT_MISMATCH")
+000245:     if (
+000246:         repository_name is None
+000247:         or repository_name.casefold() != config.expected_repository_name.casefold()
+000248:     ):
+000249:         reasons.append("REPOSITORY_NAME_MISMATCH")
+000250:     if origin_url is None:
+000251:         reasons.append("ORIGIN_UNAVAILABLE")
+000252:     elif _normalize_origin_url(origin_url) != _normalize_origin_url(
+000253:         config.expected_origin_url
+000254:     ):
+000255:         reasons.append("ORIGIN_MISMATCH")
+000256:     if branch is None:
+000257:         reasons.append("BRANCH_UNAVAILABLE")
+000258:     if git_root is not None and not _path_is_within(current_cwd, git_root):
+000259:         reasons.append("CWD_OUTSIDE_GIT_ROOT")
+000260:     if codex_copy:
+000261:         reasons.append("CODEX_WORK_COPY")
+000262:     if duplicate_suspected:
+000263:         reasons.append("DUPLICATE_REPOSITORY_SUSPECTED")
+000264: 
+000265:     json_path = destination / "repository_guardian.json"
+000266:     text_path = destination / "repository_guardian.txt"
+000267:     return GuardianResult(
+000268:         status="BLOCKED" if reasons else "READY",
+000269:         reasons=tuple(reasons),
+000270:         timestamp=datetime.now(JST).isoformat(timespec="seconds"),
+000271:         cwd=str(current_cwd),
+000272:         git_root=None if git_root is None else str(git_root),
+000273:         expected_root=str(expected_root),
+000274:         repository_name=repository_name,
+000275:         expected_repository_name=config.expected_repository_name,
+000276:         origin_url=origin_url,
+000277:         expected_origin_url=config.expected_origin_url,
+000278:         branch=branch,
+000279:         is_onedrive=onedrive,
+000280:         is_codex_copy=codex_copy,
+000281:         duplicate_copy_suspected=duplicate_suspected,
+000282:         git_errors=git_errors,
+000283:         json_report_path=str(json_path),
+000284:         text_report_path=str(text_path),
+000285:     )
+000286: 
+000287: 
+000288: def _atomic_write(path: Path, content: str) -> None:
+000289:     path.parent.mkdir(parents=True, exist_ok=True)
+000290:     temporary_path = path.with_name(
+000291:         f".{path.name}.{os.getpid()}.{uuid4().hex}.tmp"
+000292:     )
+000293:     try:
+000294:         with temporary_path.open("x", encoding="utf-8", newline="\n") as file:
+000295:             file.write(content)
+000296:             file.flush()
+000297:             os.fsync(file.fileno())
+000298:         os.replace(temporary_path, path)
+000299:     finally:
+000300:         try:
+000301:             temporary_path.unlink()
+000302:         except FileNotFoundError:
+000303:             pass
+000304: 
+000305: 
+000306: def _text_report(result: GuardianResult) -> str:
+000307:     reasons = ", ".join(result.reasons) if result.reasons else "none"
+000308:     lines = [
+000309:         f"Timestamp: {result.timestamp}",
+000310:         f"Status: {result.status}",
+000311:         f"Reasons: {reasons}",
+000312:         f"Current cwd: {result.cwd}",
+000313:         f"Git root: {result.git_root or 'unavailable'}",
+000314:         f"Expected root: {result.expected_root}",
+000315:         f"Repository name: {result.repository_name or 'unavailable'}",
+000316:         f"Expected repository name: {result.expected_repository_name}",
+000317:         f"Origin URL: {result.origin_url or 'unavailable'}",
+000318:         f"Expected origin URL: {result.expected_origin_url}",
+000319:         f"Current branch: {result.branch or 'unavailable'}",
+000320:         f"OneDrive path: {result.is_onedrive}",
+000321:         f"Codex work copy: {result.is_codex_copy}",
+000322:         f"Duplicate copy suspected: {result.duplicate_copy_suspected}",
+000323:         f"Mode: {MODE}",
+000324:         f"Orders submitted: {ORDERS_SUBMITTED}",
+000325:     ]
+000326:     if result.git_errors:
+000327:         lines.append(
+000328:             "Git read errors: "
+000329:             + json.dumps(result.git_errors, ensure_ascii=False, sort_keys=True)
+000330:         )
+000331:     return "\n".join(lines) + "\n"
+000332: 
+000333: 
+000334: def write_reports(result: GuardianResult) -> None:
+000335:     json_path = Path(result.json_report_path)
+000336:     text_path = Path(result.text_report_path)
+000337:     json_content = json.dumps(
+000338:         result.as_dict(),
+000339:         ensure_ascii=False,
+000340:         indent=2,
+000341:         sort_keys=True,
+000342:     ) + "\n"
+000343:     _atomic_write(json_path, json_content)
+000344:     _atomic_write(text_path, _text_report(result))
+000345: 
+000346: 
+000347: def run_repository_guardian(
+000348:     *,
+000349:     expected_root: str | os.PathLike[str] | None = None,
+000350:     expected_origin_url: str | None = None,
+000351:     cwd: str | os.PathLike[str] | None = None,
+000352:     report_dir: str | os.PathLike[str] | None = None,
+000353:     git_reader: GitReader | None = None,
+000354:     environment: Mapping[str, str] | None = None,
+000355: ) -> GuardianResult:
+000356:     config = config_from_environment(
+000357:         environment,
+000358:         expected_root=expected_root,
+000359:         expected_origin_url=expected_origin_url,
+000360:     )
+000361:     result = inspect_repository(
+000362:         config,
+000363:         cwd=cwd,
+000364:         report_dir=report_dir,
+000365:         git_reader=git_reader,
+000366:     )
+000367:     try:
+000368:         write_reports(result)
+000369:     except OSError as error:
+000370:         result.status = "BLOCKED"
+000371:         result.reasons = tuple((*result.reasons, "REPORT_WRITE_FAILED"))
+000372:         result.report_error = f"{type(error).__name__}: {error}"
+000373:     return result
+000374: 
+000375: 
+000376: def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+000377:     parser = argparse.ArgumentParser(
+000378:         description="PHOENIX Phase3 Step36.5 Repository Guardian",
+000379:     )
+000380:     parser.add_argument("--expected-root")
+000381:     parser.add_argument("--expected-origin-url")
+000382:     parser.add_argument("--report-dir")
+000383:     return parser.parse_args(argv)
+000384: 
+000385: 
+000386: def main(argv: Sequence[str] | None = None) -> int:
+000387:     args = parse_args(argv)
+000388:     result = run_repository_guardian(
+000389:         expected_root=args.expected_root,
+000390:         expected_origin_url=args.expected_origin_url,
+000391:         report_dir=args.report_dir,
+000392:     )
+000393:     reasons = ",".join(result.reasons) if result.reasons else "none"
+000394:     print(
+000395:         f"Repository Guardian: {result.status} | reasons={reasons} "
+000396:         f"| Mode: {MODE} | Orders submitted: {ORDERS_SUBMITTED}",
+000397:         flush=True,
+000398:     )
+000399:     if result.report_error:
+000400:         print(f"Repository Guardian report error: {result.report_error}", flush=True)
+000401:     return EXIT_READY if result.ready else EXIT_BLOCKED
+000402: 
+000403: 
+000404: if __name__ == "__main__":
+000405:     raise SystemExit(main())
+
+
+===== FILE: phoenix_fail_safe.py =====
+
+--- LINES 9-460 ---
+000009: import threading
+000010: import time
+000011: from typing import Callable, NoReturn
+000012: from uuid import uuid4
+000013: 
+000014: from phoenix_heartbeat import (
+000015:     HEARTBEAT_TIMEOUT_SECONDS,
+000016:     HeartbeatValidation,
+000017:     MONITOR_ONLY_SCOPE,
+000018:     OPERATIONAL_SCOPE,
+000019:     TRADING_ACTIONS_DISABLED,
+000020:     TRADING_ACTIONS_PAPER_ONLY,
+000021:     inspect_heartbeat,
+000022: )
+000023: 
+000024: 
+000025: ROOT_DIR = Path(__file__).resolve().parent
+000026: DEFAULT_LOG_DIR = ROOT_DIR / "logs"
+000027: DEFAULT_HEARTBEAT_PATH = ROOT_DIR / "runtime" / "guardian" / "heartbeat.json"
+000028: 
+000029: MODE = "PAPER"
+000030: ORDERS_SUBMITTED = 0
+000031: EXIT_FAIL_SAFE = 2
+000032: FAIL_SAFE_STATUS = "FAIL_SAFE"
+000033: JST = timezone(timedelta(hours=9), name="JST")
+000034: 
+000035: WATCHDOG_HEALTHY_STATUSES = frozenset({"READY", "MONITORING"})
+000036: ATOMIC_REPLACE_ATTEMPTS = 5
+000037: ATOMIC_REPLACE_RETRY_SECONDS = 0.01
+000038: 
+000039: 
+000040: class FailSafeExit(SystemExit):
+000041:     """The process must terminate with the non-retryable safety exit code."""
+000042: 
+000043:     def __init__(self, reason: str) -> None:
+000044:         self.reason = reason
+000045:         super().__init__(EXIT_FAIL_SAFE)
+000046: 
+000047: 
+000048: @dataclass(frozen=True)
+000049: class FailSafeResult:
+000050:     timestamp: str
+000051:     reason: str
+000052:     status: str
+000053:     mode: str
+000054:     orders_submitted: int
+000055:     repository_root: str
+000056:     guardian_status: str
+000057:     position_status: str
+000058:     heartbeat_status: str
+000059:     watchdog_status: str
+000060:     operating_scope: str
+000061:     trading_actions: str
+000062:     exit_code: int
+000063: 
+000064:     def as_dict(self) -> dict[str, object]:
+000065:         return asdict(self)
+000066: 
+000067: 
+000068: def _now_jst() -> datetime:
+000069:     return datetime.now(JST)
+000070: 
+000071: 
+000072: def _path_identity(value: str | os.PathLike[str]) -> str:
+000073:     return os.path.normcase(
+000074:         os.path.normpath(str(Path(value).resolve(strict=False)))
+000075:     ).casefold()
+000076: 
+000077: 
+000078: def _atomic_write(path: Path, content: str) -> None:
+000079:     path.parent.mkdir(parents=True, exist_ok=True)
+000080:     temporary_path = path.with_name(
+000081:         f".{path.name}.{os.getpid()}.{uuid4().hex}.tmp"
+000082:     )
+000083:     try:
+000084:         with temporary_path.open("x", encoding="utf-8", newline="\n") as file:
+000085:             file.write(content)
+000086:             file.flush()
+000087:             os.fsync(file.fileno())
+000088:         for attempt in range(ATOMIC_REPLACE_ATTEMPTS):
+000089:             try:
+000090:                 os.replace(temporary_path, path)
+000091:                 break
+000092:             except PermissionError:
+000093:                 if attempt + 1 >= ATOMIC_REPLACE_ATTEMPTS:
+000094:                     raise
+000095:                 time.sleep(ATOMIC_REPLACE_RETRY_SECONDS)
+000096:     finally:
+000097:         try:
+000098:             temporary_path.unlink()
+000099:         except FileNotFoundError:
+000100:             pass
+000101: 
+000102: 
+000103: def _text_report(result: FailSafeResult) -> str:
+000104:     return (
+000105:         f"Timestamp: {result.timestamp}\n"
+000106:         f"Status: {result.status}\n"
+000107:         f"Reason: {result.reason}\n"
+000108:         f"Mode: {result.mode}\n"
+000109:         f"Orders submitted: {result.orders_submitted}\n"
+000110:         f"Repository root: {result.repository_root}\n"
+000111:         f"Guardian status: {result.guardian_status}\n"
+000112:         f"Position status: {result.position_status}\n"
+000113:         f"Heartbeat status: {result.heartbeat_status}\n"
+000114:         f"WatchDog status: {result.watchdog_status}\n"
+000115:         f"Operating scope: {result.operating_scope}\n"
+000116:         f"Trading actions: {result.trading_actions}\n"
+000117:         f"Exit code: {result.exit_code}\n"
+000118:     )
+000119: 
+000120: 
+000121: def _normalized_heartbeat_reason(validation: HeartbeatValidation) -> str:
+000122:     if validation.reason == "HEARTBEAT_JSON_INVALID":
+000123:         return "JSON_CORRUPT"
+000124:     if validation.reason == "HEARTBEAT_PID_MISMATCH":
+000125:         return "PID_MISMATCH"
+000126:     if validation.reason == "HEARTBEAT_REPOSITORY_ROOT_MISMATCH":
+000127:         return "REPOSITORY_MISMATCH"
+000128:     if validation.reason == "HEARTBEAT_MODE_MISMATCH":
+000129:         return "MODE_NOT_PAPER"
+000130:     if validation.reason == "HEARTBEAT_ORDERS_SUBMITTED_MISMATCH":
+000131:         return "ORDERS_SUBMITTED_NONZERO"
+000132:     if validation.reason == "HEARTBEAT_GUARDIAN_STATUS_MISMATCH":
+000133:         return "GUARDIAN_BLOCKED"
+000134:     if validation.reason == "HEARTBEAT_POSITION_RECONCILIATION_STATUS_MISMATCH":
+000135:         return "POSITION_BLOCKED"
+000136:     if validation.reason == "HEARTBEAT_OPERATING_SCOPE_MISMATCH":
+000137:         return "OPERATING_SCOPE_MISMATCH"
+000138:     if validation.reason == "HEARTBEAT_TRADING_ACTIONS_MISMATCH":
+000139:         return "TRADING_ACTIONS_NOT_DISABLED"
+000140:     if validation.reason in {
+000141:         "HEARTBEAT_MISSING",
+000142:         "HEARTBEAT_STALE",
+000143:         "HEARTBEAT_REPORTED_FAILED",
+000144:     }:
+000145:         return "HEARTBEAT_LOST"
+000146:     return validation.reason
+000147: 
+000148: 
+000149: class FailSafeController:
+000150:     """Monitors PAPER safety invariants and performs one idempotent safe stop."""
+000151: 
+000152:     def __init__(
+000153:         self,
+000154:         *,
+000155:         repository_root: str | os.PathLike[str],
+000156:         log_dir: str | os.PathLike[str] | None = None,
+000157:         expected_repository_root: str | os.PathLike[str] | None = None,
+000158:         mode: str = MODE,
+000159:         orders_submitted: int = ORDERS_SUBMITTED,
+000160:         watchdog_status_provider: Callable[[], str] | None = None,
+000161:         monitor_interval_seconds: float = 1.0,
+000162:         heartbeat_timeout_seconds: float = HEARTBEAT_TIMEOUT_SECONDS,
+000163:         now_provider: Callable[[], datetime] = _now_jst,
+000164:     ) -> None:
+000165:         if monitor_interval_seconds <= 0:
+000166:             raise ValueError("monitor_interval_seconds must be positive")
+000167:         if heartbeat_timeout_seconds <= 0:
+000168:             raise ValueError("heartbeat_timeout_seconds must be positive")
+000169:         self.repository_root = Path(repository_root).resolve(strict=False)
+000170:         self.expected_repository_root = Path(
+000171:             expected_repository_root or repository_root
+000172:         ).resolve(strict=False)
+000173:         self.log_dir = Path(log_dir or (self.repository_root / "logs"))
+000174:         self.mode = mode
+000175:         self.orders_submitted = orders_submitted
+000176:         self.monitor_interval_seconds = float(monitor_interval_seconds)
+000177:         self.heartbeat_timeout_seconds = float(heartbeat_timeout_seconds)
+000178:         self._now_provider = now_provider
+000179:         self._watchdog_status_provider = watchdog_status_provider
+000180: 
+000181:         self.guardian_status = "NOT_CHECKED"
+000182:         self.position_status = "NOT_CHECKED"
+000183:         self.heartbeat_status = "NOT_STARTED"
+000184:         self.watchdog_status = "MONITORING"
+000185:         self.monitor_only = False
+000186: 
+000187:         self._heartbeat_path: Path | None = None
+000188:         self._expected_pid: int | None = None
+000189:         self._previous_sequence: int | None = None
+000190:         self._previous_timestamp: datetime | None = None
+000191:         self._background_stoppers: list[tuple[str, Callable[[], object]]] = []
+000192:         self._stop_event = threading.Event()
+000193:         self._triggered_event = threading.Event()
+000194:         self._monitor_thread: threading.Thread | None = None
+000195:         self._lock = threading.RLock()
+000196:         self._result: FailSafeResult | None = None
+000197:         self._report_error: str | None = None
+000198: 
+000199:     @property
+000200:     def result(self) -> FailSafeResult | None:
+000201:         with self._lock:
+000202:             return self._result
+000203: 
+000204:     @property
+000205:     def triggered(self) -> bool:
+000206:         return self._triggered_event.is_set()
+000207: 
+000208:     @property
+000209:     def monitor_is_alive(self) -> bool:
+000210:         thread = self._monitor_thread
+000211:         return bool(thread is not None and thread.is_alive())
+000212: 
+000213:     @property
+000214:     def report_error(self) -> str | None:
+000215:         with self._lock:
+000216:             return self._report_error
+000217: 
+000218:     def update_statuses(
+000219:         self,
+000220:         *,
+000221:         guardian_status: str | None = None,
+000222:         position_status: str | None = None,
+000223:         heartbeat_status: str | None = None,
+000224:         watchdog_status: str | None = None,
+000225:     ) -> None:
+000226:         with self._lock:
+000227:             if guardian_status is not None:
+000228:                 self.guardian_status = guardian_status
+000229:             if position_status is not None:
+000230:                 self.position_status = position_status
+000231:             if heartbeat_status is not None:
+000232:                 self.heartbeat_status = heartbeat_status
+000233:             if watchdog_status is not None:
+000234:                 self.watchdog_status = watchdog_status
+000235: 
+000236:     def register_background_stopper(
+000237:         self,
+000238:         name: str,
+000239:         stopper: Callable[[], object],
+000240:     ) -> None:
+000241:         if not isinstance(name, str) or not name.strip():
+000242:             raise ValueError("background name is required")
+000243:         if not callable(stopper):
+000244:             raise TypeError("background stopper must be callable")
+000245:         with self._lock:
+000246:             if self._result is not None:
+000247:                 raise RuntimeError("Fail Safe has already been triggered")
+000248:             self._background_stoppers.append((name.strip(), stopper))
+000249: 
+000250:     @property
+000251:     def operating_scope(self) -> str:
+000252:         return MONITOR_ONLY_SCOPE if self.monitor_only else OPERATIONAL_SCOPE
+000253: 
+000254:     @property
+000255:     def trading_actions(self) -> str:
+000256:         return (
+000257:             TRADING_ACTIONS_DISABLED
+000258:             if self.monitor_only
+000259:             else TRADING_ACTIONS_PAPER_ONLY
+000260:         )
+000261: 
+000262:     def enable_monitor_only(self) -> None:
+000263:         with self._lock:
+000264:             if self._result is not None or self._monitor_thread is not None:
+000265:                 raise RuntimeError("Fail Safe operating scope is already active")
+000266:             self.monitor_only = True
+000267: 
+000268:     def _write_reports(self, result: FailSafeResult) -> None:
+000269:         json_path = self.log_dir / "fail_safe.json"
+000270:         text_path = self.log_dir / "fail_safe.txt"
+000271:         json_content = json.dumps(
+000272:             result.as_dict(),
+000273:             ensure_ascii=False,
+000274:             indent=2,
+000275:             sort_keys=True,
+000276:         ) + "\n"
+000277:         try:
+000278:             _atomic_write(json_path, json_content)
+000279:             _atomic_write(text_path, _text_report(result))
+000280:         except OSError as error:
+000281:             message = f"{type(error).__name__}: {error}"
+000282:             with self._lock:
+000283:                 self._report_error = message
+000284:             print(
+000285:                 "Fail Safe report write failed: " + message,
+000286:                 file=sys.stderr,
+000287:                 flush=True,
+000288:             )
+000289: 
+000290:     def transition(
+000291:         self,
+000292:         reason: str,
+000293:         *,
+000294:         guardian_status: str | None = None,
+000295:         position_status: str | None = None,
+000296:         heartbeat_status: str | None = None,
+000297:         watchdog_status: str | None = None,
+000298:     ) -> FailSafeResult:
+000299:         if not isinstance(reason, str) or not reason.strip():
+000300:             reason = "UNDETERMINED"
+000301:         with self._lock:
+000302:             if self._result is not None:
+000303:                 return self._result
+000304:             self.update_statuses(
+000305:                 guardian_status=guardian_status,
+000306:                 position_status=position_status,
+000307:                 heartbeat_status=heartbeat_status,
+000308:                 watchdog_status=watchdog_status,
+000309:             )
+000310:             result = FailSafeResult(
+000311:                 timestamp=self._now_provider().astimezone(JST).isoformat(
+000312:                     timespec="seconds"
+000313:                 ),
+000314:                 reason=reason.strip(),
+000315:                 status=FAIL_SAFE_STATUS,
+000316:                 mode=self.mode,
+000317:                 orders_submitted=self.orders_submitted,
+000318:                 repository_root=str(self.repository_root),
+000319:                 guardian_status=self.guardian_status,
+000320:                 position_status=self.position_status,
+000321:                 heartbeat_status=self.heartbeat_status,
+000322:                 watchdog_status=self.watchdog_status,
+000323:                 operating_scope=self.operating_scope,
+000324:                 trading_actions=self.trading_actions,
+000325:                 exit_code=EXIT_FAIL_SAFE,
+000326:             )
+000327:             self._result = result
+000328:             stoppers = tuple(reversed(self._background_stoppers))
+000329:             self._stop_event.set()
+000330:             self._triggered_event.set()
+000331: 
+000332:         for name, stopper in stoppers:
+000333:             try:
+000334:                 stopper()
+000335:             except Exception as error:
+000336:                 print(
+000337:                     "Fail Safe background stop failed for "
+000338:                     f"{name}: {type(error).__name__}: {error}",
+000339:                     file=sys.stderr,
+000340:                     flush=True,
+000341:                 )
+000342:         self._write_reports(result)
+000343:         return result
+000344: 
+000345:     def fail_and_exit(self, reason: str, **statuses: str) -> NoReturn:
+000346:         self.transition(reason, **statuses)
+000347:         raise FailSafeExit(reason)
+000348: 
+000349:     def _static_reason(self) -> str | None:
+000350:         if self.mode != MODE:
+000351:             return "MODE_NOT_PAPER"
+000352:         if (
+000353:             isinstance(self.orders_submitted, bool)
+000354:             or not isinstance(self.orders_submitted, int)
+000355:             or self.orders_submitted != ORDERS_SUBMITTED
+000356:         ):
+000357:             return "ORDERS_SUBMITTED_NONZERO"
+000358:         try:
+000359:             root_matches = _path_identity(self.repository_root) == _path_identity(
+000360:                 self.expected_repository_root
+000361:             )
+000362:         except (OSError, ValueError):
+000363:             root_matches = False
+000364:         if not root_matches:
+000365:             return "REPOSITORY_MISMATCH"
+000366:         if self.guardian_status != "READY":
+000367:             return "GUARDIAN_BLOCKED"
+000368:         expected_position_status = "WARNING" if self.monitor_only else "READY"
+000369:         if self.position_status != expected_position_status:
+000370:             return "POSITION_BLOCKED"
+000371:         if self.watchdog_status not in WATCHDOG_HEALTHY_STATUSES:
+000372:             return "WATCHDOG_ABNORMAL"
+000373:         return None
+000374: 
+000375:     def check_once(self) -> bool:
+000376:         if self.triggered:
+000377:             return False
+000378:         if self._watchdog_status_provider is not None:
+000379:             try:
+000380:                 watchdog_status = self._watchdog_status_provider()
+000381:             except Exception:
+000382:                 watchdog_status = "ABNORMAL"
+000383:             self.update_statuses(watchdog_status=watchdog_status)
+000384: 
+000385:         reason = self._static_reason()
+000386:         if reason is not None:
+000387:             self.transition(reason)
+000388:             return False
+000389: 
+000390:         heartbeat_path = self._heartbeat_path
+000391:         expected_pid = self._expected_pid
+000392:         if heartbeat_path is None or expected_pid is None:
+000393:             self.transition("HEARTBEAT_LOST", heartbeat_status="LOST")
+000394:             return False
+000395:         validation = inspect_heartbeat(
+000396:             heartbeat_path,
+000397:             expected_pid=expected_pid,
+000398:             expected_repository_root=self.expected_repository_root,
+000399:             now=self._now_provider(),
+000400:             timeout_seconds=self.heartbeat_timeout_seconds,
+000401:             previous_sequence=self._previous_sequence,
+000402:             previous_timestamp=self._previous_timestamp,
+000403:             expected_operating_scope=self.operating_scope,
+000404:         )
+000405:         if not validation.healthy:
+000406:             reason = _normalized_heartbeat_reason(validation)
+000407:             self.transition(reason, heartbeat_status="LOST")
+000408:             return False
+000409: 
+000410:         self.update_statuses(heartbeat_status="HEALTHY")
+000411:         self._previous_sequence = validation.sequence
+000412:         self._previous_timestamp = validation.timestamp
+000413:         return True
+000414: 
+000415:     def _monitor(self) -> None:
+000416:         while not self._stop_event.wait(self.monitor_interval_seconds):
+000417:             try:
+000418:                 if not self.check_once():
+000419:                     return
+000420:             except Exception:
+000421:                 self.transition(
+000422:                     "FAIL_SAFE_MONITOR_EXCEPTION",
+000423:                     heartbeat_status="LOST",
+000424:                 )
+000425:                 return
+000426: 
+000427:     def start_monitoring(
+000428:         self,
+000429:         *,
+000430:         heartbeat_path: str | os.PathLike[str],
+000431:         expected_pid: int,
+000432:     ) -> None:
+000433:         if isinstance(expected_pid, bool) or not isinstance(expected_pid, int):
+000434:             raise TypeError("expected_pid must be an integer")
+000435:         if expected_pid <= 0:
+000436:             raise ValueError("expected_pid must be positive")
+000437:         with self._lock:
+000438:             if self._monitor_thread is not None:
+000439:                 raise RuntimeError("Fail Safe monitoring is already started")
+000440:             self._heartbeat_path = Path(heartbeat_path)
+000441:             self._expected_pid = expected_pid
+000442:         if not self.check_once():
+000443:             self.raise_if_triggered()
+000444:         self._monitor_thread = threading.Thread(
+000445:             target=self._monitor,
+000446:             name="phoenix-fail-safe",
+000447:             daemon=True,
+000448:         )
+000449:         self._monitor_thread.start()
+000450: 
+000451:     def stop_monitoring(self) -> None:
+000452:         self._stop_event.set()
+000453:         thread = self._monitor_thread
+000454:         if thread is not None and thread is not threading.current_thread():
+000455:             thread.join(timeout=min(5.0, self.monitor_interval_seconds + 1.0))
+000456: 
+000457:     def raise_if_triggered(self) -> None:
+000458:         result = self.result
+000459:         if result is not None:
+000460:             raise FailSafeExit(result.reason)
+
+
+===== FILE: tests/test_monitor_only.py =====
+
+--- LINES 23-303 ---
+000023: from phoenix_heartbeat import (
+000024:     HeartbeatError,
+000025:     PhoenixHeartbeat,
+000026:     TRADING_ACTIONS_DISABLED,
+000027:     inspect_heartbeat,
+000028: )
+000029: 
+000030: 
+000031: JST = timezone(timedelta(hours=9), name="JST")
+000032: 
+000033: 
+000034: def monitor_result(**overrides: object) -> SimpleNamespace:
+000035:     checked = datetime(2026, 8, 3, 9, 0, 0, tzinfo=JST)
+000036:     values: dict[str, object] = {
+000037:         "checked_at": checked.isoformat(timespec="seconds"),
+000038:         "status": "WARNING",
+000039:         "reasons": ("POSITIONS_PRESENT",),
+000040:         "mode": "PAPER",
+000041:         "positions_count": 4,
+000042:         "orders_submitted": 0,
+000043:         "guardian_status": "READY",
+000044:         "source_timestamp": (checked - timedelta(minutes=1)).isoformat(
+000045:             timespec="seconds"
+000046:         ),
+000047:         "exit_code": 0,
+000048:         "report_error": None,
+000049:     }
+000050:     values.update(overrides)
+000051:     return SimpleNamespace(**values)
+000052: 
+000053: 
+000054: class MonitorOnlyGateTest(unittest.TestCase):
+000055:     def tearDown(self) -> None:
+000056:         run_phoenix._ACTIVE_RECOVERY_SESSION = None
+000057:         run_phoenix._ACTIVE_FAIL_SAFE = None
+000058:         run_phoenix._ACTIVE_HEARTBEAT = None
+000059: 
+000060:     def test_exact_warning_positions_present_state_is_monitor_only(self) -> None:
+000061:         self.assertTrue(
+000062:             run_phoenix._is_monitor_only_reconciliation(
+000063:                 monitor_result(),
+000064:                 guardian_status="READY",
+000065:             )
+000066:         )
+000067: 
+000068:     def test_every_monitor_only_safety_condition_fails_closed(self) -> None:
+000069:         checked = datetime(2026, 8, 3, 9, 0, 0, tzinfo=JST)
+000070:         invalid_cases = {
+000071:             "other warning": {"reasons": ("SOURCE_STATE_STALE",)},
+000072:             "multiple reasons": {
+000073:                 "reasons": ("POSITIONS_PRESENT", "SOURCE_STATE_STALE")
+000074:             },
+000075:             "blocked": {"status": "BLOCKED"},
+000076:             "non paper": {"mode": "LIVE"},
+000077:             "orders nonzero": {"orders_submitted": 1},
+000078:             "orders bool": {"orders_submitted": False},
+000079:             "positions zero": {"positions_count": 0},
+000080:             "guardian result blocked": {"guardian_status": "BLOCKED"},
+000081:             "report error": {"report_error": "write failed"},
+000082:             "nonzero exit": {"exit_code": 2},
+000083:             "missing source time": {"source_timestamp": None},
+000084:             "future source time": {
+000085:                 "source_timestamp": (checked + timedelta(seconds=1)).isoformat()
+000086:             },
+000087:             "stale source time": {
+000088:                 "source_timestamp": (checked - timedelta(hours=25)).isoformat()
+000089:             },
+000090:         }
+000091:         for name, overrides in invalid_cases.items():
+000092:             with self.subTest(name=name):
+000093:                 self.assertFalse(
+000094:                     run_phoenix._is_monitor_only_reconciliation(
+000095:                         monitor_result(**overrides),
+000096:                         guardian_status="READY",
+000097:                     )
+000098:                 )
+000099:         self.assertFalse(
+000100:             run_phoenix._is_monitor_only_reconciliation(
+000101:                 monitor_result(),
+000102:                 guardian_status="BLOCKED",
+000103:             )
+000104:         )
+000105: 
+000106:     def test_monitor_only_environment_and_script_allowlist_disable_trading(self) -> None:
+000107:         environment = run_phoenix.build_environment(monitor_only=True)
+000108:         self.assertEqual("MONITOR_ONLY", environment["PHOENIX_OPERATING_SCOPE"])
+000109:         self.assertEqual("DISABLED", environment["PHOENIX_TRADING_ACTIONS"])
+000110:         self.assertEqual(
+000111:             {
+000112:                 "market_risk_ai.py",
+000113:                 "price_monitor.py",
+000114:                 "get_nikkei225.py",
+000115:                 "daily_report.py",
+000116:                 "learning_engine.py",
+000117:                 "ai_judgement.py",
+000118:                 "trade_engine.py",
+000119:                 "order_manager.py",
+000120:                 "vba_bridge.py",
+000121:                 "ranking_ai.py",
+000122:                 "chart_generator.py",
+000123:                 "notify.py",
+000124:             },
+000125:             set(run_phoenix.MONITOR_ONLY_ALLOWED_SCRIPTS),
+000126:         )
+000127: 
+000128:         with tempfile.TemporaryDirectory() as temporary_directory:
+000129:             root = Path(temporary_directory)
+000130:             with (
+000131:                 mock.patch.object(run_phoenix, "ROOT_DIR", root),
+000132:                 mock.patch.object(run_phoenix, "LOG_DIR", root / "logs"),
+000133:                 mock.patch.object(run_phoenix, "LOG_FILE", root / "logs" / "run.log"),
+000134:                 mock.patch.object(run_phoenix.subprocess, "run") as subprocess_run,
+000135:             ):
+000136:                 result = run_phoenix.run_script(
+000137:                     "Order submission",
+000138:                     "phoenix.py",
+000139:                     True,
+000140:                     monitor_only=True,
+000141:                 )
+000142: 
+000143:         self.assertFalse(result[0])
+000144:         self.assertEqual(-20, result[2])
+000145:         subprocess_run.assert_not_called()
+000146: 
+000147:     def test_invalid_warning_exits_two_before_disaster_recovery(self) -> None:
+000148:         guardian = SimpleNamespace(
+000149:             ready=True,
+000150:             status="READY",
+000151:             reasons=(),
+000152:             report_error=None,
+000153:         )
+000154:         position = monitor_result(reasons=("SOURCE_STATE_STALE",))
+000155: 
+000156:         class BlockingFailSafe:
+000157:             def __init__(self, **kwargs: object) -> None:
+000158:                 pass
+000159: 
+000160:             def update_statuses(self, **kwargs: object) -> None:
+000161:                 pass
+000162: 
+000163:             def fail_and_exit(self, reason: str, **kwargs: object) -> None:
+000164:                 raise FailSafeExit(reason)
+000165: 
+000166:         with (
+000167:             mock.patch.object(run_phoenix, "FailSafeController", BlockingFailSafe),
+000168:             mock.patch.object(run_phoenix, "configure_console"),
+000169:             mock.patch.object(
+000170:                 run_phoenix, "run_repository_guardian", return_value=guardian
+000171:             ),
+000172:             mock.patch.object(
+000173:                 run_phoenix, "run_position_reconciliation", return_value=position
+000174:             ),
+000175:             mock.patch.object(run_phoenix, "run_disaster_recovery") as recovery,
+000176:             mock.patch("builtins.print"),
+000177:         ):
+000178:             with self.assertRaises(FailSafeExit) as stopped:
+000179:                 run_phoenix._run_main()
+000180: 
+000181:         self.assertEqual(2, stopped.exception.code)
+000182:         recovery.assert_not_called()
+000183: 
+000184: 
+000185: class RunPhoenixMonitorOnlyIntegrationTest(unittest.TestCase):
+000186:     def tearDown(self) -> None:
+000187:         run_phoenix._ACTIVE_RECOVERY_SESSION = None
+000188:         run_phoenix._ACTIVE_FAIL_SAFE = None
+000189:         run_phoenix._ACTIVE_HEARTBEAT = None
+000190: 
+000191:     def test_monitor_only_reaches_existing_processing_without_operational_ready(self) -> None:
+000192:         events: list[str] = []
+000193:         constructor_arguments: dict[str, dict[str, object]] = {}
+000194:         guardian = SimpleNamespace(
+000195:             ready=True,
+000196:             status="READY",
+000197:             reasons=(),
+000198:             report_error=None,
+000199:         )
+000200:         position = monitor_result()
+000201:         recovery = SimpleNamespace(
+000202:             blocked=False,
+000203:             recovery_required=False,
+000204:             recovery_status="READY",
+000205:             recovery_reasons=[],
+000206:             state_path="recovery.json",
+000207:             previous_git_commit="a" * 40,
+000208:             current_git_commit="a" * 40,
+000209:             recovery_attempt=0,
+000210:             recovered_at=None,
+000211:         )
+000212: 
+000213:         class ReachedExistingProcessing(RuntimeError):
+000214:             pass
+000215: 
+000216:         class FakeFailSafe:
+000217:             triggered = False
+000218: 
+000219:             def __init__(self, **kwargs: object) -> None:
+000220:                 events.append("fail_safe_created")
+000221: 
+000222:             def update_statuses(self, **kwargs: object) -> None:
+000223:                 pass
+000224: 
+000225:             def enable_monitor_only(self) -> None:
+000226:                 events.append("monitor_only_enabled")
+000227: 
+000228:             def register_background_stopper(self, *args: object) -> None:
+000229:                 pass
+000230: 
+000231:             def start_monitoring(self, **kwargs: object) -> None:
+000232:                 events.append("fail_safe_monitoring")
+000233: 
+000234:             def raise_if_triggered(self) -> None:
+000235:                 pass
+000236: 
+000237:         class FakeRecoverySession:
+000238:             def __init__(self, **kwargs: object) -> None:
+000239:                 constructor_arguments["session"] = kwargs
+000240: 
+000241:             def start(self) -> None:
+000242:                 events.append("recovery_session")
+000243: 
+000244:         class FakeHeartbeat:
+000245:             heartbeat_path = "heartbeat.json"
+000246:             pid = 1234
+000247: 
+000248:             def __init__(self, **kwargs: object) -> None:
+000249:                 constructor_arguments["heartbeat"] = kwargs
+000250: 
+000251:             def start(self, **kwargs: object) -> None:
+000252:                 constructor_arguments["heartbeat_start"] = kwargs
+000253:                 events.append("heartbeat")
+000254: 
+000255:             def set_stage(self, stage: str) -> None:
+000256:                 pass
+000257: 
+000258:             def stop(self, **kwargs: object) -> None:
+000259:                 pass
+000260: 
+000261:         def recovery_gate(**kwargs: object) -> SimpleNamespace:
+000262:             constructor_arguments["recovery"] = kwargs
+000263:             return recovery
+000264: 
+000265:         def initialize() -> None:
+000266:             events.append("existing_processing")
+000267:             raise ReachedExistingProcessing("reached")
+000268: 
+000269:         with tempfile.TemporaryDirectory() as temporary_directory:
+000270:             root = Path(temporary_directory)
+000271:             with (
+000272:                 mock.patch.object(run_phoenix, "ROOT_DIR", root),
+000273:                 mock.patch.object(run_phoenix, "LOG_DIR", root / "logs"),
+000274:                 mock.patch.object(run_phoenix, "FailSafeController", FakeFailSafe),
+000275:                 mock.patch.object(run_phoenix, "RecoverySession", FakeRecoverySession),
+000276:                 mock.patch.object(run_phoenix, "PhoenixHeartbeat", FakeHeartbeat),
+000277:                 mock.patch.object(run_phoenix, "configure_console"),
+000278:                 mock.patch.object(
+000279:                     run_phoenix, "run_repository_guardian", return_value=guardian
+000280:                 ),
+000281:                 mock.patch.object(
+000282:                     run_phoenix, "run_position_reconciliation", return_value=position
+000283:                 ),
+000284:                 mock.patch.object(
+000285:                     run_phoenix, "run_disaster_recovery", side_effect=recovery_gate
+000286:                 ),
+000287:                 mock.patch.object(
+000288:                     run_phoenix, "initialize_directories", side_effect=initialize
+000289:                 ),
+000290:                 mock.patch.dict(
+000291:                     os.environ,
+000292:                     {"PHOENIX_WATCHDOG_RESTART_ATTEMPT": "0"},
+000293:                 ),
+000294:                 mock.patch("builtins.print") as printer,
+000295:             ):
+000296:                 with self.assertRaises(ReachedExistingProcessing):
+000297:                     run_phoenix._run_main()
+000298: 
+000299:         self.assertIn("monitor_only_enabled", events)
+000300:         self.assertIn("existing_processing", events)
+000301:         self.assertTrue(constructor_arguments["recovery"]["monitor_only"])
+000302:         self.assertEqual(
+000303:             ("POSITIONS_PRESENT",),
+
+
+===== FILE: tests/test_phoenix_disaster_recovery.py =====
+
+--- LINES 548-802 ---
+000548:         class FakeFailSafe:
+000549:             triggered = False
+000550: 
+000551:             def __init__(self, **kwargs: object) -> None:
+000552:                 pass
+000553: 
+000554:             def update_statuses(self, **kwargs: object) -> None:
+000555:                 pass
+000556: 
+000557:             def register_background_stopper(self, *args: object) -> None:
+000558:                 pass
+000559: 
+000560:             def start_monitoring(self, **kwargs: object) -> None:
+000561:                 events.append("fail_safe")
+000562: 
+000563:             def raise_if_triggered(self) -> None:
+000564:                 pass
+000565: 
+000566:         class FakeSession:
+000567:             def __init__(self, **kwargs: object) -> None:
+000568:                 pass
+000569: 
+000570:             def start(self) -> None:
+000571:                 events.append("recovery_session")
+000572: 
+000573:         class FakeHeartbeat:
+000574:             heartbeat_path = "heartbeat.json"
+000575:             pid = 1234
+000576: 
+000577:             def __init__(self, **kwargs: object) -> None:
+000578:                 pass
+000579: 
+000580:             def start(self, **kwargs: object) -> None:
+000581:                 events.append("heartbeat")
+000582: 
+000583:             def set_stage(self, value: str) -> None:
+000584:                 pass
+000585: 
+000586:             def stop(self, **kwargs: object) -> None:
+000587:                 pass
+000588: 
+000589:         def initialize() -> None:
+000590:             events.append("existing")
+000591:             raise RuntimeError("stop after startup order")
+000592: 
+000593:         with (
+000594:             mock.patch.object(self.run_phoenix, "FailSafeController", FakeFailSafe),
+000595:             mock.patch.object(self.run_phoenix, "RecoverySession", FakeSession),
+000596:             mock.patch.object(self.run_phoenix, "PhoenixHeartbeat", FakeHeartbeat),
+000597:             mock.patch.object(self.run_phoenix, "configure_console"),
+000598:             mock.patch.object(
+000599:                 self.run_phoenix,
+000600:                 "run_repository_guardian",
+000601:                 side_effect=lambda **kwargs: events.append("guardian") or guardian,
+000602:             ),
+000603:             mock.patch.object(
+000604:                 self.run_phoenix,
+000605:                 "run_position_reconciliation",
+000606:                 side_effect=lambda **kwargs: events.append("position") or position,
+000607:             ),
+000608:             mock.patch.object(
+000609:                 self.run_phoenix,
+000610:                 "run_disaster_recovery",
+000611:                 side_effect=lambda **kwargs: events.append("recovery") or recovery,
+000612:             ),
+000613:             mock.patch.object(self.run_phoenix, "initialize_directories", side_effect=initialize),
+000614:             mock.patch.dict(os.environ, {"PHOENIX_WATCHDOG_RESTART_ATTEMPT": "0"}),
+000615:             mock.patch("builtins.print"),
+000616:         ):
+000617:             with self.assertRaisesRegex(RuntimeError, "stop after startup order"):
+000618:                 self.run_phoenix._run_main()
+000619: 
+000620:         self.assertEqual(
+000621:             [
+000622:                 "guardian",
+000623:                 "position",
+000624:                 "recovery",
+000625:                 "recovery_session",
+000626:                 "heartbeat",
+000627:                 "fail_safe",
+000628:                 "existing",
+000629:             ],
+000630:             events,
+000631:         )
+000632: 
+000633:     def test_recovery_required_stops_before_heartbeat_and_existing_processing(self) -> None:
+000634:         guardian = mock.Mock(ready=True, status="READY", reasons=(), report_error=None)
+000635:         position = mock.Mock(
+000636:             status="READY",
+000637:             reasons=(),
+000638:             report_error=None,
+000639:             mode="PAPER",
+000640:             orders_submitted=0,
+000641:         )
+000642:         recovery = mock.Mock(
+000643:             blocked=False,
+000644:             recovery_required=True,
+000645:             recovery_reasons=["PREVIOUS_STATUS_RUNNING"],
+000646:         )
+000647:         with (
+000648:             mock.patch.object(self.run_phoenix, "configure_console"),
+000649:             mock.patch.object(self.run_phoenix, "run_repository_guardian", return_value=guardian),
+000650:             mock.patch.object(self.run_phoenix, "run_position_reconciliation", return_value=position),
+000651:             mock.patch.object(self.run_phoenix, "run_disaster_recovery", return_value=recovery),
+000652:             mock.patch.object(self.run_phoenix, "PhoenixHeartbeat") as heartbeat,
+000653:             mock.patch.object(self.run_phoenix, "initialize_directories") as initialize,
+000654:             mock.patch("builtins.print"),
+000655:         ):
+000656:             with self.assertRaises(RecoveryRequiredExit) as stopped:
+000657:                 self.run_phoenix.main()
+000658: 
+000659:         self.assertEqual(1, stopped.exception.code)
+000660:         heartbeat.assert_not_called()
+000661:         initialize.assert_not_called()
+000662: 
+000663:     def test_recovery_blocked_exits_two(self) -> None:
+000664:         guardian = mock.Mock(ready=True, status="READY", reasons=(), report_error=None)
+000665:         position = mock.Mock(
+000666:             status="READY",
+000667:             reasons=(),
+000668:             report_error=None,
+000669:             mode="PAPER",
+000670:             orders_submitted=0,
+000671:         )
+000672:         recovery = mock.Mock(
+000673:             blocked=True,
+000674:             recovery_required=False,
+000675:             recovery_reasons=["GIT_COMMIT_MISMATCH"],
+000676:         )
+000677: 
+000678:         class BlockingFailSafe:
+000679:             def __init__(self, **kwargs: object) -> None:
+000680:                 pass
+000681: 
+000682:             def update_statuses(self, **kwargs: object) -> None:
+000683:                 pass
+000684: 
+000685:             def stop_monitoring(self) -> None:
+000686:                 pass
+000687: 
+000688:             def fail_and_exit(self, reason: str, **kwargs: object) -> None:
+000689:                 raise FailSafeExit(reason)
+000690: 
+000691:         with (
+000692:             mock.patch.object(self.run_phoenix, "FailSafeController", BlockingFailSafe),
+000693:             mock.patch.object(self.run_phoenix, "configure_console"),
+000694:             mock.patch.object(self.run_phoenix, "run_repository_guardian", return_value=guardian),
+000695:             mock.patch.object(self.run_phoenix, "run_position_reconciliation", return_value=position),
+000696:             mock.patch.object(self.run_phoenix, "run_disaster_recovery", return_value=recovery),
+000697:             mock.patch("builtins.print"),
+000698:         ):
+000699:             with self.assertRaises(FailSafeExit) as stopped:
+000700:                 self.run_phoenix.main()
+000701: 
+000702:         self.assertEqual(EXIT_BLOCKED, stopped.exception.code)
+000703: 
+000704: 
+000705: class WatchdogDisasterRecoveryIntegrationTest(unittest.TestCase):
+000706:     def setUp(self) -> None:
+000707:         self.temporary_directory = tempfile.TemporaryDirectory()
+000708:         self.root = Path(self.temporary_directory.name)
+000709:         self.log_dir = self.root / "logs"
+000710:         self.lock_file = self.log_dir / "phoenix_watchdog.lock"
+000711:         self.state_path = self.root / "runtime" / "guardian" / "recovery_state.json"
+000712: 
+000713:     def tearDown(self) -> None:
+000714:         self.temporary_directory.cleanup()
+000715: 
+000716:     def make_watchdog(self, target: Path, max_restarts: int) -> PhoenixWatchdog:
+000717:         return PhoenixWatchdog(
+000718:             target_script=target,
+000719:             root_dir=self.root,
+000720:             log_dir=self.log_dir,
+000721:             lock_file=self.lock_file,
+000722:             recovery_state_path=self.state_path,
+000723:             config=MonitorConfig(
+000724:                 max_restarts=max_restarts,
+000725:                 backoff_base_seconds=0.0,
+000726:                 backoff_max_seconds=0.0,
+000727:                 startup_grace_seconds=0.0,
+000728:                 poll_seconds=0.005,
+000729:                 termination_grace_seconds=1.0,
+000730:                 stale_lock_seconds=1.0,
+000731:                 heartbeat_timeout_seconds=0.2,
+000732:             ),
+000733:         )
+000734: 
+000735:     def recovery_payload(self, *, status: str = "RECOVERY_REQUIRED") -> dict[str, object]:
+000736:         now = datetime.now(JST)
+000737:         return {
+000738:             "schema_version": 1,
+000739:             "checked_at": now.isoformat(timespec="seconds"),
+000740:             "previous_run_id": "watchdog-run",
+000741:             "previous_status": "RUNNING" if status == "RECOVERY_REQUIRED" else "COMPLETED",
+000742:             "previous_started_at": now.isoformat(timespec="seconds"),
+000743:             "previous_finished_at": None if status == "RECOVERY_REQUIRED" else now.isoformat(timespec="seconds"),
+000744:             "previous_pid": 999999999,
+000745:             "previous_git_commit": "a" * 40,
+000746:             "previous_repository_root": str(self.root),
+000747:             "previous_guardian_status": "READY",
+000748:             "previous_position_status": "READY",
+000749:             "previous_heartbeat_status": "RUNNING" if status == "RECOVERY_REQUIRED" else "COMPLETED",
+000750:             "previous_fail_safe_status": "NOT_TRIGGERED",
+000751:             "previous_orders_submitted": 0,
+000752:             "previous_mode": "PAPER",
+000753:             "recovery_status": status,
+000754:             "recovery_reasons": [],
+000755:             "recovery_attempt": 1 if status == "RECOVERY_REQUIRED" else 0,
+000756:             "recovered_at": None,
+000757:             "exit_code": 1 if status == "RECOVERY_REQUIRED" else 0,
+000758:         }
+000759: 
+000760:     def test_watchdog_restarts_only_when_recovery_state_allows(self) -> None:
+000761:         counter = self.root / "count.txt"
+000762:         target = self.root / "run_phoenix.py"
+000763:         target.write_text(
+000764:             "from pathlib import Path\n"
+000765:             "import sys\n"
+000766:             f"p=Path({str(counter)!r})\n"
+000767:             "n=int(p.read_text()) if p.exists() else 0\n"
+000768:             "p.write_text(str(n+1))\n"
+000769:             "sys.exit(1 if n == 0 else 0)\n",
+000770:             encoding="utf-8",
+000771:         )
+000772:         self.state_path.parent.mkdir(parents=True)
+000773:         self.state_path.write_text(
+000774:             json.dumps(self.recovery_payload()), encoding="utf-8"
+000775:         )
+000776: 
+000777:         result = self.make_watchdog(target, max_restarts=2).run()
+000778: 
+000779:         self.assertEqual(EXIT_OK, result)
+000780:         self.assertEqual("2", counter.read_text(encoding="utf-8"))
+000781: 
+000782:     def test_disaster_recovery_exit_two_is_not_retried(self) -> None:
+000783:         counter = self.root / "count.txt"
+000784:         target = self.root / "run_phoenix.py"
+000785:         target.write_text(
+000786:             "from pathlib import Path\n"
+000787:             "import sys\n"
+000788:             f"p=Path({str(counter)!r})\n"
+000789:             "n=int(p.read_text()) if p.exists() else 0\n"
+000790:             "p.write_text(str(n+1))\n"
+000791:             "sys.exit(2)\n",
+000792:             encoding="utf-8",
+000793:         )
+000794: 
+000795:         result = self.make_watchdog(target, max_restarts=3).run()
+000796: 
+000797:         self.assertEqual(EXIT_CONFIGURATION_ERROR, result)
+000798:         self.assertEqual("1", counter.read_text(encoding="utf-8"))
+000799: 
+000800: 
+000801: if __name__ == "__main__":
+000802:     unittest.main()
+
+
+===== FILE: tests/test_weekly_signal_comparison_run_phoenix.py =====
+
+--- LINES 1-183 ---
+000001: from __future__ import annotations
+000002: 
+000003: from contextlib import ExitStack
+000004: from datetime import datetime, timezone
+000005: from pathlib import Path
+000006: from types import SimpleNamespace
+000007: import unittest
+000008: from unittest import mock
+000009: 
+000010: import run_phoenix
+000011: 
+000012: 
+000013: class FakeFailSafe:
+000014:     triggered = False
+000015: 
+000016:     def __init__(self, **kwargs: object) -> None:
+000017:         self.kwargs = kwargs
+000018:         self.monitor_only_enabled = False
+000019:         self.triggered = False
+000020: 
+000021:     def update_statuses(self, **kwargs: object) -> None:
+000022:         self.status_updates = kwargs
+000023: 
+000024:     def enable_monitor_only(self) -> None:
+000025:         self.monitor_only_enabled = True
+000026: 
+000027:     def register_background_stopper(self, *args: object) -> None:
+000028:         self.background_stopper = args
+000029: 
+000030:     def start_monitoring(self, **kwargs: object) -> None:
+000031:         self.monitoring = kwargs
+000032: 
+000033:     def transition(self, reason: str, **kwargs: object) -> None:
+000034:         self.transitioned = {"reason": reason, **kwargs}
+000035:         self.triggered = True
+000036: 
+000037:     def stop_monitoring(self) -> None:
+000038:         self.stop_monitoring_called = True
+000039: 
+000040:     def raise_if_triggered(self) -> None:
+000041:         return None
+000042: 
+000043:     def fail_and_exit(self, *args: object, **kwargs: object) -> None:
+000044:         raise AssertionError("fail_and_exit should not be reached in this test")
+000045: 
+000046: 
+000047: class FakeHeartbeat:
+000048:     heartbeat_path = "heartbeat.json"
+000049:     pid = 4321
+000050: 
+000051:     def __init__(self, **kwargs: object) -> None:
+000052:         self.kwargs = kwargs
+000053:         self.stages: list[str] = []
+000054: 
+000055:     def start(self, **kwargs: object) -> None:
+000056:         self.start_kwargs = kwargs
+000057: 
+000058:     def set_stage(self, stage: str) -> None:
+000059:         self.stages.append(stage)
+000060: 
+000061:     def stop(self, **kwargs: object) -> None:
+000062:         self.stop_kwargs = kwargs
+000063: 
+000064: 
+000065: class FakeRecoverySession:
+000066:     def __init__(self, **kwargs: object) -> None:
+000067:         self.kwargs = kwargs
+000068: 
+000069:     def start(self) -> None:
+000070:         self.started = True
+000071: 
+000072:     def finish(
+000073:         self,
+000074:         *,
+000075:         status: str,
+000076:         heartbeat_status: str,
+000077:         fail_safe_status: str,
+000078:     ) -> None:
+000079:         self.finished = {
+000080:             "status": status,
+000081:             "heartbeat_status": heartbeat_status,
+000082:             "fail_safe_status": fail_safe_status,
+000083:         }
+000084: 
+000085: 
+000086: class WeeklySignalComparisonRunPhoenixTest(unittest.TestCase):
+000087:     def setUp(self) -> None:
+000088:         run_phoenix._ACTIVE_RECOVERY_SESSION = None
+000089:         run_phoenix._ACTIVE_FAIL_SAFE = None
+000090:         run_phoenix._ACTIVE_HEARTBEAT = None
+000091:         self.fail_safe_instances: list[FakeFailSafe] = []
+000092: 
+000093:     def tearDown(self) -> None:
+000094:         run_phoenix._ACTIVE_RECOVERY_SESSION = None
+000095:         run_phoenix._ACTIVE_FAIL_SAFE = None
+000096:         run_phoenix._ACTIVE_HEARTBEAT = None
+000097:         self.fail_safe_instances = []
+000098: 
+000099:     def _guardian(self) -> SimpleNamespace:
+000100:         return SimpleNamespace(
+000101:             ready=True,
+000102:             status="READY",
+000103:             reasons=(),
+000104:             report_error=None,
+000105:             expected_root=Path.cwd(),
+000106:         )
+000107: 
+000108:     def _ready_position(self) -> SimpleNamespace:
+000109:         timestamp = datetime(2026, 8, 4, 9, 0, 0, tzinfo=timezone.utc).isoformat()
+000110:         source_timestamp = datetime(2026, 8, 4, 8, 0, 0, tzinfo=timezone.utc).isoformat()
+000111:         return SimpleNamespace(
+000112:             status="READY",
+000113:             reasons=(),
+000114:             mode="PAPER",
+000115:             orders_submitted=0,
+000116:             guardian_status="READY",
+000117:             report_error=None,
+000118:             exit_code=0,
+000119:             checked_at=timestamp,
+000120:             source_timestamp=source_timestamp,
+000121:             positions_count=0,
+000122:         )
+000123: 
+000124:     def _monitor_only_position(self) -> SimpleNamespace:
+000125:         timestamp = datetime(2026, 8, 4, 9, 0, 0, tzinfo=timezone.utc).isoformat()
+000126:         source_timestamp = datetime(2026, 8, 4, 8, 0, 0, tzinfo=timezone.utc).isoformat()
+000127:         return SimpleNamespace(
+000128:             status="WARNING",
+000129:             reasons=("POSITIONS_PRESENT",),
+000130:             mode="PAPER",
+000131:             orders_submitted=0,
+000132:             guardian_status="READY",
+000133:             report_error=None,
+000134:             exit_code=0,
+000135:             checked_at=timestamp,
+000136:             source_timestamp=source_timestamp,
+000137:             positions_count=1,
+000138:         )
+000139: 
+000140:     def _recovery_result(self) -> SimpleNamespace:
+000141:         return SimpleNamespace(
+000142:             blocked=False,
+000143:             recovery_required=False,
+000144:             recovery_status="READY",
+000145:             recovery_reasons=[],
+000146:             state_path=Path("recovery_state.json"),
+000147:             previous_git_commit="a" * 40,
+000148:             current_git_commit="a" * 40,
+000149:             recovery_attempt=0,
+000150:             recovered_at=None,
+000151:         )
+000152: 
+000153:     def _patch_daily_run(
+000154:         self,
+000155:         stack: ExitStack,
+000156:         *,
+000157:         run_script_result: tuple[bool, float, int, str],
+000158:         position_result: SimpleNamespace,
+000159:     ) -> None:
+000160:         test_case = self
+000161:         stack.enter_context(mock.patch.object(run_phoenix, "write_log"))
+000162:         stack.enter_context(mock.patch.object(run_phoenix, "configure_console"))
+000163:         stack.enter_context(mock.patch.object(run_phoenix, "initialize_directories"))
+000164:         stack.enter_context(mock.patch.object(run_phoenix, "reset_log_file"))
+000165:         stack.enter_context(
+000166:             mock.patch.object(
+000167:                 run_phoenix,
+000168:                 "configure_quote_transport",
+000169:                 return_value={
+000170:                     "status": "READY",
+000171:                     "ca_bundle_mode": "LOCAL_MATERIALIZED_COPY",
+000172:                     "code": "READY",
+000173:                 },
+000174:             )
+000175:         )
+000176:         stack.enter_context(
+000177:             mock.patch.object(
+000178:                 run_phoenix,
+000179:                 "run_repository_guardian",
+000180:                 return_value=self._guardian(),
+000181:             )
+000182:         )
+000183:         stack.enter_context(
+
+
+===== FILE FULL: vba/PHOENIX_STEP44_Receiver.bas =====
+000001: Attribute VB_Name = "PHOENIX_STEP44_Receiver"
+000002: Option Explicit
+000003: 
+000004: ' ADODB.Stream is used in the companion CSV module for local UTF-8 file I/O.
+000005: 
+000006: #If VBA7 Then
+000007:     Private Declare PtrSafe Function MoveFileExW Lib "kernel32" ( _
+000008:         ByVal lpExistingFileName As LongPtr, _
+000009:         ByVal lpNewFileName As LongPtr, _
+000010:         ByVal dwFlags As Long) As Long
+000011: #Else
+000012:     Private Declare Function MoveFileExW Lib "kernel32" ( _
+000013:         ByVal lpExistingFileName As Long, _
+000014:         ByVal lpNewFileName As Long, _
+000015:         ByVal dwFlags As Long) As Long
+000016: #End If
+000017: 
+000018: Private Const MOVEFILE_REPLACE_EXISTING As Long = &H1
+000019: Private Const MOVEFILE_WRITE_THROUGH As Long = &H8
+000020: 
+000021: Public Sub RunPhoenixStep44LocalReceiver()
+000022:     Dim rootPath As String
+000023:     Dim currentStage As String
+000024:     Dim errorNumber As Long
+000025:     Dim errorSource As String
+000026:     Dim errorDescription As String
+000027:     Dim errorLine As Long
+000028: 
+000029:     On Error GoTo CleanFail
+000030:     currentStage = "RESOLVE_ROOT"
+000031:     rootPath = FindRepositoryRoot(ThisWorkbook.Path)
+000032:     currentStage = "ENSURE_DIRECTORIES"
+000033:     EnsureBridgeDirectories rootPath
+000034:     currentStage = "ACQUIRE_LOCK"
+000035:     AcquireStep44Lock rootPath
+000036:     currentStage = "PROCESS_PENDING"
+000037:     ProcessPendingOutboxFiles rootPath
+000038: CleanExit:
+000039:     ReleaseStep44Lock
+000040:     Exit Sub
+000041: CleanFail:
+000042:     errorNumber = Err.Number
+000043:     errorSource = Err.Source
+000044:     errorDescription = Err.Description
+000045:     errorLine = Erl
+000046:     On Error Resume Next
+000047:     If Len(rootPath) > 0 Then
+000048:         AppendAuditJsonLine rootPath, BuildAuditJsonLine( _
+000049:             "fatal", _
+000050:             FormatJstTimestamp(CurrentJst()), _
+000051:             "", _
+000052:             "", _
+000053:             "", _
+000054:             "CORRUPT", _
+000055:             "RUN_FAILED", _
+000056:             "", _
+000057:             "", _
+000058:             "", _
+000059:             VBA_INSTANCE_ID, _
+000060:             "0", _
+000061:             "top_level_failure", _
+000062:             currentStage, _
+000063:             "", _
+000064:             CStr(errorNumber), _
+000065:             errorSource, _
+000066:             errorDescription, _
+000067:             CStr(errorLine))
+000068:     End If
+000069:     On Error GoTo 0
+000070:     Resume CleanExit
+000071: End Sub
+000072: 
+000073: Private Function FindRepositoryRoot(ByVal startPath As String) As String
+000074:     Dim currentPath As String
+000075:     Dim parentPath As String
+000076:     Dim fso As Object
+000077: 
+000078:     If Len(startPath) = 0 Then
+000079:         Err.Raise vbObjectError + 4430, CONTRACT_ID, "This workbook must be saved before running Step44"
+000080:     End If
+000081: 
+000082:     Set fso = CreateObject("Scripting.FileSystemObject")
+000083:     currentPath = startPath
+000084:     Do
+000085:         If RepositoryLooksValid(currentPath) Then
+000086:             FindRepositoryRoot = currentPath
+000087:             Exit Function
+000088:         End If
+000089:         parentPath = fso.GetParentFolderName(currentPath)
+000090:         If Len(parentPath) = 0 Or parentPath = currentPath Then Exit Do
+000091:         currentPath = parentPath
+000092:     Loop
+000093: 
+000094:     Err.Raise vbObjectError + 4431, CONTRACT_ID, "Unable to resolve the PHOENIX repository root"
+000095: End Function
+000096: 
+000097: Private Function RepositoryLooksValid(ByVal rootPath As String) As Boolean
+000098:     RepositoryLooksValid = _
+000099:         FileExists(RepositoryPath(rootPath, "run_phoenix.py")) And _
+000100:         FileExists(RepositoryPath(rootPath, "AGENTS.md")) And _
+000101:         FileExists(RepositoryPath(rootPath, "phoenix_core\__init__.py"))
+000102: End Function
+000103: 
+000104: Private Function PendingCsvFiles(ByVal folderPath As String) As Collection
+000105:     Dim fso As Object
+000106:     Dim folder As Object
+000107:     Dim fileItem As Object
+000108:     Dim values() As String
+000109:     Dim result As New Collection
+000110:     Dim count As Long
+000111:     Dim index As Long
+000112: 
+000113:     Set fso = CreateObject("Scripting.FileSystemObject")
+000114:     If Not fso.FolderExists(folderPath) Then
+000115:         Set PendingCsvFiles = result
+000116:         Exit Function
+000117:     End If
+000118: 
+000119:     Set folder = fso.GetFolder(folderPath)
+000120:     For Each fileItem In folder.Files
+000121:         If LCase$(fso.GetExtensionName(fileItem.Name)) = "csv" Then
+000122:             ReDim Preserve values(0 To count)
+000123:             values(count) = CStr(fileItem.Path)
+000124:             count = count + 1
+000125:         End If
+000126:     Next fileItem
+000127: 
+000128:     If count = 0 Then
+000129:         Set PendingCsvFiles = result
+000130:         Exit Function
+000131:     End If
+000132: 
+000133:     SortStringArray values
+000134:     For index = LBound(values) To UBound(values)
+000135:         result.Add values(index)
+000136:     Next index
+000137:     Set PendingCsvFiles = result
+000138: End Function
+000139: 
+000140: Private Sub SortStringArray(ByRef values() As String)
+000141:     Dim i As Long
+000142:     Dim j As Long
+000143:     Dim temp As String
+000144: 
+000145:     For i = LBound(values) To UBound(values) - 1
+000146:         For j = i + 1 To UBound(values)
+000147:             If StrComp(values(i), values(j), vbBinaryCompare) > 0 Then
+000148:                 temp = values(i)
+000149:                 values(i) = values(j)
+000150:                 values(j) = temp
+000151:             End If
+000152:         Next j
+000153:     Next i
+000154: End Sub
+000155: 
+000156: Private Function FileStem(ByVal filePath As String) As String
+000157:     Dim fso As Object
+000158:     Set fso = CreateObject("Scripting.FileSystemObject")
+000159:     FileStem = fso.GetBaseName(filePath)
+000160: End Function
+000161: 
+000162: Private Function MoveFileAtomic(ByVal sourcePath As String, ByVal destinationPath As String) As String
+000163:     Dim result As Long
+000164: 
+000165:     EnsureFolderTree ParentFolderPath(destinationPath)
+000166:     If FileExists(destinationPath) Then
+000167:         On Error Resume Next
+000168:         Kill destinationPath
+000169:         On Error GoTo 0
+000170:     End If
+000171:     result = MoveFileExW(StrPtr(sourcePath), StrPtr(destinationPath), MOVEFILE_REPLACE_EXISTING Or MOVEFILE_WRITE_THROUGH)
+000172:     If result = 0 Then
+000173:         Err.Raise vbObjectError + 4432, CONTRACT_ID, "Atomic move failed: " & sourcePath & " -> " & destinationPath
+000174:     End If
+000175:     MoveFileAtomic = destinationPath
+000176: End Function
+000177: 
+000178: Private Sub AddReason(ByRef reasonCodes As String, ByVal code As String)
+000179:     If Len(code) = 0 Then Exit Sub
+000180:     If Len(reasonCodes) = 0 Then
+000181:         reasonCodes = code
+000182:         Exit Sub
+000183:     End If
+000184:     If InStr(1, ";" & reasonCodes & ";", ";" & code & ";", vbTextCompare) = 0 Then
+000185:         reasonCodes = reasonCodes & ";" & code
+000186:     End If
+000187: End Sub
+000188: 
+000189: Private Function IsFinalStatus(ByVal status As String) As Boolean
+000190:     Select Case UCase$(NormalizeText(status))
+000191:         Case "ACCEPTED", "REJECTED", "DUPLICATE", "EXPIRED", "CORRUPT"
+000192:             IsFinalStatus = True
+000193:     End Select
+000194: End Function
+000195: 
+000196: Private Function FindLatestStateRowIndex(ByVal rows As Collection, ByVal columnIndex As Long, ByVal targetValue As String) As Long
+000197:     Dim index As Long
+000198:     Dim rowValues As Variant
+000199: 
+000200:     For index = rows.Count To 1 Step -1
+000201:         rowValues = rows.Item(index)
+000202:         If NormalizeText(rowValues(columnIndex)) = targetValue Then
+000203:             FindLatestStateRowIndex = index
+000204:             Exit Function
+000205:         End If
+000206:     Next index
+000207: End Function
+000208: 
+000209: Private Function BuildStateRow( _
+000210:     ByVal recordedAt As String, _
+000211:     ByVal intentId As String, _
+000212:     ByVal idempotencyKey As String, _
+000213:     ByVal sourceChecksum As String, _
+000214:     ByVal status As String, _
+000215:     ByVal resultValue As String, _
+000216:     ByVal reasonCodes As String, _
+000217:     ByVal outboxFile As String, _
+000218:     ByVal receiptFile As String, _
+000219:     ByVal note As String) As Variant
+000220: 
+000221:     Dim row(0 To 11) As String
+000222:     row(ST_RECORDED_AT) = recordedAt
+000223:     row(ST_INTENT_ID) = intentId
+000224:     row(ST_IDEMPOTENCY_KEY) = idempotencyKey
+000225:     row(ST_SOURCE_CHECKSUM) = sourceChecksum
+000226:     row(ST_STATUS) = status
+000227:     row(ST_RESULT) = resultValue
+000228:     row(ST_REASON_CODES) = reasonCodes
+000229:     row(ST_OUTBOX_FILE) = outboxFile
+000230:     row(ST_RECEIPT_FILE) = receiptFile
+000231:     row(ST_VBA_INSTANCE_ID) = VBA_INSTANCE_ID
+000232:     row(ST_ORDERS_SUBMITTED) = CStr(ORDERS_SUBMITTED)
+000233:     row(ST_NOTE) = note
+000234:     BuildStateRow = row
+000235: End Function
+000236: 
+000237: Private Function JsonEscapeText(ByVal value As String) As String
+000238:     Dim result As String
+000239:     Dim index As Long
+000240:     Dim character As String
+000241: 
+000242:     For index = 1 To Len(value)
+000243:         character = Mid$(value, index, 1)
+000244:         Select Case character
+000245:             Case """"
+000246:                 result = result & """"
+000247:             Case "\"
+000248:                 result = result & "\\"
+000249:             Case vbBack
+000250:                 result = result & "\b"
+000251:             Case vbFormFeed
+000252:                 result = result & "\f"
+000253:             Case vbLf
+000254:                 result = result & "\n"
+000255:             Case vbCr
+000256:                 result = result & "\r"
+000257:             Case vbTab
+000258:                 result = result & "\t"
+000259:             Case Else
+000260:                 result = result & character
+000261:         End Select
+000262:     Next index
+000263:     JsonEscapeText = result
+000264: End Function
+000265: 
+000266: Private Function JsonStringText(ByVal value As String) As String
+000267:     JsonStringText = """" & JsonEscapeText(value) & """"
+000268: End Function
+000269: 
+000270: Private Function BuildAuditJsonLine( _
+000271:     ByVal kind As String, _
+000272:     ByVal recordedAt As String, _
+000273:     ByVal intentId As String, _
+000274:     ByVal idempotencyKey As String, _
+000275:     ByVal sourceChecksum As String, _
+000276:     ByVal resultValue As String, _
+000277:     ByVal reasonCodes As String, _
+000278:     ByVal sourceFile As String, _
+000279:     ByVal receiptFile As String, _
+000280:     ByVal outboxFile As String, _
+000281:     ByVal readerId As String, _
+000282:     ByVal ordersSubmitted As String, _
+000283:     ByVal note As String, _
+000284:     Optional ByVal currentStage As String = "", _
+000285:     Optional ByVal currentFile As String = "", _
+000286:     Optional ByVal errorNumber As String = "", _
+000287:     Optional ByVal errorSource As String = "", _
+000288:     Optional ByVal errorDescription As String = "", _
+000289:     Optional ByVal errorLine As String = "") As String
+000290: 
+000291:     BuildAuditJsonLine = "{" & _
+000292:         """kind"":" & JsonStringText(kind) & "," & _
+000293:         """recorded_at"":" & JsonStringText(recordedAt) & "," & _
+000294:         """intent_id"":" & JsonStringText(intentId) & "," & _
+000295:         """idempotency_key"":" & JsonStringText(idempotencyKey) & "," & _
+000296:         """source_checksum"":" & JsonStringText(sourceChecksum) & "," & _
+000297:         """result"":" & JsonStringText(resultValue) & "," & _
+000298:         """reason_codes"":" & JsonStringText(reasonCodes) & "," & _
+000299:         """source_file"":" & JsonStringText(sourceFile) & "," & _
+000300:         """receipt_file"":" & JsonStringText(receiptFile) & "," & _
+000301:         """outbox_file"":" & JsonStringText(outboxFile) & "," & _
+000302:         """reader_id"":" & JsonStringText(readerId) & "," & _
+000303:         """orders_submitted"":" & JsonStringText(ordersSubmitted) & "," & _
+000304:         """note"":" & JsonStringText(note) & "," & _
+000305:         """current_stage"":" & JsonStringText(currentStage) & "," & _
+000306:         """current_file"":" & JsonStringText(currentFile) & "," & _
+000307:         """error_number"":" & JsonStringText(errorNumber) & "," & _
+000308:         """error_source"":" & JsonStringText(errorSource) & "," & _
+000309:         """error_description"":" & JsonStringText(errorDescription) & "," & _
+000310:         """error_line"":" & JsonStringText(errorLine) & "}"
+000311: End Function
+000312: 
+000313: Private Function JsonPropertyText(ByVal key As String, ByVal value As String) As String
+000314:     JsonPropertyText = JsonStringText(key) & ":" & JsonStringText(value)
+000315: End Function
+000316: 
+000317: Private Function FindLatestFinalStateRowIndex(ByVal rows As Collection, ByVal columnIndex As Long, ByVal targetValue As String) As Long
+000318:     Dim index As Long
+000319:     Dim rowValues As Variant
+000320: 
+000321:     For index = rows.Count To 1 Step -1
+000322:         rowValues = rows.Item(index)
+000323:         If NormalizeText(rowValues(columnIndex)) = targetValue Then
+000324:             If IsFinalStatus(rowValues(ST_STATUS)) Then
+000325:                 FindLatestFinalStateRowIndex = index
+000326:                 Exit Function
+000327:             End If
+000328:         End If
+000329:     Next index
+000330: End Function
+000331: 
+000332: Private Function CanonicalJsonFromOutboxRow(ByVal rowValues As Variant) As String
+000333:     Dim parts(0 To 18) As String
+000334: 
+000335:     parts(0) = JsonPropertyText("bridge_status", NormalizeText(rowValues(OB_BRIDGE_STATUS)))
+000336:     parts(1) = JsonPropertyText("estimated_max_loss", NormalizeText(rowValues(OB_ESTIMATED_MAX_LOSS)))
+000337:     parts(2) = JsonPropertyText("estimated_notional", NormalizeText(rowValues(OB_ESTIMATED_NOTIONAL)))
+000338:     parts(3) = JsonPropertyText("execution_mode", NormalizeText(rowValues(OB_EXECUTION_MODE)))
+000339:     parts(4) = JsonPropertyText("expires_at", NormalizeText(rowValues(OB_EXPIRES_AT)))
+000340:     parts(5) = JsonPropertyText("generated_at", NormalizeText(rowValues(OB_GENERATED_AT)))
+000341:     parts(6) = JsonPropertyText("idempotency_key", NormalizeText(rowValues(OB_IDEMPOTENCY_KEY)))
+000342:     parts(7) = JsonPropertyText("intent_id", NormalizeText(rowValues(OB_INTENT_ID)))
+000343:     parts(8) = JsonPropertyText("limit_price", NormalizeText(rowValues(OB_LIMIT_PRICE)))
+000344:     parts(9) = JsonPropertyText("market", NormalizeText(rowValues(OB_MARKET)))
+000345:     parts(10) = JsonPropertyText("order_type", NormalizeText(rowValues(OB_ORDER_TYPE)))
+000346:     parts(11) = JsonPropertyText("quantity", NormalizeText(rowValues(OB_QUANTITY)))
+000347:     parts(12) = JsonPropertyText("reference_price", NormalizeText(rowValues(OB_REFERENCE_PRICE)))
+000348:     parts(13) = JsonPropertyText("schema_version", NormalizeText(rowValues(OB_SCHEMA_VERSION)))
+000349:     parts(14) = JsonPropertyText("side", NormalizeText(rowValues(OB_SIDE)))
+000350:     parts(15) = JsonPropertyText("stop_loss_price", NormalizeText(rowValues(OB_STOP_LOSS_PRICE)))
+000351:     parts(16) = JsonPropertyText("take_profit_price", NormalizeText(rowValues(OB_TAKE_PROFIT_PRICE)))
+000352:     parts(17) = JsonPropertyText("ticker", NormalizeText(rowValues(OB_TICKER)))
+000353:     parts(18) = JsonPropertyText("trading_mode", NormalizeText(rowValues(OB_TRADING_MODE)))
+000354:     CanonicalJsonFromOutboxRow = "{" & Join(parts, ",") & "}"
+000355: End Function
+000356: 
+000357: Private Function CanonicalJsonFromReceiptRow(ByVal rowValues As Variant) As String
+000358:     Dim parts(0 To 8) As String
+000359: 
+000360:     parts(0) = JsonPropertyText("idempotency_key", NormalizeText(rowValues(RC_IDEMPOTENCY_KEY)))
+000361:     parts(1) = JsonPropertyText("intent_id", NormalizeText(rowValues(RC_INTENT_ID)))
+000362:     parts(2) = JsonPropertyText("orders_submitted", NormalizeText(rowValues(RC_ORDERS_SUBMITTED)))
+000363:     parts(3) = JsonPropertyText("reason_codes", NormalizeText(rowValues(RC_REASON_CODES)))
+000364:     parts(4) = JsonPropertyText("received_at", NormalizeText(rowValues(RC_RECEIVED_AT)))
+000365:     parts(5) = JsonPropertyText("result", NormalizeText(rowValues(RC_RESULT)))
+000366:     parts(6) = JsonPropertyText("schema_version", NormalizeText(rowValues(RC_SCHEMA_VERSION)))
+000367:     parts(7) = JsonPropertyText("source_checksum", NormalizeText(rowValues(RC_SOURCE_CHECKSUM)))
+000368:     parts(8) = JsonPropertyText("vba_instance_id", NormalizeText(rowValues(RC_VBA_INSTANCE_ID)))
+000369:     CanonicalJsonFromReceiptRow = "{" & Join(parts, ",") & "}"
+000370: End Function
+000371: 
+000372: Private Function IsHexDigestText(ByVal value As String) As Boolean
+000373:     Dim index As Long
+000374:     Dim character As String
+000375: 
+000376:     If Len(value) <> 64 Then Exit Function
+000377:     For index = 1 To Len(value)
+000378:         character = Mid$(value, index, 1)
+000379:         If InStr(1, "0123456789abcdefABCDEF", character, vbBinaryCompare) = 0 Then Exit Function
+000380:     Next index
+000381:     IsHexDigestText = True
+000382: End Function
+000383: 
+000384: Private Function Sha256HexUtf8(ByVal text As String) As String
+000385:     Dim shell As Object
+000386:     Dim environmentValues As Object
+000387:     Dim execObject As Object
+000388:     Dim command As String
+000389:     Dim stdoutText As String
+000390:     Dim lines As Variant
+000391:     Dim lineValue As Variant
+000392:     Dim index As Long
+000393: 
+000394:     Set shell = CreateObject("WScript.Shell")
+000395:     Set environmentValues = shell.Environment("Process")
+000396:     environmentValues("PHOENIX_STEP44_HASH_INPUT") = text
+000397: 
+000398:     ' Inline PowerShell avoids temporary script execution-policy failures and keeps hashing self-contained.
+000399:     command = "powershell.exe -NoProfile -NonInteractive -Command ""$sha=[System.Security.Cryptography.SHA256]::Create(); try { $bytes=[System.Text.Encoding]::UTF8.GetBytes($env:PHOENIX_STEP44_HASH_INPUT); ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }) -join '' } finally { $sha.Dispose() }"""
+000400:     Set execObject = shell.Exec(command)
+000401:     stdoutText = execObject.StdOut.ReadAll
+000402: 
+000403:     On Error Resume Next
+000404:     environmentValues("PHOENIX_STEP44_HASH_INPUT") = ""
+000405:     On Error GoTo 0
+000406: 
+000407:     stdoutText = Replace$(Replace$(stdoutText, vbCrLf, vbLf), vbCr, vbLf)
+000408:     lines = Split(stdoutText, vbLf)
+000409:     For index = UBound(lines) To LBound(lines) Step -1
+000410:         lineValue = Trim$(CStr(lines(index)))
+000411:         If Len(lineValue) = 64 Then
+000412:             If IsHexDigestText(lineValue) Then
+000413:                 Sha256HexUtf8 = LCase$(lineValue)
+000414:                 Exit Function
+000415:             End If
+000416:         End If
+000417:     Next index
+000418: 
+000419:     Err.Raise vbObjectError + 4419, CONTRACT_ID, "SHA-256 calculation failed"
+000420: End Function
+000421: 
+000422: Private Function NormalizeOutboxRow(ByVal rowValues As Variant) As Variant
+000423:     Dim row(0 To 19) As String
+000424: 
+000425:     row(OB_SCHEMA_VERSION) = ValidateRequiredText(rowValues(OB_SCHEMA_VERSION), "schema_version")
+000426:     row(OB_INTENT_ID) = ValidateRequiredText(rowValues(OB_INTENT_ID), "intent_id")
+000427:     row(OB_IDEMPOTENCY_KEY) = ValidateRequiredText(rowValues(OB_IDEMPOTENCY_KEY), "idempotency_key")
+000428:     row(OB_GENERATED_AT) = ValidateJstTimestampText(rowValues(OB_GENERATED_AT), "generated_at")
+000429:     row(OB_EXPIRES_AT) = ValidateJstTimestampText(rowValues(OB_EXPIRES_AT), "expires_at")
+000430:     row(OB_TICKER) = ValidateRequiredText(rowValues(OB_TICKER), "ticker")
+000431:     row(OB_MARKET) = ValidateRequiredText(rowValues(OB_MARKET), "market")
+000432:     row(OB_SIDE) = NormalizeUpperText(ValidateRequiredText(rowValues(OB_SIDE), "side"))
+000433:     row(OB_ORDER_TYPE) = NormalizeUpperText(ValidateRequiredText(rowValues(OB_ORDER_TYPE), "order_type"))
+000434:     row(OB_QUANTITY) = ValidatePositiveIntegerText(rowValues(OB_QUANTITY), "quantity")
+000435:     row(OB_REFERENCE_PRICE) = ValidatePositiveMoneyText(rowValues(OB_REFERENCE_PRICE), "reference_price")
+000436:     row(OB_LIMIT_PRICE) = ValidatePositiveMoneyText(rowValues(OB_LIMIT_PRICE), "limit_price")
+000437:     row(OB_STOP_LOSS_PRICE) = ValidatePositiveMoneyText(rowValues(OB_STOP_LOSS_PRICE), "stop_loss_price")
+000438:     row(OB_TAKE_PROFIT_PRICE) = ValidatePositiveMoneyText(rowValues(OB_TAKE_PROFIT_PRICE), "take_profit_price")
+000439:     row(OB_ESTIMATED_NOTIONAL) = ValidatePositiveMoneyText(rowValues(OB_ESTIMATED_NOTIONAL), "estimated_notional")
+000440:     row(OB_ESTIMATED_MAX_LOSS) = ValidatePositiveMoneyText(rowValues(OB_ESTIMATED_MAX_LOSS), "estimated_max_loss")
+000441:     row(OB_TRADING_MODE) = NormalizeUpperText(ValidateRequiredText(rowValues(OB_TRADING_MODE), "trading_mode"))
+000442:     row(OB_EXECUTION_MODE) = NormalizeUpperText(ValidateRequiredText(rowValues(OB_EXECUTION_MODE), "execution_mode"))
+000443:     row(OB_BRIDGE_STATUS) = NormalizeUpperText(ValidateRequiredText(rowValues(OB_BRIDGE_STATUS), "bridge_status"))
+000444:     row(OB_CHECKSUM) = LCase$(ValidateRequiredText(rowValues(OB_CHECKSUM), "checksum"))
+000445:     NormalizeOutboxRow = row
+000446: End Function
+000447: 
+000448: Private Sub EvaluateContractResult( _
+000449:     ByVal rowValues As Variant, _
+000450:     ByVal sourceFile As String, _
+000451:     ByVal currentTime As Date, _
+000452:     ByRef resultValue As String, _
+000453:     ByRef reasonCodes As String)
+000454: 
+000455:     Dim generatedAt As Date
+000456:     Dim expiresAt As Date
+000457:     Dim computedChecksum As String
+000458:     Dim sourceFileStem As String
+000459: 
+000460:     resultValue = "ACCEPTED"
+000461:     reasonCodes = ""
+000462: 
+000463:     sourceFileStem = FileStem(sourceFile)
+000464:     If NormalizeText(rowValues(OB_INTENT_ID)) <> sourceFileStem Then
+000465:         resultValue = "CORRUPT"
+000466:         AddReason reasonCodes, "INTENT_FILENAME_MISMATCH"
+000467:     End If
+000468: 
+000469:     If NormalizeText(rowValues(OB_SCHEMA_VERSION)) <> CStr(SCHEMA_VERSION) Then
+000470:         resultValue = "REJECTED"
+000471:         AddReason reasonCodes, "SCHEMA_VERSION_INVALID"
+000472:     End If
+000473:     If NormalizeText(rowValues(OB_TRADING_MODE)) <> TRADING_MODE Then
+000474:         resultValue = "REJECTED"
+000475:         AddReason reasonCodes, "TRADING_MODE_INVALID"
+000476:     End If
+000477:     If NormalizeText(rowValues(OB_EXECUTION_MODE)) <> EXECUTION_MODE Then
+000478:         resultValue = "REJECTED"
+000479:         AddReason reasonCodes, "EXECUTION_MODE_INVALID"
+000480:     End If
+000481:     If NormalizeText(rowValues(OB_BRIDGE_STATUS)) <> "PENDING" Then
+000482:         resultValue = "REJECTED"
+000483:         AddReason reasonCodes, "BRIDGE_STATUS_INVALID"
+000484:     End If
+000485: 
+000486:     On Error GoTo TimestampFailure
+000487:     generatedAt = ParseJstTimestamp(rowValues(OB_GENERATED_AT), "generated_at")
+000488:     expiresAt = ParseJstTimestamp(rowValues(OB_EXPIRES_AT), "expires_at")
+000489:     On Error GoTo 0
+000490: 
+000491:     If expiresAt <= generatedAt Then
+000492:         resultValue = "CORRUPT"
+000493:         AddReason reasonCodes, "EXPIRES_AT_INVALID"
+000494:     End If
+000495:     If generatedAt > DateAdd("n", MAX_FUTURE_SKEW_MINUTES, currentTime) Then
+000496:         resultValue = "CORRUPT"
+000497:         AddReason reasonCodes, "GENERATED_AT_FUTURE"
+000498:     End If
+000499:     If currentTime > expiresAt Then
+000500:         If resultValue <> "CORRUPT" Then resultValue = "EXPIRED"
+000501:         AddReason reasonCodes, "EXPIRED"
+000502:     End If
+000503: 
+000504:     computedChecksum = LCase$(Sha256HexUtf8(CanonicalJsonFromOutboxRow(rowValues)))
+000505:     If NormalizeText(rowValues(OB_CHECKSUM)) <> computedChecksum Then
+000506:         resultValue = "CORRUPT"
+000507:         AddReason reasonCodes, "CHECKSUM_MISMATCH"
+000508:     End If
+000509:     Exit Sub
+000510: TimestampFailure:
+000511:     resultValue = "CORRUPT"
+000512:     AddReason reasonCodes, "TIMESTAMP_INVALID"
+000513:     On Error GoTo 0
+000514: End Sub
+000515: 
+000516: Private Function BuildReceiptRow( _
+000517:     ByVal intentId As String, _
+000518:     ByVal idempotencyKey As String, _
+000519:     ByVal receivedAt As String, _
+000520:     ByVal resultValue As String, _
+000521:     ByVal reasonCodes As String, _
+000522:     ByVal sourceChecksum As String) As Variant
+000523: 
+000524:     Dim row(0 To 9) As String
+000525:     row(RC_SCHEMA_VERSION) = CStr(SCHEMA_VERSION)
+000526:     row(RC_INTENT_ID) = intentId
+000527:     row(RC_IDEMPOTENCY_KEY) = idempotencyKey
+000528:     row(RC_RECEIVED_AT) = receivedAt
+000529:     row(RC_RESULT) = UCase$(resultValue)
+000530:     row(RC_REASON_CODES) = reasonCodes
+000531:     row(RC_VBA_INSTANCE_ID) = VBA_INSTANCE_ID
+000532:     row(RC_SOURCE_CHECKSUM) = LCase$(sourceChecksum)
+000533:     row(RC_ORDERS_SUBMITTED) = CStr(ORDERS_SUBMITTED)
+000534:     row(RC_CHECKSUM) = LCase$(Sha256HexUtf8(CanonicalJsonFromReceiptRow(row)))
+000535:     BuildReceiptRow = row
+000536: End Function
+000537: 
+000538: Private Sub ProcessSingleOutboxFile( _
+000539:     ByVal rootPath As String, _
+000540:     ByVal pendingFilePath As String, _
+000541:     ByRef acceptedCount As Long, _
+000542:     ByRef rejectedCount As Long, _
+000543:     ByRef duplicateCount As Long, _
+000544:     ByRef expiredCount As Long, _
+000545:     ByRef corruptCount As Long)
+000546: 
+000547:     Dim processingPath As String
+000548:     Dim finalOutboxPath As String
+000549:     Dim outboxRow As Variant
+000550:     Dim normalizedRow As Variant
+000551:     Dim stateRows As Collection
+000552:     Dim currentTime As Date
+000553:     Dim intentId As String
+000554:     Dim idempotencyKey As String
+000555:     Dim sourceChecksum As String
+000556:     Dim resultValue As String
+000557:     Dim reasonCodes As String
+000558:     Dim latestIntentIndex As Long
+000559:     Dim latestIdemIndex As Long
+000560:     Dim latestRow As Variant
+000561:     Dim receiptRow As Variant
+000562:     Dim receiptPath As String
+000563:     Dim stateRow As Variant
+000564:     Dim auditLine As String
+000565:     Dim currentStage As String
+000566:     Dim currentFile As String
+000567:     Dim finalStateNote As String
+000568:     Dim fatalNote As String
+000569:     Dim cleanupNote As String
+000570:     Dim cleanupSourcePath As String
+000571:     Dim cleanupDestinationPath As String
+000572:     Dim fatalRecordedAt As String
+000573:     Dim fatalIntentId As String
+000574:     Dim fatalIdempotencyKey As String
+000575:     Dim fatalSourceChecksum As String
+000576:     Dim errorNumber As Long
+000577:     Dim errorSource As String
+000578:     Dim errorDescription As String
+000579:     Dim errorLine As Long
+000580:     Dim hasPriorFinalState As Boolean
+000581:     Dim hasPriorFinalStateChecked As Boolean
+000582:     Dim receiptWritten As Boolean
+000583: 
+000584:     On Error GoTo FatalFail
+000585:     currentStage = "MOVE_TO_PROCESSING"
+000586:     currentFile = pendingFilePath
+000587:     currentTime = CurrentJst()
+000588:     processingPath = RepositoryPath(rootPath, PROCESSING_DIR) & "\" & FileStem(pendingFilePath) & ".csv"
+000589:     finalOutboxPath = processingPath
+000590:     MoveFileAtomic pendingFilePath, processingPath
+000591:     currentFile = processingPath
+000592: 
+000593:     currentStage = "READ_CSV"
+000594:     outboxRow = ReadSingleCsvRecord(processingPath, OutboxColumns())
+000595: 
+000596:     currentStage = "NORMALIZE"
+000597:     normalizedRow = NormalizeOutboxRow(outboxRow)
+000598: 
+000599:     intentId = NormalizeText(normalizedRow(OB_INTENT_ID))
+000600:     idempotencyKey = NormalizeText(normalizedRow(OB_IDEMPOTENCY_KEY))
+000601:     sourceChecksum = NormalizeText(normalizedRow(OB_CHECKSUM))
+000602: 
+000603:     currentStage = "LOAD_STATE"
+000604:     Set stateRows = LoadStateRows(rootPath)
+000605: 
+000606:     currentStage = "WRITE_PROCESSING_STATE"
+000607:     AppendStateRow rootPath, BuildStateRow( _
+000608:         FormatJstTimestamp(currentTime), _
+000609:         intentId, _
+000610:         idempotencyKey, _
+000611:         sourceChecksum, _
+000612:         "PROCESSING", _
+000613:         "PROCESSING", _
+000614:         "ENTERED_PROCESSING", _
+000615:         processingPath, _
+000616:         "", _
+000617:         "working")
+000618: 
+000619:     currentStage = "VALIDATE_CONTRACT"
+000620:     resultValue = ""
+000621:     reasonCodes = ""
+000622:     latestIntentIndex = FindLatestFinalStateRowIndex(stateRows, ST_INTENT_ID, intentId)
+000623:     latestIdemIndex = FindLatestFinalStateRowIndex(stateRows, ST_IDEMPOTENCY_KEY, idempotencyKey)
+000624:     hasPriorFinalState = (latestIntentIndex > 0) Or (latestIdemIndex > 0)
+000625:     hasPriorFinalStateChecked = True
+000626: 
+000627:     If latestIntentIndex > 0 Then
+000628:         latestRow = stateRows.Item(latestIntentIndex)
+000629:         If Len(NormalizeText(latestRow(ST_SOURCE_CHECKSUM))) > 0 And NormalizeText(latestRow(ST_SOURCE_CHECKSUM)) <> sourceChecksum Then
+000630:             resultValue = "CORRUPT"
+000631:             AddReason reasonCodes, "STATE_INTENT_CHECKSUM_CONFLICT"
+000632:         ElseIf NormalizeText(latestRow(ST_IDEMPOTENCY_KEY)) <> idempotencyKey Then
+000633:             resultValue = "CORRUPT"
+000634:             AddReason reasonCodes, "STATE_INTENT_IDEMPOTENCY_CONFLICT"
+000635:         Else
+000636:             resultValue = "DUPLICATE"
+000637:             AddReason reasonCodes, "ALREADY_PROCESSED"
+000638:         End If
+000639:     End If
+000640: 
+000641:     If resultValue = "" And latestIdemIndex > 0 Then
+000642:         latestRow = stateRows.Item(latestIdemIndex)
+000643:         If NormalizeText(latestRow(ST_INTENT_ID)) <> intentId Then
+000644:             resultValue = "CORRUPT"
+000645:             AddReason reasonCodes, "STATE_IDEMPOTENCY_INTENT_CONFLICT"
+000646:         End If
+000647:     End If
+000648: 
+000649:     If resultValue = "" Then
+000650:         EvaluateContractResult normalizedRow, processingPath, currentTime, resultValue, reasonCodes
+000651:     End If
+000652: 
+000653:     If resultValue = "ACCEPTED" Then
+000654:         acceptedCount = acceptedCount + 1
+000655:     ElseIf resultValue = "REJECTED" Then
+000656:         rejectedCount = rejectedCount + 1
+000657:     ElseIf resultValue = "DUPLICATE" Then
+000658:         duplicateCount = duplicateCount + 1
+000659:     ElseIf resultValue = "EXPIRED" Then
+000660:         expiredCount = expiredCount + 1
+000661:     Else
+000662:         corruptCount = corruptCount + 1
+000663:     End If
+000664: 
+000665:     currentStage = "BUILD_RECEIPT"
+000666:     receiptRow = BuildReceiptRow(intentId, idempotencyKey, FormatJstTimestamp(currentTime), resultValue, reasonCodes, sourceChecksum)
+000667: 
+000668:     currentStage = "WRITE_RECEIPT"
+000669:     receiptPath = RepositoryPath(rootPath, INBOX_DIR) & "\" & intentId & ".csv"
+000670:     WriteCsvRecordAtomic receiptPath, ReceiptColumns(), receiptRow
+000671:     receiptWritten = True
+000672: 
+000673:     If resultValue = "ACCEPTED" Then
+000674:         finalOutboxPath = RepositoryPath(rootPath, COMPLETE_DIR) & "\" & FileStem(processingPath) & ".csv"
+000675:     Else
+000676:         finalOutboxPath = RepositoryPath(rootPath, REJECTED_DIR) & "\" & FileStem(processingPath) & ".csv"
+000677:     End If
+000678: 
+000679:     currentStage = "MOVE_TO_FINAL"
+000680:     MoveFileAtomic processingPath, finalOutboxPath
+000681:     currentFile = finalOutboxPath
+000682: 
+000683:     finalStateNote = ""
+000684:     If hasPriorFinalState Then
+000685:         finalStateNote = "prior_final_exists=TRUE"
+000686:     End If
+000687: 
+000688:     currentStage = "WRITE_FINAL_STATE"
+000689:     stateRow = BuildStateRow( _
+000690:         FormatJstTimestamp(CurrentJst()), _
+000691:         intentId, _
+000692:         idempotencyKey, _
+000693:         sourceChecksum, _
+000694:         UCase$(resultValue), _
+000695:         UCase$(resultValue), _
+000696:         reasonCodes, _
+000697:         finalOutboxPath, _
+000698:         receiptPath, _
+000699:         "finalized")
+000700:     AppendStateRow rootPath, stateRow
+000701: 
+000702:     currentStage = "WRITE_AUDIT"
+000703:     auditLine = BuildAuditJsonLine( _
+000704:         "receipt", _
+000705:         FormatJstTimestamp(currentTime), _
+000706:         intentId, _
+000707:         idempotencyKey, _
+000708:         sourceChecksum, _
+000709:         UCase$(resultValue), _
+000710:         reasonCodes, _
+000711:         pendingFilePath, _
+000712:         receiptPath, _
+000713:         finalOutboxPath, _
+000714:         VBA_INSTANCE_ID, _
+000715:         CStr(ORDERS_SUBMITTED), _
+000716:         finalStateNote, _
+000717:         currentStage, _
+000718:         currentFile, _
+000719:         "", _
+000720:         "", _
+000721:         "", _
+000722:         "")
+000723:     AppendAuditJsonLine rootPath, auditLine
+000724:     Exit Sub
+000725: 
+000726: FatalFail:
+000727:     errorNumber = Err.Number
+000728:     errorSource = Err.Source
+000729:     errorDescription = Err.Description
+000730:     errorLine = Erl
+000731:     fatalRecordedAt = FormatJstTimestamp(CurrentJst())
+000732:     fatalIntentId = intentId
+000733:     If Len(fatalIntentId) = 0 Then
+000734:         fatalIntentId = FileStem(pendingFilePath)
+000735:     End If
+000736:     fatalIdempotencyKey = idempotencyKey
+000737:     fatalSourceChecksum = sourceChecksum
+000738: 
+000739:     Err.Clear
+000740:     cleanupNote = ""
+000741:     On Error Resume Next
+000742:     If receiptWritten And UCase$(NormalizeText(resultValue)) = "ACCEPTED" Then
+000743:         If Len(receiptPath) > 0 And FileExists(receiptPath) Then
+000744:             Kill receiptPath
+000745:             If Err.Number <> 0 Then
+000746:                 cleanupNote = cleanupNote & "receipt_cleanup_failed=" & CStr(Err.Number) & ";"
+000747:                 Err.Clear
+000748:             Else
+000749:                 cleanupNote = cleanupNote & "receipt_cleanup=DELETED;"
+000750:                 Err.Clear
+000751:             End If
+000752:         End If
+000753:     End If
+000754: 
+000755:     cleanupSourcePath = currentFile
+000756:     If Len(cleanupSourcePath) = 0 Or Not FileExists(cleanupSourcePath) Then
+000757:         If Len(finalOutboxPath) > 0 And FileExists(finalOutboxPath) Then
+000758:             cleanupSourcePath = finalOutboxPath
+000759:         ElseIf Len(processingPath) > 0 And FileExists(processingPath) Then
+000760:             cleanupSourcePath = processingPath
+000761:         ElseIf Len(pendingFilePath) > 0 And FileExists(pendingFilePath) Then
+000762:             cleanupSourcePath = pendingFilePath
+000763:         End If
+000764:     End If
+000765: 
+000766:     If Len(cleanupSourcePath) > 0 Then
+000767:         cleanupDestinationPath = RepositoryPath(rootPath, REJECTED_DIR) & "\" & FileStem(cleanupSourcePath) & ".csv"
+000768:         If StrComp(NormalizeText(cleanupSourcePath), NormalizeText(cleanupDestinationPath), vbTextCompare) <> 0 Then
+000769:             MoveFileAtomic cleanupSourcePath, cleanupDestinationPath
+000770:             If Err.Number <> 0 Then
+000771:                 cleanupNote = cleanupNote & "cleanup_move_failed=" & CStr(Err.Number) & ";"
+000772:                 Err.Clear
+000773:             Else
+000774:                 cleanupNote = cleanupNote & "cleanup_move=REJECTED;"
+000775:                 Err.Clear
+000776:             End If
+000777:         Else
+000778:             cleanupNote = cleanupNote & "cleanup_move=SKIPPED_ALREADY_REJECTED;"
+000779:         End If
+000780:     Else
+000781:         cleanupNote = cleanupNote & "cleanup_move=SKIPPED_NO_SOURCE;"
+000782:     End If
+000783:     On Error GoTo 0
+000784: 
+000785:     Do While Len(cleanupNote) > 0 And Right$(cleanupNote, 1) = ";"
+000786:         cleanupNote = Left$(cleanupNote, Len(cleanupNote) - 1)
+000787:     Loop
+000788: 
+000789:     fatalNote = "stage=" & currentStage
+000790:     If Len(cleanupNote) > 0 Then
+000791:         fatalNote = fatalNote & ";" & cleanupNote
+000792:     End If
+000793:     If hasPriorFinalStateChecked And hasPriorFinalState Then
+000794:         fatalNote = fatalNote & ";prior_final_exists=TRUE"
+000795:     End If
+000796: 
+000797:     On Error Resume Next
+000798:     stateRow = BuildStateRow( _
+000799:         fatalRecordedAt, _
+000800:         fatalIntentId, _
+000801:         fatalIdempotencyKey, _
+000802:         fatalSourceChecksum, _
+000803:         "CORRUPT", _
+000804:         "RUN_FAILED", _
+000805:         "RUN_FAILED", _
+000806:         currentFile, _
+000807:         receiptPath, _
+000808:         fatalNote)
+000809:     AppendStateRow rootPath, stateRow
+000810:     If Err.Number <> 0 Then
+000811:         If Len(fatalNote) > 0 Then fatalNote = fatalNote & ";"
+000812:         fatalNote = fatalNote & "state_write_failed=" & CStr(Err.Number)
+000813:         Err.Clear
+000814:     End If
+000815:     On Error GoTo 0
+000816: 
+000817:     On Error Resume Next
+000818:     auditLine = BuildAuditJsonLine( _
+000819:         "fatal", _
+000820:         fatalRecordedAt, _
+000821:         fatalIntentId, _
+000822:         fatalIdempotencyKey, _
+000823:         fatalSourceChecksum, _
+000824:         "RUN_FAILED", _
+000825:         "RUN_FAILED", _
+000826:         pendingFilePath, _
+000827:         receiptPath, _
+000828:         currentFile, _
+000829:         VBA_INSTANCE_ID, _
+000830:         CStr(ORDERS_SUBMITTED), _
+000831:         fatalNote, _
+000832:         currentStage, _
+000833:         currentFile, _
+000834:         CStr(errorNumber), _
+000835:         errorSource, _
+000836:         errorDescription, _
+000837:         CStr(errorLine))
+000838:     AppendAuditJsonLine rootPath, auditLine
+000839:     On Error GoTo 0
+000840: End Sub
+000841: 
+000842: Private Sub ProcessPendingOutboxFiles(ByVal rootPath As String)
+000843:     Dim files As Collection
+000844:     Dim filePath As Variant
+000845:     Dim acceptedCount As Long
+000846:     Dim rejectedCount As Long
+000847:     Dim duplicateCount As Long
+000848:     Dim expiredCount As Long
+000849:     Dim corruptCount As Long
+000850: 
+000851:     Set files = PendingCsvFiles(RepositoryPath(rootPath, PENDING_DIR))
+000852:     For Each filePath In files
+000853:         ProcessSingleOutboxFile rootPath, CStr(filePath), acceptedCount, rejectedCount, duplicateCount, expiredCount, corruptCount
+000854:     Next filePath
+000855: 
+000856:     AppendAuditJsonLine rootPath, BuildAuditJsonLine( _
+000857:         "summary", _
+000858:         FormatJstTimestamp(CurrentJst()), _
+000859:         "", _
+000860:         "", _
+000861:         "", _
+000862:         "READY", _
+000863:         "", _
+000864:         "", _
+000865:         "", _
+000866:         "", _
+000867:         VBA_INSTANCE_ID, _
+000868:         CStr(ORDERS_SUBMITTED), _
+000869:         "accepted=" & CStr(acceptedCount) & ";rejected=" & CStr(rejectedCount) & ";duplicate=" & CStr(duplicateCount) & ";expired=" & CStr(expiredCount) & ";corrupt=" & CStr(corruptCount))
+000870: End Sub

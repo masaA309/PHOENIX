@@ -1,0 +1,2 @@
+warning: in the working copy of 'phoenix_disaster_recovery.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_phoenix_disaster_recovery.py', LF will be replaced by CRLF the next time Git touches it

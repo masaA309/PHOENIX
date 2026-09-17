@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "<phoenix-astra-apply>", line 89, in <module>
+  File "<phoenix-astra-apply>", line 42, in atomic_write
+PermissionError: [WinError 5] アクセスが拒否されました。: 'C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\AGENTS.md.astra_tmp' -> 'C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\AGENTS.md'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import base64,hashlib,json,sys;from pathlib import Path;c=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'));p=json.loads(c['task'].split('\n',1)[1]);b=base64.b64decode(p['executor_b64']);assert hashlib.sha256(b).hexdigest()==p['executor_sha256'];exec(compile(b.decode('utf-8-sig'),'<phoenix-astra-apply>','exec'),{'__name__':'__main__','sys':sys})
+                                                                                                                                                                                                                                                                  ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<phoenix-astra-apply>", line 163, in <module>
+  File "<phoenix-astra-apply>", line 42, in atomic_write
+PermissionError: [WinError 5] アクセスが拒否されました。: 'C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\AGENTS.md.astra_tmp' -> 'C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\AGENTS.md'

@@ -1,0 +1,145 @@
+........F....F......................F..............                      [100%]
+================================== FAILURES ===================================
+__ HistoricalValidation20yTest.test_cached_range_skips_network_when_covered ___
+
+self = <tests.test_historical_validation_20y.HistoricalValidation20yTest testMethod=test_cached_range_skips_network_when_covered>
+
+    def test_cached_range_skips_network_when_covered(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache_dir = root / "data" / "market_cache"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cached = make_history_frame(
+                [
+                    "2006-08-01",
+                    "2006-08-02",
+                    "2006-08-03",
+                ]
+            )
+            cached.index.name = "Date"
+            cached.to_csv(cache_dir / "7203_T.csv", encoding="utf-8")
+    
+            with patch.object(hv.yf, "download", side_effect=AssertionError("network should not be used")):
+                report = hv.run_historical_validation_20y(
+                    root=root,
+                    tickers=["7203.T"],
+                    requested_start="2006-08-01",
+                    requested_end="2006-08-03",
+                    cache_dir=cache_dir,
+                    output_csv=root / "reports" / "historical_validation_20y" / "data_coverage.csv",
+                    as_of=datetime(2006, 8, 4, 16, 0, tzinfo=JST),
+                )
+    
+            row = report["rows"][0]
+            self.assertTrue(row["cache_used"])
+            self.assertFalse(row["download_used"])
+>           self.assertEqual(0, row["network_attempts"])
+E           AssertionError: 0 != 1
+
+tests\test_historical_validation_20y.py:1720: AssertionError
+_ HistoricalValidation20yTest.test_diagnostics_record_pending_created_and_d1_position_limit_shortfall_after_gap_up _
+
+self = <tests.test_historical_validation_20y.HistoricalValidation20yTest testMethod=test_diagnostics_record_pending_created_and_d1_position_limit_shortfall_after_gap_up>
+
+    def test_diagnostics_record_pending_created_and_d1_position_limit_shortfall_after_gap_up(self) -> None:
+        requested_start = pd.Timestamp("2006-08-01")
+        requested_end = pd.Timestamp("2006-08-02")
+        prepared_histories = {
+            "1000.T": pd.DataFrame(
+                [
+                    {"Open": 100.0, "High": 111.0, "Low": 90.0, "Close": 100.0, "Volume": 1000, "ATR": 10.0},
+                    {"Open": 150.0, "High": 161.0, "Low": 140.0, "Close": 150.0, "Volume": 1001, "ATR": 10.0},
+                ],
+                index=pd.to_datetime(["2006-08-01", "2006-08-02"]),
+            )
+        }
+        universe = pd.DataFrame(
+            [
+                {"ticker": "1000.T", "company_name": "LIMIT"},
+            ]
+        )
+        config = replace(
+            make_pending_order_config(1_000_000.0, risk_per_trade_pct=0.01),
+            max_position_pct=0.01,
+        )
+    
+        with patch.object(
+            hv,
+            "is_entry_signal",
+            side_effect=lambda row, strategy: row.name == pd.Timestamp("2006-08-01"),
+        ), patch.object(
+            hv,
+            "signal_score",
+            return_value=80.0,
+        ):
+            result = hv.simulate_validation(prepared_histories, universe, config, requested_start, requested_end)
+    
+        counts = diagnostics_lookup(result.diagnostics)
+        self.assertEqual(1, counts[(2006, "SIGNAL_CANDIDATE")])
+        self.assertEqual(1, counts[(2006, "PENDING_CREATED")])
+>       self.assertEqual(1, counts[(2006, "D1_REJECT_POSITION_LIMIT")])
+E       AssertionError: 1 != 0
+
+tests\test_historical_validation_20y.py:1338: AssertionError
+_ HistoricalValidation20yTest.test_requested_range_uses_global_last_market_date_for_end_coverage _
+
+self = <tests.test_historical_validation_20y.HistoricalValidation20yTest testMethod=test_requested_range_uses_global_last_market_date_for_end_coverage>
+
+    def test_requested_range_uses_global_last_market_date_for_end_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls: list[dict[str, object]] = []
+    
+            def make_dates(start: str, end: str, gap_start: str | None = None, gap_end: str | None = None) -> list[str]:
+                gap_start_ts = pd.Timestamp(gap_start) if gap_start is not None else None
+                gap_end_ts = pd.Timestamp(gap_end) if gap_end is not None else None
+                dates: list[str] = []
+                for timestamp in pd.bdate_range(start, end):
+                    if gap_start_ts is not None and gap_end_ts is not None and gap_start_ts <= timestamp <= gap_end_ts:
+                        continue
+                    dates.append(timestamp.strftime("%Y-%m-%d"))
+                return dates
+    
+            def fake_download(ticker: str, **kwargs):
+                calls.append({"ticker": ticker, **kwargs})
+                if ticker == "7203.T":
+                    return make_history_frame(
+                        make_dates("2006-08-01", "2026-08-07", "2012-07-02", "2012-07-13")
+                    )
+                return make_history_frame(make_dates("2006-08-01", "2026-07-20"))
+    
+            with patch.object(hv.yf, "download", side_effect=fake_download):
+                report = hv.run_historical_validation_20y(
+                    root=root,
+                    tickers=["7203.T", "6758.T"],
+                    requested_start="2006-08-01",
+                    requested_end="2026-08-09",
+                    cache_dir=root / "data" / "market_cache",
+                    output_csv=root / "reports" / "historical_validation_20y" / "data_coverage.csv",
+                    as_of=datetime(2026, 8, 9, 16, 0, tzinfo=JST),
+                )
+    
+            self.assertEqual(2, len(calls))
+            self.assertEqual(["7203.T", "6758.T"], [call["ticker"] for call in calls])
+>           self.assertEqual("2006-08-01", calls[0]["start"])
+E           AssertionError: '2006-08-01' != '2006-02-14'
+E           - 2006-08-01
+E           ?       ^ -
+E           + 2006-02-14
+E           ?       ^  +
+
+tests\test_historical_validation_20y.py:593: AssertionError
+============================== warnings summary ===============================
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_cache_hit_fetches_only_missing_range
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_cached_range_skips_network_when_covered
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_legacy_price_date_cache_is_restored_and_fake_row_dropped
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_legacy_tuple_cache_is_migrated_to_five_columns
+  C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\phoenix_core\historical_validation_20y.py:561: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`).Please use a specific unit instead.
+    date_values = np.full(row_count, np.datetime64("NaT"), dtype="datetime64[ns]")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_cached_range_skips_network_when_covered
+FAILED tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_diagnostics_record_pending_created_and_d1_position_limit_shortfall_after_gap_up
+FAILED tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_requested_range_uses_global_last_market_date_for_end_coverage
+3 failed, 48 passed, 4 warnings in 109.40s (0:01:49)

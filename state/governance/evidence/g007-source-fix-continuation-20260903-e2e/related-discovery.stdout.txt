@@ -1,0 +1,6 @@
+tests\test_monitor_only.py
+tests\test_phoenix_disaster_recovery.py
+tests\test_phoenix_fail_safe.py
+tests\test_phoenix_heartbeat.py
+tests\test_position_reconciliation.py
+tests\test_weekly_signal_comparison_run_phoenix.py

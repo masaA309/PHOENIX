@@ -2124,6 +2124,157 @@ class ProductionRakutenRssTransportStep49Test(unittest.TestCase):
         self.assertIn("RSS_CONNECTED", message)
         self.assertIn("MarketSpeed2_RSS_64bit.xll", message)
 
+    def test_read_only_readiness_ready_addins_ok_returns_true(self) -> None:
+        fixed_now = datetime(2026, 8, 21, 8, 47, 42, tzinfo=ZoneInfo("Asia/Tokyo"))
+        values = {
+            WORKBOOK_STATE_EXCEL_ALIVE_CELL: True,
+            WORKBOOK_STATE_RSS_CONNECTED_CELL: True,
+            WORKBOOK_STATE_ADDIN_READY_CELL: True,
+            WORKBOOK_STATE_ORDER_TRANSPORT_READY_CELL: True,
+            WORKBOOK_STATE_HEARTBEAT_CELL: fixed_now.isoformat(timespec="seconds"),
+        }
+        touched_cells: list[str] = []
+        writes: list[str] = []
+        clears: list[str] = []
+
+        class ReadOnlyCell:
+            def __init__(self, cell_ref: str) -> None:
+                self.cell_ref = cell_ref
+
+            @property
+            def Value2(self) -> object:
+                touched_cells.append(self.cell_ref)
+                return values[self.cell_ref]
+
+            @Value2.setter
+            def Value2(self, value: object) -> None:
+                writes.append(self.cell_ref)
+                raise AssertionError("Value2 write is forbidden")
+
+            @property
+            def Formula(self) -> str:
+                return ""
+
+            @Formula.setter
+            def Formula(self, value: object) -> None:
+                writes.append(self.cell_ref)
+                raise AssertionError("Formula write is forbidden")
+
+            def ClearContents(self) -> None:
+                clears.append(self.cell_ref)
+                raise AssertionError("ClearContents is forbidden")
+
+        class ReadOnlySheet:
+            def Range(self, cell_ref: str) -> ReadOnlyCell:
+                if cell_ref not in values:
+                    raise AssertionError(f"Unexpected read-only cell: {cell_ref}")
+                return ReadOnlyCell(cell_ref)
+
+        class AddIn:
+            def __init__(self, name: str) -> None:
+                self.Name = name
+                self.Installed = True
+                self.FullName = f"C:/RSS/{name}"
+
+        class ReadOnlyApplication:
+            def __init__(self) -> None:
+                self.AddIns = [AddIn(name) for name in (
+                    "MarketSpeed2_RSS_64bit.xll",
+                    "MarketSpeed2_RSS_VBA.xlam",
+                )]
+                self.Evaluate = mock.Mock(side_effect=AssertionError("Evaluate is forbidden"))
+                self.Run = mock.Mock(side_effect=AssertionError("Run is forbidden"))
+
+        class ReadOnlyWorkbook:
+            def __init__(self, application: ReadOnlyApplication) -> None:
+                self.Application = application
+
+            def Worksheets(self, sheet_name: str) -> ReadOnlySheet:
+                self.worksheet_name = sheet_name
+                return ReadOnlySheet()
+
+        application = ReadOnlyApplication()
+        workbook = ReadOnlyWorkbook(application)
+        backend = Win32ComExcelBackend()
+        backend.health_check = mock.Mock(side_effect=AssertionError("health_check is forbidden"))  # type: ignore[method-assign]
+        backend._probe_rss_connection = mock.Mock(side_effect=AssertionError("probe is forbidden"))  # type: ignore[method-assign]
+        session = ExcelTransportSession(
+            application=application,
+            workbook=workbook,
+            workbook_path=DEFAULT_WORKBOOK_PATH,
+            workbook_name=DEFAULT_WORKBOOK_PATH.name,
+        )
+
+        with mock.patch("phoenix_core.production_rakuten_rss_transport._now_jst", return_value=fixed_now):
+            ready, runtime_state, message = backend.read_only_readiness(session)
+
+        self.assertTrue(ready)
+        self.assertIsNotNone(runtime_state)
+        self.assertTrue(runtime_state.ready)
+        self.assertIn("MarketSpeed2_RSS_64bit.xll", message)
+        self.assertEqual(
+            {
+                WORKBOOK_STATE_EXCEL_ALIVE_CELL,
+                WORKBOOK_STATE_RSS_CONNECTED_CELL,
+                WORKBOOK_STATE_ADDIN_READY_CELL,
+                WORKBOOK_STATE_ORDER_TRANSPORT_READY_CELL,
+                WORKBOOK_STATE_HEARTBEAT_CELL,
+            },
+            set(touched_cells),
+        )
+        self.assertEqual([], writes)
+        self.assertEqual([], clears)
+        application.Evaluate.assert_not_called()
+        application.Run.assert_not_called()
+        backend.health_check.assert_not_called()
+        backend._probe_rss_connection.assert_not_called()
+
+    def test_read_only_readiness_runtime_not_ready_skips_addins(self) -> None:
+        fixed_now = datetime(2026, 8, 21, 8, 47, 42, tzinfo=ZoneInfo("Asia/Tokyo"))
+        backend = Win32ComExcelBackend()
+        backend._read_runtime_values = lambda session: {  # type: ignore[method-assign]
+            WORKBOOK_STATE_EXCEL_ALIVE_CELL: True,
+            WORKBOOK_STATE_RSS_CONNECTED_CELL: False,
+            WORKBOOK_STATE_ADDIN_READY_CELL: True,
+            WORKBOOK_STATE_ORDER_TRANSPORT_READY_CELL: True,
+            WORKBOOK_STATE_HEARTBEAT_CELL: fixed_now.isoformat(timespec="seconds"),
+        }
+        backend._has_required_addins = mock.Mock(side_effect=AssertionError("addins must not be read"))  # type: ignore[method-assign]
+        session = mock.Mock()
+        session.application = mock.Mock()
+
+        with mock.patch("phoenix_core.production_rakuten_rss_transport._now_jst", return_value=fixed_now):
+            ready, runtime_state, message = backend.read_only_readiness(session)
+
+        self.assertFalse(ready)
+        self.assertIsNotNone(runtime_state)
+        self.assertFalse(runtime_state.ready)
+        self.assertIn("RSS is not connected", message)
+        backend._has_required_addins.assert_not_called()
+
+    def test_read_only_readiness_addins_ng_returns_false(self) -> None:
+        fixed_now = datetime(2026, 8, 21, 8, 47, 42, tzinfo=ZoneInfo("Asia/Tokyo"))
+        backend = Win32ComExcelBackend()
+        backend._read_runtime_values = lambda session: {  # type: ignore[method-assign]
+            WORKBOOK_STATE_EXCEL_ALIVE_CELL: True,
+            WORKBOOK_STATE_RSS_CONNECTED_CELL: True,
+            WORKBOOK_STATE_ADDIN_READY_CELL: True,
+            WORKBOOK_STATE_ORDER_TRANSPORT_READY_CELL: True,
+            WORKBOOK_STATE_HEARTBEAT_CELL: fixed_now.isoformat(timespec="seconds"),
+        }
+        backend._has_required_addins = mock.Mock(return_value=(False, "Missing RSS add-in: MarketSpeed2_RSS_64bit.xll"))  # type: ignore[method-assign]
+        session = mock.Mock()
+        session.application = mock.Mock()
+
+        with mock.patch("phoenix_core.production_rakuten_rss_transport._now_jst", return_value=fixed_now):
+            ready, runtime_state, message = backend.read_only_readiness(session)
+
+        self.assertFalse(ready)
+        self.assertIsNotNone(runtime_state)
+        self.assertTrue(runtime_state.ready)
+        self.assertIn("Missing RSS add-in", message)
+        backend._has_required_addins.assert_called_once_with(session.application)
+
     def test_win32com_health_check_writes_not_connected_on_probe_fail(self) -> None:
         self.skipTest("superseded by file_ready heartbeat owner design")
         backend = Win32ComExcelBackend()

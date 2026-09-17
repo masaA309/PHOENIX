@@ -31,8 +31,8 @@ class RiskControllerV7Test(unittest.TestCase):
         self,
         *,
         max_positions: int | None = 3,
-        max_orders_per_run: int = 2,
-        max_total_invested_pct: float = 0.95,
+        max_orders_per_run: int | None = None,
+        max_total_invested_pct: float = 0.80,
         bear_max_total_invested_pct: float = 0.70,
         max_single_position_pct: float = 0.30,
         risk_v2_enabled: bool = False,
@@ -104,11 +104,29 @@ class RiskControllerV7Test(unittest.TestCase):
                 make_order("4902.T", 600, "M-2"),
                 make_order("3697.T", 700, "M-3"),
             ],
-            self.config,
+            self._risk_config(max_orders_per_run=2),
             RiskState.new(300000),
         )
         self.assertEqual(2, len(report.accepted_orders))
         self.assertFalse(report.decisions[2].accepted)
+
+    def test_max_orders_per_run_none_does_not_apply_arbitrary_count_cap(self) -> None:
+        report = evaluate_orders(
+            self.broker,
+            [
+                make_order("9501.T", 500, "NOCAP-1"),
+                make_order("4902.T", 600, "NOCAP-2"),
+                make_order("3697.T", 700, "NOCAP-3"),
+            ],
+            self._risk_config(max_positions=None, max_orders_per_run=None),
+            RiskState.new(300000),
+        )
+        self.assertEqual(3, len(report.accepted_orders))
+        self.assertTrue(all(decision.accepted for decision in report.decisions))
+
+    def test_max_orders_per_run_rejects_non_positive_explicit_values(self) -> None:
+        with self.assertRaises(ValueError):
+            self._risk_config(max_orders_per_run=0).validate()
 
     def test_blocks_single_position_limit(self) -> None:
         report = evaluate_orders(
@@ -124,6 +142,7 @@ class RiskControllerV7Test(unittest.TestCase):
         config = self._risk_config(risk_v2_enabled=True)
         state = RiskState.new(300000)
         state.start_of_day_equity_yen = 400000
+        self.broker.submit_order(make_order("9501.T", 500, "BUY-OWNED"))
         report = evaluate_orders(
             self.broker,
             [make_order("9501.T", 500, "SELL-1", side=OrderSide.SELL)],
@@ -134,10 +153,24 @@ class RiskControllerV7Test(unittest.TestCase):
         self.assertEqual(1, len(report.accepted_orders))
         self.assertTrue(report.decisions[0].accepted)
 
+    def test_rejects_sell_above_phoenix_owned_quantity(self) -> None:
+        config = self._risk_config(risk_v2_enabled=True)
+        state = RiskState.new(300000)
+        report = evaluate_orders(
+            self.broker,
+            [make_order("9501.T", 500, "SELL-1", side=OrderSide.SELL)],
+            config,
+            state,
+            market_context=self._market_context(breadth_ratio=0.50, regime="BULL"),
+        )
+        self.assertEqual(0, len(report.accepted_orders))
+        self.assertFalse(report.decisions[0].accepted)
+        self.assertIn("PHOENIX保有株数不足", report.decisions[0].reason)
+
     def test_max_positions_none_skips_position_count_reject(self) -> None:
         config = self._risk_config(
             max_positions=None,
-            max_orders_per_run=10,
+            max_orders_per_run=None,
             risk_v2_enabled=True,
         )
         report = evaluate_orders(
@@ -169,7 +202,7 @@ class RiskControllerV7Test(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            0.95,
+            0.80,
             risk_controller.resolve_effective_total_invested_pct(
                 config,
                 self._market_context(breadth_ratio=0.4000, regime="BULL"),
@@ -199,7 +232,7 @@ class RiskControllerV7Test(unittest.TestCase):
         config = PositionSizingConfig(
             risk_per_trade_pct=1.0,
             max_position_pct=1.0,
-            max_total_invested_pct=0.95,
+            max_total_invested_pct=0.80,
             minimum_cash_reserve_pct=0.0,
             fallback_stop_distance_pct=0.03,
             lot_size=100,
@@ -212,8 +245,8 @@ class RiskControllerV7Test(unittest.TestCase):
             get_account_snapshot=lambda: SimpleNamespace(
                 equity_yen=300000.0,
                 cash_yen=300000.0,
-                market_value_yen=50000.0,
-                positions=(SimpleNamespace(ticker="7203.T", quantity=100, market_value=50000.0),),
+                market_value_yen=20000.0,
+                positions=(SimpleNamespace(ticker="7203.T", quantity=100, market_value=20000.0),),
             ),
         )
         candidates = pd.DataFrame(

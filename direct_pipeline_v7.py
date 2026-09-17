@@ -66,7 +66,7 @@ def risk_config(payload: dict[str, Any]) -> RiskConfig:
     return RiskConfig(
         max_daily_loss_pct=float(c.get("max_daily_loss_pct", 0.03)),
         max_drawdown_pct=float(c.get("max_drawdown_pct", 0.10)),
-        max_positions=int(c.get("max_positions", 5)),
+        max_positions=None if c.get("max_positions") is None else int(c.get("max_positions")),
         max_total_invested_pct=float(c.get("max_total_invested_pct", 0.80)),
         max_single_position_pct=float(c.get("max_single_position_pct", 0.30)),
         max_orders_per_run=int(c.get("max_orders_per_run", 3)),

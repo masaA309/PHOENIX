@@ -1,0 +1,16 @@
+.........F.
+======================================================================
+FAIL: test_nonlegacy_current_safety_context_missing_fails_closed (tests.test_phoenix_disaster_recovery.DisasterRecoveryStep40Test.test_nonlegacy_current_safety_context_missing_fails_closed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\tests\test_phoenix_disaster_recovery.py", line 962, in test_nonlegacy_current_safety_context_missing_fails_closed
+    self.assertEqual("CURRENT_SAFETY_CONTEXT_MISSING", gate.reason)
+AssertionError: 'CURRENT_SAFETY_CONTEXT_MISSING' != 'GIT_COMMIT_UNAVAILABLE'
+- CURRENT_SAFETY_CONTEXT_MISSING
++ GIT_COMMIT_UNAVAILABLE
+
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.290s
+
+FAILED (failures=1)

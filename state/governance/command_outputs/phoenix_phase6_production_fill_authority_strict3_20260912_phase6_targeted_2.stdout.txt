@@ -1,0 +1,9 @@
+TEST_LABEL=PHASE6_TARGETED
+TEST_COMMAND=C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\.venv\Scripts\python.exe -X utf8 -B -m pytest -p no:cacheprovider tests/test_historical_validation_20y.py -q -k phase6_
+RAW_STDOUT_BEGIN
+...                                                                      [100%]
+3 passed, 67 deselected in 0.74s
+RAW_STDOUT_END
+RAW_STDERR_BEGIN
+RAW_STDERR_END
+RETURN_CODE=0

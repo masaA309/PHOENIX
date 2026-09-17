@@ -1,0 +1,13 @@
+CURRENT_POSTIMAGE_SYNTAX_AUDIT
+SYNTAX_CHECK_COMMAND=python -X utf8 builtin compile(source,path,'exec')
+SYNTAX_OK:phoenix_core/strategy_execution_runtime.py
+SYNTAX_OK:phoenix_core/rakuten_rss_adapter.py
+SYNTAX_FAIL:phoenix_core/rakuten_rss_broker.py:SyntaxError:expected 'except' or 'finally' block (phoenix_core/rakuten_rss_broker.py, line 233)
+SYNTAX_ERROR_LINE=233
+SYNTAX_ERROR_OFFSET=4
+NEAREST_ENCLOSING_DEFINITION=233:def executable_buy_price(self, ticker: str) -> float | None:
+SYNTAX_OK:phoenix_core/production_rakuten_rss_adapter.py
+SYNTAX_OK:phoenix_core/production_rakuten_rss_transport.py
+SYNTAX_OK:tests/test_historical_validation_20y.py
+CURRENT_POSTIMAGE_SYNTAX_RESULT=FAIL
+RETURN_CODE=2

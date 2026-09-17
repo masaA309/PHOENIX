@@ -1,0 +1,11 @@
+...................................................                      [100%]
+============================== warnings summary ===============================
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_cache_hit_fetches_only_missing_range
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_cached_range_skips_network_when_covered
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_legacy_price_date_cache_is_restored_and_fake_row_dropped
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_legacy_tuple_cache_is_migrated_to_five_columns
+  C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\phoenix_core\historical_validation_20y.py:561: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`).Please use a specific unit instead.
+    date_values = np.full(row_count, np.datetime64("NaT"), dtype="datetime64[ns]")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+51 passed, 4 warnings in 115.05s (0:01:55)

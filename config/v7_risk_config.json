@@ -9,9 +9,9 @@
     "max_daily_loss_pct": 0.03,
     "max_drawdown_pct": 0.1,
     "max_positions": null,
-    "max_total_invested_pct": 0.95,
+    "max_total_invested_pct": 0.8,
     "max_single_position_pct": 0.3,
-    "max_orders_per_run": 3,
+    "max_orders_per_run": null,
     "max_consecutive_losses": 3,
     "minimum_cash_reserve_pct": 0.1,
     "block_on_broker_health_failure": true

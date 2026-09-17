@@ -1,0 +1,78 @@
+PREARM_SIX_GATE_AUDIT
+USER_CONDITION_1_BEGIN
+SYNTAX_COMMAND=python -X utf8 builtin compile(source,path,'exec') + ast.parse(source)
+SYNTAX_OK:phoenix_core/strategy_execution_runtime.py
+SYNTAX_OK:phoenix_core/rakuten_rss_adapter.py
+SYNTAX_OK:phoenix_core/rakuten_rss_broker.py
+SYNTAX_OK:phoenix_core/production_rakuten_rss_adapter.py
+SYNTAX_OK:phoenix_core/production_rakuten_rss_transport.py
+SYNTAX_OK:phoenix_core/factory.py
+SYNTAX_OK:phoenix_core/protective_orders.py
+SYNTAX_OK:tests/test_historical_validation_20y.py
+PROJECT_WRITE_PATHS=NONE
+USER_CONDITION_1=READ_ONLY_NA_PLUS_CURRENT_SYNTAX_PROOF
+USER_CONDITION_1_END
+USER_CONDITION_2_BEGIN
+CURRENT_CALLEE:phoenix_core/strategy_execution_runtime.py:229:RakutenLiveStrategyExecutionAdapter.submit_entry:def submit_entry(self, decision: D1EntryDecision, client_order_id: str) -> OrderResult:
+CURRENT_CALLEE:phoenix_core/rakuten_rss_broker.py:319:RakutenRssBroker.submit_order:def submit_order(self, order: OrderRequest) -> OrderResult:
+CURRENT_CALLEE:phoenix_core/rakuten_rss_broker.py:809:RakutenRssBroker._apply_update:def _apply_update(
+CURRENT_CALLEE:phoenix_core/rakuten_rss_broker.py:1006:RakutenRssBroker._apply_cumulative_fill:def _apply_cumulative_fill(
+CURRENT_CALLEE:phoenix_core/production_rakuten_rss_adapter.py:218:ProductionRakutenRssAdapter.poll_order:def poll_order(self, broker_order_id: str) -> tuple[RakutenRssOrderUpdate, ...]:
+CURRENT_CALLEE:phoenix_core/production_rakuten_rss_transport.py:2430:ProductionRakutenRssTransport.poll_order:def poll_order(self, broker_order_id: str) -> tuple[RakutenRssOrderUpdate, ...]:
+CURRENT_CALLEE:phoenix_core/production_rakuten_rss_transport.py:2620:ProductionRakutenRssTransport.executable_buy_price:def executable_buy_price(self, ticker: str) -> float | None:
+CURRENT_CALLEE:phoenix_core/production_rakuten_rss_transport.py:1252:Win32ComExcelBackend.read_executable_buy_price:def read_executable_buy_price(
+NEW_OR_CHANGED_PROJECT_CALLS_AUTHORED_BY_THIS_CANDIDATE=NONE
+USER_CONDITION_2=NOT_APPLICABLE_NO_PROJECT_MUTATION
+USER_CONDITION_2_END
+USER_CONDITION_3_BEGIN
+TEST_METHOD_COUNT=70
+PHASE6_TEST_NAMES=test_phase6_live_adapter_preserves_identity_and_single_mutation_owner,test_phase6_live_buy_quote_is_authoritative_and_caps_limit,test_phase6_production_fill_semantics_are_safe_and_restart_idempotent
+PHASE6_TEST_SHA256:test_phase6_production_fill_semantics_are_safe_and_restart_idempotent:3e08a3afd55bdfe78faf70ac743633d3cbeb423741deb5574265582f66ea76e5
+PHASE6_TEST_SHA256:test_phase6_live_buy_quote_is_authoritative_and_caps_limit:538924c5dcc67aea2f44cbe6e608532d6511dadd0b378269d93b300422abbeff
+PHASE6_TEST_SHA256:test_phase6_live_adapter_preserves_identity_and_single_mutation_owner:13bced884951f6e46d96f7855c9f2239914b59561706b4781bd80493df63ac97
+NEW_OR_CHANGED_TESTS_AUTHORED_BY_THIS_CANDIDATE=NONE
+USER_CONDITION_3=NOT_APPLICABLE_NO_TEST_MUTATION
+USER_CONDITION_3_END
+USER_CONDITION_4_BEGIN
+PRODUCTION_SOURCE_IDENTITY_KEY:phoenix_core/rakuten_rss_broker.py:1017:source = (str(update.source_order_number).strip(), str(update.source_reception_number).strip())
+PRODUCTION_ACCOUNTING_MODE:phoenix_core/rakuten_rss_broker.py:836:if update.fill_accounting_mode == "CUMULATIVE_ORDER_EXECUTIONS":
+CUMULATIVE_REPLAY_QTY:phoenix_core/rakuten_rss_broker.py:1011:q0 = int(record.get("cumulative_filled_quantity", record.get("filled_quantity", 0)))
+CUMULATIVE_REPLAY_PRICE:phoenix_core/rakuten_rss_broker.py:1012:p0 = float(record.get("cumulative_average_fill_price", record.get("filled_price", 0.0)))
+EVENT_REPLAY_KEY:phoenix_core/rakuten_rss_broker.py:840:fill_event_id = str(update.fill_event_id).strip()
+EVENT_REPLAY_LEDGER:phoenix_core/rakuten_rss_broker.py:772:"applied_fill_events": {},
+AMBIGUITY_FAIL_CLOSED:phoenix_core/rakuten_rss_broker.py:1020:raise RuntimeError("PRODUCTION_FILL_SOURCE_AMBIGUOUS")
+QUANTITY_MISMATCH_FAIL_CLOSED:phoenix_core/rakuten_rss_broker.py:1016:raise RuntimeError("PRODUCTION_FILL_QUANTITY_MISMATCH")
+USER_CONDITION_4=PASS
+USER_CONDITION_4_END
+USER_CONDITION_5_BEGIN
+TEST_EXECUTION_FOR_THIS_CANDIDATE=NOT_RUN_BY_DESIGN_READ_ONLY
+PERSISTED_ACCEPTED_FULL70_RAW_STDOUT_BEGIN
+TEST_LABEL=FULL_70
+TEST_COMMAND=C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\.venv\Scripts\python.exe -X utf8 -B -m pytest -p no:cacheprovider tests/test_historical_validation_20y.py -q
+RAW_STDOUT_BEGIN
+......................................................................   [100%]
+============================== warnings summary ===============================
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_cache_hit_fetches_only_missing_range
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_cached_range_skips_network_when_covered
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_legacy_price_date_cache_is_restored_and_fake_row_dropped
+tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_legacy_tuple_cache_is_migrated_to_five_columns
+  C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\phoenix_core\historical_validation_20y.py:599: DeprecationWarning: The 'generic' unit for NumPy timedelta is deprecated, and will raise an error in the future. This includes implicit conversion of bare integers (e.g. `+ 1`).Please use a specific unit instead.
+    date_values = np.full(row_count, np.datetime64("NaT"), dtype="datetime64[ns]")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+70 passed, 4 warnings in 111.42s (0:01:51)
+RAW_STDOUT_END
+RAW_STDERR_BEGIN
+RAW_STDERR_END
+RETURN_CODE=0
+PERSISTED_ACCEPTED_FULL70_RAW_STDOUT_END
+PERSISTED_ACCEPTED_FULL70_RAW_STDERR_BEGIN
+
+PERSISTED_ACCEPTED_FULL70_RAW_STDERR_END
+PERSISTED_ACCEPTED_FULL70_HAS_COMMAND_STDOUT_RC=YES
+USER_CONDITION_5=PASS
+USER_CONDITION_5_END
+USER_CONDITION_6=PASS
+PREARM_SIX_GATE_AUDIT_RESULT=PASS
+UNRESOLVED_ITEMS=NONE
+RETURN_CODE=0

@@ -1,0 +1,133 @@
+TEST_LABEL=PHASE6_TARGETED
+TEST_COMMAND=C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\.venv\Scripts\python.exe -X utf8 -B -m pytest -p no:cacheprovider tests/test_historical_validation_20y.py -q -k phase6_
+RAW_STDOUT_BEGIN
+.FF                                                                      [100%]
+================================== FAILURES ===================================
+_ HistoricalValidation20yTest.test_phase6_live_buy_quote_is_authoritative_and_caps_limit _
+
+self = <tests.test_historical_validation_20y.HistoricalValidation20yTest testMethod=test_phase6_live_buy_quote_is_authoritative_and_caps_limit>
+
+    def test_phase6_live_buy_quote_is_authoritative_and_caps_limit(self) -> None:
+        from phoenix_core.historical_validation_20y import D1EntryDecision
+        from phoenix_core.production_rakuten_rss_adapter import ProductionRakutenRssAdapter
+        from phoenix_core.production_rakuten_rss_transport import MockExcelComBackend, ProductionRakutenRssTransport
+        from phoenix_core.rakuten_rss_adapter import MockRakutenRssAdapter
+        from phoenix_core.rakuten_rss_broker import RakutenRssBroker
+        from phoenix_core.strategy_execution_runtime import RakutenLiveStrategyExecutionAdapter
+    
+        backend = MockExcelComBackend(executable_prices={"7203.T": 101.25})
+        transport = ProductionRakutenRssTransport(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            armed=False,
+            backend=backend,
+        )
+        adapter = ProductionRakutenRssAdapter(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            transport=transport,
+        )
+        broker = RakutenRssBroker(adapter=adapter, live_enabled=True)
+        self.assertEqual(101.25, broker.executable_buy_price("7203.T"))
+        self.assertIsNone(broker.executable_buy_price("6758.T"))
+        self.assertEqual(0, transport.order_function_call_count)
+        decision = D1EntryDecision(
+            ticker="7203.T", company_name="Toyota", signal_date="2026-09-11",
+            execution_date="2026-09-12", signal_score=80.0, planned_quantity=100,
+            final_quantity=100, sizing_price=101.25, planned_risk_per_share=5.0,
+            stop_price_at_sizing=96.25, target_price_at_sizing=111.25,
+            rejection_reason="",
+        )
+        mock = MockRakutenRssAdapter(executable_prices={"7203.T": 101.25})
+        with tempfile.TemporaryDirectory() as directory:
+            live = RakutenLiveStrategyExecutionAdapter(
+                RakutenRssBroker(
+                    state_file=Path(directory) / "rss.json", adapter=mock, live_enabled=True
+                )
+            )
+>           live.submit_entry(decision, "PHX-ENTRY-17DAA4BB6D684E84")
+
+tests\test_historical_validation_20y.py:2489: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <phoenix_core.strategy_execution_runtime.RakutenLiveStrategyExecutionAdapter object at 0x00000232CAC8E660>
+decision = D1EntryDecision(ticker='7203.T', company_name='Toyota', signal_date='2026-09-11', execution_date='2026-09-12', signal_...ice=101.25, planned_risk_per_share=5.0, stop_price_at_sizing=96.25, target_price_at_sizing=111.25, rejection_reason='')
+client_order_id = 'PHX-ENTRY-17DAA4BB6D684E84'
+
+    def submit_entry(self, decision: D1EntryDecision, client_order_id: str) -> OrderResult:
+        expected_id = deterministic_entry_client_order_id(
+            decision.ticker, decision.signal_date, decision.execution_date
+        )
+        if client_order_id != expected_id:
+>           raise ValueError("client_order_id does not match the entry decision")
+E           ValueError: client_order_id does not match the entry decision
+
+phoenix_core\strategy_execution_runtime.py:234: ValueError
+_ HistoricalValidation20yTest.test_phase6_production_fill_semantics_are_safe_and_restart_idempotent _
+
+self = <tests.test_historical_validation_20y.HistoricalValidation20yTest testMethod=test_phase6_production_fill_semantics_are_safe_and_restart_idempotent>
+
+    def test_phase6_production_fill_semantics_are_safe_and_restart_idempotent(self) -> None:
+        from phoenix_core.models import OrderRequest, OrderSide, OrderStatus, OrderType
+        from phoenix_core.production_rakuten_rss_adapter import (
+            ProductionRakutenRssAdapter,
+            RakutenRssTransportHealth,
+            TRANSPORT_SOURCE_COM_LIVE,
+        )
+        from phoenix_core.rakuten_rss_adapter import RakutenRssOrderUpdate, RakutenRssSubmitAck
+        from phoenix_core.rakuten_rss_broker import RakutenRssBroker
+    
+        class ProductionObservationTransport:
+            def __init__(self) -> None:
+                self.update = RakutenRssOrderUpdate(
+                    status=OrderStatus.PARTIALLY_FILLED,
+                    fill_quantity=40,
+                    fill_price=100.0,
+                    fill_event_id="",
+                    rss_order_id=7,
+                    rss_order_number="ORDER-7",
+                )
+    
+            def health_check(self):
+                return RakutenRssTransportHealth(True, "ready", TRANSPORT_SOURCE_COM_LIVE)
+    
+            def submit_order(self, order, broker_order_id):
+                return RakutenRssSubmitAck(OrderStatus.ACCEPTED, "accepted", rss_order_id=7, rss_order_number="ORDER-7")
+    
+            def poll_order(self, broker_order_id):
+                return (self.update,)
+    
+            def cancel_order(self, broker_order_id):
+                raise AssertionError("cancel is not part of this proof")
+    
+            def executable_buy_price(self, ticker):
+                return 100.0
+    
+        transport = ProductionObservationTransport()
+        adapter = ProductionRakutenRssAdapter(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            transport=transport,
+        )
+        order = OrderRequest("7203.T", OrderSide.BUY, 100, OrderType.LIMIT, 100.0, "phase6-fill")
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = Path(directory) / "rss.json"
+            broker = RakutenRssBroker(state_file=state_file, adapter=adapter, live_enabled=True)
+            broker.submit_order(order)
+            with self.assertRaisesRegex(RuntimeError, "FILL_EVENT_ID_NOT_PROVEN"):
+                broker.refresh_pending_orders()
+            restarted = RakutenRssBroker(state_file=state_file, adapter=adapter, live_enabled=True)
+            with self.assertRaisesRegex(RuntimeError, "FILL_EVENT_ID_NOT_PROVEN"):
+                restarted.refresh_pending_orders()
+>           self.assertEqual(100_000.0, restarted.get_account_snapshot().cash_yen)
+E           AssertionError: 100000.0 != 300000.0
+
+tests\test_historical_validation_20y.py:2449: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_phase6_live_buy_quote_is_authoritative_and_caps_limit
+FAILED tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_phase6_production_fill_semantics_are_safe_and_restart_idempotent
+2 failed, 1 passed, 67 deselected in 2.19s
+RAW_STDOUT_END
+RAW_STDERR_BEGIN
+RAW_STDERR_END
+RETURN_CODE=1

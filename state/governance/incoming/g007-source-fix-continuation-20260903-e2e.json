@@ -1,0 +1,241 @@
+{
+  "agents_sha256": "291c10259b1601bf8201bc938c876a9afdcc0560f2567114b3bbe08e0ec9f58c",
+  "allowed": [
+    "write this governance candidate",
+    "write preflight report",
+    "write bounded command evidence",
+    "modify phoenix_disaster_recovery.py only for G-007 SOURCE_FIX",
+    "modify tests/test_phoenix_disaster_recovery.py only for G-007 test expectations and coverage",
+    "read-only identify related test modules and CI/test commands",
+    "run read-only git checks and diff checks"
+  ],
+  "artifact_lock": [
+    {
+      "existing": true,
+      "path": "AGENTS.md",
+      "sha256": "291c10259b1601bf8201bc938c876a9afdcc0560f2567114b3bbe08e0ec9f58c"
+    },
+    {
+      "existing": true,
+      "path": "tools/codex_execution_preflight_gate.py",
+      "sha256": "d3bac0771380e341f9b51e20b157a4129386b48f98a909baac277a9642d8a814"
+    },
+    {
+      "existing": true,
+      "path": "tools/governance_command_runner.py",
+      "sha256": "8419ab5c53cd58f8f9ab6f27a36508c9840862c18217b1b04fc8fc156511d029"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/root_cause_synonyms.json",
+      "sha256": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1"
+    },
+    {
+      "existing": true,
+      "path": "knowledge/failure_class_ledger.json",
+      "sha256": "12a0c025fdb69fdb321e0574c48d1ac0fe5407364bc769207987c8326361a954"
+    },
+    {
+      "existing": true,
+      "path": "phoenix_disaster_recovery.py",
+      "sha256": "0683667ba1e971dfb01504b829e5c010a744b45205586664a5299b6dc7fd012f"
+    },
+    {
+      "existing": true,
+      "path": "tests/test_phoenix_disaster_recovery.py",
+      "sha256": "0fe41cc28faaec8257cc50248e168882ab5d47f2f4cd1aae68947ed333105abe"
+    }
+  ],
+  "candidate_id": "g007-source-fix-continuation-20260903-e2e",
+  "candidate_sha256": "25a69673bdc471422ef066dc7893ac5a90b1efbbc0f5121c0bc71ff2d67b90c8",
+  "candidate_type": "IMPLEMENTATION",
+  "created_at_utc": "2026-09-02T17:00:00Z",
+  "evidence_graph": [
+    {
+      "bundle_members": [
+        "focused.stdout.txt",
+        "focused.stderr.txt",
+        "module.stdout.txt",
+        "module.stderr.txt",
+        "related-discovery.stdout.txt",
+        "related.stdout.txt",
+        "regression-discovery.stdout.txt",
+        "regression.stdout.txt",
+        "diff-check.stdout.txt",
+        "target-diff.stdout.txt",
+        "scope-check.stdout.txt"
+      ],
+      "claim": "G-007 SOURCE_FIX is source-closed by focused tests, module tests, related modules, regression command if present, diff check, and scope check without Git mutation.",
+      "evidence_kind": "ATOMIC_BUNDLE",
+      "exact_command": "commands executed in this run and recorded in final output",
+      "exact_evidence_source": "focused unittest, module unittest, rg related modules, related tests, regression command discovery/result, diff check, target diff, scope check",
+      "expected_shape": "all required tests pass; no standard regression failure if command exists; diff check passes; only target files plus governance candidate/report/evidence changed",
+      "fail_predicate": "any required command fails after allowed correction cycles",
+      "failure_path": "up to three correction cycles, each only after concrete G-007 failure; no Git mutation",
+      "not_proven_predicate": "evidence incomplete",
+      "owner": "USER",
+      "pass_predicate": "all evidence satisfies expected_shape",
+      "persistence_source": "state/governance/evidence/g007-source-fix-continuation-20260903-e2e",
+      "proof_id": "PT-G007-E2E",
+      "reader": "USER",
+      "runtime_identity": "local PHOENIX workspace with specified source/test precondition hashes",
+      "side_effects": "two target files and governance candidate/report/evidence only",
+      "time_window": "this one end-to-end run",
+      "update_trigger": "single approved end-to-end G-007 continuation run",
+      "writer": "Codex local implementation plus governance command evidence"
+    }
+  ],
+  "execution_manifest": {
+    "commands": [
+      {
+        "argv": [
+          "./.venv/Scripts/python.exe",
+          "tools/codex_execution_preflight_gate.py",
+          "--candidate",
+          "state/governance/incoming/g007-source-fix-continuation-20260903-e2e.json",
+          "--agents",
+          "AGENTS.md",
+          "--ledger",
+          "knowledge/failure_class_ledger.json",
+          "--synonyms",
+          "config/governance/root_cause_synonyms.json",
+          "--report",
+          "state/governance/reports/g007-source-fix-continuation-20260903-e2e.report.json"
+        ],
+        "preflight": true
+      }
+    ]
+  },
+  "expires_at_utc": "2026-09-09T17:00:00Z",
+  "failure_classes": [],
+  "forbidden": [
+    "git add",
+    "git commit",
+    "git push",
+    "git reset",
+    "git checkout",
+    "git clean",
+    "modify any other source or test file",
+    "broker Excel runtime orders live or PAPER state mutation",
+    "Claude audit",
+    "unrelated failure fixes",
+    "test deletion skip or safety expectation relaxation"
+  ],
+  "objective": "Complete the approved G-007 Disaster Recovery source fix end-to-end from the current two-file implementation state without Git mutation.",
+  "output": {
+    "complete": true,
+    "fields": [
+      "AGENTS_READ",
+      "PRECONDITION_RESULT",
+      "PREFLIGHT_RESULT",
+      "CORRECTION_CYCLES",
+      "FILES_WRITTEN",
+      "FOCUSED_TEST_RESULT",
+      "MODULE_TEST_RESULT",
+      "RELATED_TEST_RESULT",
+      "REGRESSION_TEST_RESULT",
+      "TOTAL_TEST_COUNT",
+      "DIFF_CHECK",
+      "TARGET_SCOPE_CHECK",
+      "SOURCE_SHA256",
+      "TEST_SHA256",
+      "PAPER",
+      "orders_submitted",
+      "BRIDGE_ARMED",
+      "GIT_MUTATION",
+      "SCOPE_VIOLATION",
+      "SOURCE_CLOSED_ALLOWED",
+      "NEXT_EXACT_ACTION"
+    ],
+    "truncate": false
+  },
+  "output_budget": {
+    "declared_stderr_bytes": 12000,
+    "declared_stdout_bytes": 12000,
+    "max_stderr_bytes": 20000,
+    "max_stdout_bytes": 20000
+  },
+  "proof_targets": [
+    {
+      "claim": "G-007 SOURCE_FIX is source-closed by focused tests, module tests, related modules, regression command if present, diff check, and scope check without Git mutation.",
+      "proof_id": "PT-G007-E2E"
+    }
+  ],
+  "result_branches": {
+    "FAIL": "SOURCE_CLOSED_ALLOWED:NO",
+    "NOT_PROVEN": "SOURCE_CLOSED_ALLOWED:NO",
+    "PASS": "SOURCE_CLOSED_ALLOWED:YES"
+  },
+  "review_inputs": [
+    {
+      "actor": "user-approved-continuation",
+      "completed": true,
+      "context_id": "g007-e2e-20260903",
+      "prior_free_text_conclusion": false,
+      "provider": "user",
+      "review_type": "MECHANICAL_REVIEW"
+    }
+  ],
+  "review_requirements": [
+    "MECHANICAL_REVIEW"
+  ],
+  "rollback_stop": {
+    "failure_path": "Stop after at most three correction cycles or first non-G007/unrelated failure without Git mutation.",
+    "rollback_scope": "No destructive rollback; report state.",
+    "stop_before": "Any edit if precondition or preflight fails."
+  },
+  "runtime_preconditions": [
+    {
+      "evidence": "Exact user-specified current hashes are verified before editing.",
+      "name": "source_sha256_precondition",
+      "proven": true
+    },
+    {
+      "evidence": "No broker Excel runtime order or live commands are in this run.",
+      "name": "trading_safety",
+      "proven": true
+    }
+  ],
+  "safety": {
+    "required_states": [
+      {
+        "name": "PAPER",
+        "value": "MAINTAINED"
+      },
+      {
+        "name": "orders_submitted",
+        "value": 0
+      },
+      {
+        "name": "BRIDGE_ARMED",
+        "value": false
+      },
+      {
+        "name": "live_trading_change",
+        "value": false
+      },
+      {
+        "name": "broker_rss_send",
+        "value": false
+      }
+    ]
+  },
+  "shell_transport": {
+    "command": [
+      "./.venv/Scripts/python.exe",
+      "tools/governance_command_runner.py"
+    ],
+    "layers": [
+      "Codex",
+      "PowerShell",
+      "Python",
+      "governance_command_runner"
+    ],
+    "script_path": "",
+    "script_sha256": ""
+  },
+  "task": "After fixed SHA preconditions and preflight, correct only G-007 scoped defects in phoenix_disaster_recovery.py and tests/test_phoenix_disaster_recovery.py, then run focused tests, full disaster recovery module, related test modules discovered by rg, any standard regression command found in AGENTS or CI, git diff --check, target diff, and scope checks.",
+  "user_machine_operations": [],
+  "validator_version": "1.0.0",
+  "workspace": "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX"
+}

@@ -216,6 +216,69 @@ def legacy_cache_columns(ticker: str) -> list[str]:
 
 
 class HistoricalValidation20yTest(unittest.TestCase):
+
+    def test_incremental_runtime_matches_simulate_validation_full_result_surface(self) -> None:
+        histories = {"1332.T": make_atr_history_frame(
+            ["2006-08-01", "2006-08-02", "2006-08-03"], base_price=100.0, atr=10.0
+        )}
+        universe = pd.DataFrame([{"ticker": "1332.T", "company_name": "TEST"}])
+        config = replace(make_pending_order_config(500_000.0), max_position_hard_pct=1.0, max_hold_sessions=10)
+        requested_start_ts = pd.Timestamp("2006-08-01")
+        requested_end_ts = pd.Timestamp("2006-08-02")
+        simulation_dates = sorted({
+            pd.Timestamp(day).normalize()
+            for frame in histories.values()
+            for day in frame.index
+            if requested_start_ts <= pd.Timestamp(day).normalize() <= requested_end_ts
+        })
+        last_available_dates = {ticker: hv._last_available_date(frame) for ticker, frame in histories.items()}
+        with patch.object(hv, "is_entry_signal", return_value=True), patch.object(hv, "signal_score", return_value=80.0):
+            reference = hv.simulate_validation(histories, universe, config, requested_start_ts, requested_end_ts)
+            state = hv.create_strategy_runtime_state(universe, config)
+            for current_date in simulation_dates:
+                hv.step_strategy_runtime(
+                    state, histories, current_date,
+                    historical_last_available_dates=last_available_dates,
+                    historical_candidate_end=requested_end_ts,
+                )
+            result = hv.finalize_historical_strategy_runtime(
+                state, histories, simulation_dates[-1], requested_start_ts, requested_end_ts
+            )
+        for name in ("trades", "equity_curve", "annual_returns", "monthly_returns", "diagnostics", "risk_v2_research"):
+            pd.testing.assert_frame_equal(getattr(reference, name), getattr(result, name))
+        self.assertEqual(reference.rejected_due_to_lot, result.rejected_due_to_lot)
+        self.assertEqual(reference.rejected_due_to_buying_power, result.rejected_due_to_buying_power)
+
+    def test_incremental_runtime_requires_explicit_historical_finalization(self) -> None:
+        histories = {"1332.T": make_atr_history_frame(
+            ["2006-08-01", "2006-08-02", "2006-08-03"], base_price=100.0, atr=10.0
+        )}
+        universe = pd.DataFrame([{"ticker": "1332.T", "company_name": "TEST"}])
+        config = replace(make_pending_order_config(500_000.0), max_position_hard_pct=1.0, max_hold_sessions=10)
+        requested_start_ts = pd.Timestamp("2006-08-01")
+        requested_end_ts = pd.Timestamp("2006-08-02")
+        last_available_dates = {ticker: hv._last_available_date(frame) for ticker, frame in histories.items()}
+        state = hv.create_strategy_runtime_state(universe, config)
+        with patch.object(hv, "is_entry_signal", return_value=True), patch.object(hv, "signal_score", return_value=80.0):
+            for current_date in (requested_start_ts, requested_end_ts):
+                hv.step_strategy_runtime(
+                    state, histories, current_date,
+                    historical_last_available_dates=last_available_dates,
+                    historical_candidate_end=requested_end_ts,
+                )
+        self.assertIn("1332.T", state.positions)
+        self.assertFalse(any(trade.exit_reason == "END_OF_TEST" for trade in state.trades))
+        result = hv.finalize_historical_strategy_runtime(
+            state, histories, requested_end_ts, requested_start_ts, requested_end_ts
+        )
+        self.assertFalse(state.positions)
+        self.assertFalse(state.pending_orders)
+        self.assertEqual(0.0, state.reserved_cash)
+        self.assertEqual(["END_OF_TEST"], result.trades["exit_reason"].tolist())
+        self.assertEqual(["1332.T"], result.trades["ticker"].tolist())
+        self.assertEqual(0, result.equity_curve.iloc[-1]["open_positions"])
+        self.assertEqual(0, result.equity_curve.iloc[-1]["pending_orders"])
+
     def test_config_file_preserves_window_capital_and_lot_size(self) -> None:
         settings = hv.load_settings(ROOT)
         self.assertEqual(500000.0, float(settings["initial_capital_yen"]))
@@ -527,9 +590,13 @@ class HistoricalValidation20yTest(unittest.TestCase):
 
             self.assertEqual(2, len(calls))
             self.assertEqual(["7203.T", "6758.T"], [call["ticker"] for call in calls])
-            self.assertEqual("2006-08-01", calls[0]["start"])
+            expected_fetch_start = (
+                pd.Timestamp("2006-08-01")
+                - pd.offsets.BDay(hv.DEFAULT_MINIMUM_HISTORY_SESSIONS + 20)
+            ).date().isoformat()
+            self.assertEqual(expected_fetch_start, calls[0]["start"])
             self.assertEqual("2026-08-10", calls[0]["end"])
-            self.assertEqual("2006-08-01", calls[1]["start"])
+            self.assertEqual(expected_fetch_start, calls[1]["start"])
             self.assertEqual("2026-08-10", calls[1]["end"])
             self.assertEqual(2, report["ticker_count"])
             rows = {row["ticker"]: row for row in report["rows"]}
@@ -1256,6 +1323,7 @@ class HistoricalValidation20yTest(unittest.TestCase):
         config = replace(
             make_pending_order_config(1_000_000.0, risk_per_trade_pct=0.01),
             max_position_pct=0.01,
+            max_position_hard_pct=0.01,
         )
 
         with patch.object(
@@ -1630,12 +1698,12 @@ class HistoricalValidation20yTest(unittest.TestCase):
             root = Path(directory)
             cache_dir = root / "data" / "market_cache"
             cache_dir.mkdir(parents=True, exist_ok=True)
+            warmup_start = (
+                pd.Timestamp("2006-08-01")
+                - pd.offsets.BDay(hv.DEFAULT_MINIMUM_HISTORY_SESSIONS + 20)
+            )
             cached = make_history_frame(
-                [
-                    "2006-08-01",
-                    "2006-08-02",
-                    "2006-08-03",
-                ]
+                pd.bdate_range(warmup_start, "2006-08-03").strftime("%Y-%m-%d").tolist()
             )
             cached.index.name = "Date"
             cached.to_csv(cache_dir / "7203_T.csv", encoding="utf-8")
@@ -1946,6 +2014,573 @@ class HistoricalValidation20yTest(unittest.TestCase):
         self.assertGreaterEqual(days, hv.DEFAULT_MINIMUM_HISTORY_SESSIONS)
         self.assertEqual(requested_start, report.get("requested_start"))
         self.assertEqual(pd.Timestamp(requested_start).date(), captured.get("simulate_requested_start"))
+
+    def test_evaluate_d1_entry_matches_historical_d1_math_and_contracts(self) -> None:
+        self.assertEqual(
+            (
+                "cash_yen",
+                "market_value_yen",
+                "equity_yen",
+                "current_exposure_yen",
+                "current_portfolio_risk_yen",
+            ),
+            tuple(hv.StrategyAccountView.__dataclass_fields__),
+        )
+        self.assertEqual(
+            (
+                "ticker",
+                "company_name",
+                "signal_date",
+                "execution_date",
+                "signal_score",
+                "planned_quantity",
+                "final_quantity",
+                "sizing_price",
+                "planned_risk_per_share",
+                "stop_price_at_sizing",
+                "target_price_at_sizing",
+                "rejection_reason",
+            ),
+            tuple(hv.D1EntryDecision.__dataclass_fields__),
+        )
+        self.assertEqual(
+            (
+                "client_order_id",
+                "broker_order_id",
+                "ticker",
+                "side",
+                "filled_quantity",
+                "fill_price",
+                "commission_yen",
+                "observed_at",
+                "final",
+            ),
+            tuple(hv.ConfirmedExecutionFill.__dataclass_fields__),
+        )
+
+        universe = pd.DataFrame([{"ticker": "7203.T", "company_name": "Toyota"}])
+        config = make_pending_order_config(100_000.0, risk_per_trade_pct=0.01)
+        state = hv.create_strategy_runtime_state(universe, config)
+        pending = hv.PendingOrder(
+            ticker="7203.T",
+            company_name="Toyota",
+            signal_date="2026-08-10",
+            entry_date="2026-08-11",
+            entry_session_index=1,
+            quantity=1_000,
+            stop_price=90.0,
+            target_price=120.0,
+            signal_score=80.0,
+            estimated_cost_yen=100_000.0,
+            estimated_entry_price=100.0,
+        )
+        account = hv.StrategyAccountView(100_000.0, 0.0, 100_000.0, 0.0, 0.0)
+        decision = hv.evaluate_d1_entry(
+            state,
+            pending,
+            current_date=pd.Timestamp("2026-08-11"),
+            sizing_price=110.0,
+            account=account,
+        )
+        self.assertEqual(100, decision.final_quantity)
+        self.assertEqual(10.0, decision.planned_risk_per_share)
+        self.assertEqual(100.0, decision.stop_price_at_sizing)
+        self.assertEqual(130.0, decision.target_price_at_sizing)
+        self.assertEqual("", decision.rejection_reason)
+
+        limited_state = hv.create_strategy_runtime_state(
+            universe,
+            replace(config, max_position_pct=0.01, max_position_hard_pct=0.01),
+        )
+        rejected = hv.evaluate_d1_entry(
+            limited_state,
+            pending,
+            current_date=pd.Timestamp("2026-08-11"),
+            sizing_price=200.0,
+            account=hv.StrategyAccountView(1_000_000.0, 0.0, 1_000_000.0, 0.0, 0.0),
+        )
+        self.assertEqual(0, rejected.final_quantity)
+        self.assertEqual("D1_REJECT_POSITION_LIMIT", rejected.rejection_reason)
+
+    def test_historical_step_routes_d1_sizing_through_evaluate_d1_entry(self) -> None:
+        current_date = pd.Timestamp("2026-08-11")
+        universe = pd.DataFrame([{"ticker": "7203.T", "company_name": "Toyota"}])
+        config = make_pending_order_config(100_000.0, risk_per_trade_pct=0.01)
+        state = hv.create_strategy_runtime_state(universe, config)
+        state.pending_orders[current_date] = [
+            hv.PendingOrder(
+                ticker="7203.T",
+                company_name="Toyota",
+                signal_date="2026-08-10",
+                entry_date="2026-08-11",
+                entry_session_index=1,
+                quantity=100,
+                stop_price=90.0,
+                target_price=120.0,
+                signal_score=80.0,
+                estimated_cost_yen=10_000.0,
+                estimated_entry_price=100.0,
+            )
+        ]
+        state.reserved_cash = 10_000.0
+        history = pd.DataFrame(
+            [{"Open": 110.0, "High": 111.0, "Low": 109.0, "Close": 110.0, "Volume": 1_000.0, "ATR": 1.0}],
+            index=pd.DatetimeIndex([current_date]),
+        )
+        with patch.object(hv, "evaluate_d1_entry", wraps=hv.evaluate_d1_entry) as evaluate, patch.object(
+            hv, "is_entry_signal", return_value=False
+        ):
+            hv.step_strategy_runtime(state, {"7203.T": history}, current_date)
+
+        evaluate.assert_called_once()
+        position = state.positions["7203.T"]
+        self.assertEqual("2026-08-10", position.signal_date)
+        self.assertEqual("2026-08-11", position.entry_date)
+        self.assertEqual(110.0, position.entry_price)
+        self.assertEqual(100, position.quantity)
+        self.assertEqual(100.0, position.actual_stop_price)
+        self.assertEqual(130.0, position.actual_target_price)
+
+    def test_paper_runtime_uses_same_d1_decision_and_broker_confirmed_full_fill(self) -> None:
+        from phoenix_core.broker import PaperBroker
+        from phoenix_core.strategy_execution_runtime import (
+            PaperStrategyExecutionAdapter,
+            execute_paper_session_open_entries,
+        )
+
+        current_date = pd.Timestamp("2026-08-11")
+        config = make_pending_order_config(100_000.0, risk_per_trade_pct=0.01)
+        state = hv.create_strategy_runtime_state(
+            pd.DataFrame([{"ticker": "7203.T", "company_name": "Toyota"}]),
+            config,
+        )
+        state.pending_orders[current_date] = [
+            hv.PendingOrder("7203.T", "Toyota", "2026-08-10", "2026-08-11", 1, 100, 90.0, 120.0, 80.0, 10_000.0, 100.0)
+        ]
+        state.reserved_cash = 10_000.0
+        with tempfile.TemporaryDirectory() as directory:
+            broker = PaperBroker(initial_cash_yen=100_000.0, state_file=Path(directory) / "paper.json")
+            adapter = PaperStrategyExecutionAdapter(broker, lambda ticker, day: 110.0)
+            decisions = execute_paper_session_open_entries(state, current_date, adapter)
+
+        self.assertEqual(1, len(decisions))
+        self.assertEqual(100, decisions[0].final_quantity)
+        position = state.positions["7203.T"]
+        self.assertEqual(100, position.quantity)
+        self.assertEqual(110.0, position.entry_price)
+        self.assertEqual(100.0, position.actual_stop_price)
+        self.assertEqual(130.0, position.actual_target_price)
+        self.assertEqual(89_000.0, state.cash)
+        self.assertEqual(1, state.diagnostics_counts[(2026, "D1_FILLED")])
+
+    def test_paper_runtime_restart_repeated_intent_has_zero_second_economic_fill(self) -> None:
+        from phoenix_core.broker import PaperBroker
+        from phoenix_core.strategy_execution_runtime import (
+            PaperStrategyExecutionAdapter,
+            deterministic_entry_client_order_id,
+            execute_paper_session_open_entries,
+        )
+
+        current_date = pd.Timestamp("2026-08-11")
+        pending = hv.PendingOrder("7203.T", "Toyota", "2026-08-10", "2026-08-11", 1, 100, 90.0, 120.0, 80.0, 10_000.0, 100.0)
+        config = make_pending_order_config(100_000.0, risk_per_trade_pct=0.01)
+        universe = pd.DataFrame([{"ticker": "7203.T", "company_name": "Toyota"}])
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = Path(directory) / "paper.json"
+            first_state = hv.create_strategy_runtime_state(universe, config)
+            first_state.pending_orders[current_date] = [pending]
+            first_state.reserved_cash = 10_000.0
+            first_broker = PaperBroker(initial_cash_yen=100_000.0, state_file=state_file)
+            execute_paper_session_open_entries(first_state, current_date, PaperStrategyExecutionAdapter(first_broker, lambda ticker, day: 100.0))
+            first_account = first_broker.get_account_snapshot()
+
+            second_state = hv.create_strategy_runtime_state(universe, config)
+            second_state.pending_orders[current_date] = [pending]
+            second_state.reserved_cash = 10_000.0
+            second_broker = PaperBroker(initial_cash_yen=100_000.0, state_file=state_file)
+            execute_paper_session_open_entries(second_state, current_date, PaperStrategyExecutionAdapter(second_broker, lambda ticker, day: 100.0))
+            second_account = second_broker.get_account_snapshot()
+
+        self.assertEqual(
+            deterministic_entry_client_order_id("7203.T", "2026-08-10", current_date),
+            deterministic_entry_client_order_id("7203.T", "2026-08-10", current_date),
+        )
+        self.assertEqual(first_account.cash_yen, second_account.cash_yen)
+        self.assertEqual(first_account.positions, second_account.positions)
+        self.assertNotIn("7203.T", second_state.positions)
+
+    def test_paper_runtime_multi_entry_account_view_does_not_double_count_prior_fill(self) -> None:
+        from phoenix_core.broker import PaperBroker
+        from phoenix_core.strategy_execution_runtime import PaperStrategyExecutionAdapter, execute_paper_session_open_entries
+
+        current_date = pd.Timestamp("2026-08-11")
+        config = replace(make_pending_order_config(100_000.0), max_positions=2)
+        state = hv.create_strategy_runtime_state(
+            pd.DataFrame([
+                {"ticker": "7203.T", "company_name": "Toyota"},
+                {"ticker": "6758.T", "company_name": "Sony"},
+            ]),
+            config,
+        )
+        state.pending_orders[current_date] = [
+            hv.PendingOrder("7203.T", "Toyota", "2026-08-10", "2026-08-11", 1, 100, 90.0, 120.0, 90.0, 10_000.0, 100.0),
+            hv.PendingOrder("6758.T", "Sony", "2026-08-10", "2026-08-11", 1, 100, 90.0, 120.0, 80.0, 10_000.0, 100.0),
+        ]
+        state.reserved_cash = 20_000.0
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "phoenix_core.strategy_execution_runtime.evaluate_d1_entry",
+            wraps=hv.evaluate_d1_entry,
+        ) as evaluate:
+            broker = PaperBroker(initial_cash_yen=100_000.0, state_file=Path(directory) / "paper.json")
+            execute_paper_session_open_entries(state, current_date, PaperStrategyExecutionAdapter(broker, lambda ticker, day: 100.0))
+
+        self.assertEqual(2, evaluate.call_count)
+        first_call, second_call = evaluate.call_args_list
+        self.assertEqual(0.0, first_call.kwargs["same_session_committed_exposure_yen"])
+        self.assertEqual(0.0, second_call.kwargs["same_session_committed_exposure_yen"])
+        self.assertEqual(0.0, second_call.kwargs["same_session_committed_risk_yen"])
+        self.assertEqual(10_000.0, second_call.kwargs["account"].market_value_yen)
+        self.assertEqual(10_000.0, second_call.kwargs["account"].current_exposure_yen)
+        self.assertEqual(2, len(state.positions))
+
+    def test_rakuten_reconcile_only_adapter_blocks_entry_and_economic_mutation(self) -> None:
+        from phoenix_core.rakuten_rss_adapter import MockRakutenRssAdapter
+        from phoenix_core.rakuten_rss_broker import RakutenRssBroker
+        from phoenix_core.strategy_execution_runtime import RakutenReconcileOnlyStrategyExecutionAdapter
+
+        mock = MockRakutenRssAdapter(healthy=True, live_trading_enabled=True)
+        with tempfile.TemporaryDirectory() as directory:
+            broker = RakutenRssBroker(state_file=Path(directory) / "rss.json", adapter=mock, live_enabled=True)
+            adapter = RakutenReconcileOnlyStrategyExecutionAdapter(broker)
+            with self.assertRaises(RuntimeError):
+                adapter.executable_buy_price("7203.T", pd.Timestamp("2026-08-11"))
+            with self.assertRaises(RuntimeError):
+                adapter.submit_entry(None, "blocked")
+            snapshot = adapter.reconcile()
+
+        self.assertFalse(hasattr(adapter, "broker"))
+        self.assertEqual(0, mock.submitted_count)
+        self.assertEqual(0, snapshot.nonterminal_order_count)
+        self.assertEqual((), snapshot.orders)
+
+    def test_rakuten_reconcile_only_factory_wiring_is_mode_locked(self) -> None:
+        from phoenix_core.rakuten_rss_adapter import MockRakutenRssAdapter
+        from phoenix_core.rakuten_rss_broker import RakutenRssBroker
+        from phoenix_core.strategy_execution_runtime import create_rakuten_reconcile_only_execution_adapter
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            broker = RakutenRssBroker(state_file=root / "rss.json", adapter=MockRakutenRssAdapter(), live_enabled=True)
+            for mode in ("", "PAPER_SAFE", "LIVE_ACTIVE", "OTHER"):
+                with patch("phoenix_core.factory.create_broker") as factory_call, self.assertRaises(ValueError):
+                    create_rakuten_reconcile_only_execution_adapter({"operating_mode": mode}, root)
+                factory_call.assert_not_called()
+            with patch("phoenix_core.factory.create_broker") as factory_call, self.assertRaises(ValueError):
+                create_rakuten_reconcile_only_execution_adapter(
+                    {"operating_mode": "LIVE_RECONCILE_ONLY", "broker": {"production_live_fire_armed": True}}, root
+                )
+            factory_call.assert_not_called()
+            with patch("phoenix_core.factory.create_broker", return_value=broker) as factory_call:
+                adapter = create_rakuten_reconcile_only_execution_adapter(
+                    {"operating_mode": "LIVE_RECONCILE_ONLY", "broker": {"production_live_fire_armed": False}}, root
+                )
+            factory_call.assert_called_once()
+            self.assertFalse(hasattr(adapter, "broker"))
+
+    def test_rakuten_reconcile_only_restart_preserves_account_and_order_crosswalk(self) -> None:
+        from phoenix_core.rakuten_rss_adapter import MockRakutenRssAdapter
+        from phoenix_core.rakuten_rss_broker import RakutenRssBroker
+        from phoenix_core.strategy_execution_runtime import RakutenReconcileOnlyStrategyExecutionAdapter
+
+        observed_at = datetime(2026, 9, 12, 9, 0, tzinfo=JST).isoformat()
+        payload = {
+            "state_version": 1,
+            "cash_yen": 90_000.0,
+            "realized_pnl_yen": 0.0,
+            "commission_rate": 0.0,
+            "live_trading_enabled": True,
+            "kill_switch_engaged": False,
+            "kill_switch_reason": "",
+            "positions": {"7203.T": {"quantity": 100, "average_price": 100.0, "market_price": 110.0, "economics_tracked_quantity": 100, "economics_tracked_cost_basis_yen": 10_000.0}},
+            "orders": {"client-1": {"client_order_id": "client-1", "broker_order_id": "RSS-1", "ticker": "7203.T", "side": "BUY", "quantity": 100, "requested_price": 100.0, "status": "ACCEPTED", "message": "accepted", "submitted_at": observed_at, "updated_at": observed_at, "rss_order_id": 7, "rss_order_number": "ORDER-7", "broker_observation_state": "ACCEPTED", "cancel_observation_state": "", "last_authoritative_rss_status": 2, "filled_quantity": 0, "filled_notional_yen": 0.0, "filled_price": 0.0}},
+            "fill_events": [],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = Path(directory) / "rss.json"
+            state_file.write_text(json.dumps(payload), encoding="utf-8")
+            first = RakutenReconcileOnlyStrategyExecutionAdapter(
+                RakutenRssBroker(state_file=state_file, adapter=MockRakutenRssAdapter(), live_enabled=True)
+            ).reconcile()
+            second = RakutenReconcileOnlyStrategyExecutionAdapter(
+                RakutenRssBroker(state_file=state_file, adapter=MockRakutenRssAdapter(), live_enabled=True)
+            ).reconcile()
+
+        self.assertEqual(first.account.cash_yen, second.account.cash_yen)
+        self.assertEqual(first.account.positions, second.account.positions)
+        self.assertEqual(first.account.realized_pnl_yen, second.account.realized_pnl_yen)
+        self.assertEqual(first.orders, second.orders)
+        self.assertEqual(1, first.nonterminal_order_count)
+        self.assertEqual("client-1", first.orders[0].client_order_id)
+        self.assertEqual("RSS-1", first.orders[0].broker_order_id)
+        self.assertEqual(7, first.orders[0].rss_order_id)
+        self.assertEqual("ORDER-7", first.orders[0].rss_order_number)
+
+
+    def test_phase5_strategy_runtime_checkpoint_roundtrip_preserves_execution_state(self) -> None:
+        from phoenix_core.strategy_execution_runtime import strategy_runtime_state_to_payload, strategy_runtime_state_from_payload
+        state = hv.create_strategy_runtime_state(
+            pd.DataFrame([{"ticker": "7203.T", "company_name": "Toyota"}]),
+            hv.HistoricalValidationConfig(),
+        )
+        state.cash = 12345.0
+        state.diagnostics_counts[(2026, "D1_FILLED")] = 2
+        restored = strategy_runtime_state_from_payload(
+            strategy_runtime_state_to_payload(state, last_completed_strategy_session=pd.Timestamp("2026-08-11"))
+        )
+        self.assertEqual(state.cash, restored.cash)
+        self.assertEqual(state.diagnostics_counts, restored.diagnostics_counts)
+        self.assertEqual(pd.Timestamp("2026-08-11"), restored.last_completed_strategy_session)
+
+    def test_phase5_persist_before_send_unknown_restart_never_blind_resends(self) -> None:
+        from phoenix_core.rakuten_rss_adapter import MockRakutenRssAdapter
+        from phoenix_core.rakuten_rss_broker import RakutenRssBroker
+        from phoenix_core.models import OrderRequest, OrderSide, OrderType
+        with tempfile.TemporaryDirectory() as directory:
+            adapter = MockRakutenRssAdapter(healthy=True, live_trading_enabled=True)
+            broker = RakutenRssBroker(state_file=Path(directory) / "state.json", adapter=adapter, live_enabled=True)
+            order = OrderRequest("7203.T", OrderSide.BUY, 100, OrderType.LIMIT, 100.0, "p5-unknown")
+            broker.submit_order(order)
+            restarted = RakutenRssBroker(state_file=Path(directory) / "state.json", adapter=adapter, live_enabled=True)
+            restarted.submit_order(order)
+            self.assertEqual(1, adapter.submitted_count)
+
+    def test_phase5_same_client_order_id_same_payload_restart_is_idempotent(self) -> None:
+        from phoenix_core.rakuten_rss_broker import _canonical_immutable_order_payload, _immutable_order_payload_sha256
+        from phoenix_core.models import OrderRequest, OrderSide, OrderType
+        order = OrderRequest("7203.T", OrderSide.BUY, 100, OrderType.LIMIT, 100.0, "same")
+        payload = _canonical_immutable_order_payload(order)
+        self.assertEqual(_immutable_order_payload_sha256(payload), _immutable_order_payload_sha256(payload))
+
+    def test_phase5_same_client_order_id_different_payload_is_hard_conflict(self) -> None:
+        from phoenix_core.rakuten_rss_broker import _canonical_immutable_order_payload
+        from phoenix_core.models import OrderRequest, OrderSide, OrderType
+        first = OrderRequest("7203.T", OrderSide.BUY, 100, OrderType.LIMIT, 100.0, "same")
+        second = OrderRequest("7203.T", OrderSide.BUY, 200, OrderType.LIMIT, 100.0, "same")
+        self.assertNotEqual(_canonical_immutable_order_payload(first), _canonical_immutable_order_payload(second))
+
+    def test_phase5_partial_fill_updates_strategy_and_protection_from_confirmed_cumulative_fill(self) -> None:
+        from phoenix_core.protective_orders import ProtectiveOrderLedger, RECONCILING
+        ledger = ProtectiveOrderLedger()
+        ledger.sync_confirmed_buy_fill("7203.T", 40, 100.0, 120.0, 90.0, buy_order_id="RSS-1")
+        ledger.register_protective_order_accepted("7203.T", "PROTECT-1")
+        record = ledger.sync_confirmed_buy_fill("7203.T", 100, 101.0, 121.0, 91.0, buy_order_id="RSS-1")
+        self.assertEqual((100, RECONCILING), (record.quantity, record.protective_order_state))
+
+    def test_phase5_partial_fill_then_cancel_keeps_confirmed_position(self) -> None:
+        from phoenix_core.protective_orders import ProtectiveOrderLedger
+        ledger = ProtectiveOrderLedger()
+        record = ledger.sync_confirmed_buy_fill("7203.T", 40, 100.0, 120.0, 90.0, buy_order_id="RSS-1")
+        self.assertEqual(40, record.quantity)
+
+    def test_phase5_restart_replay_does_not_double_apply_fill_or_protection(self) -> None:
+        from phoenix_core.protective_orders import ProtectiveOrderLedger
+        ledger = ProtectiveOrderLedger()
+        first = ledger.sync_confirmed_buy_fill("7203.T", 40, 100.0, 120.0, 90.0, buy_order_id="RSS-1")
+        replay = ledger.sync_confirmed_buy_fill("7203.T", 40, 100.0, 120.0, 90.0, buy_order_id="RSS-1")
+        self.assertEqual(first, replay)
+
+    def test_phase5_unprotected_position_blocks_new_buy_while_reconcile_continues(self) -> None:
+        from phoenix_core.protective_orders import ProtectiveOrderLedger
+        ledger = ProtectiveOrderLedger(reconcile_required=True)
+        self.assertFalse(ledger.can_submit_new_buy())
+
+    def test_phase6_production_fill_semantics_are_safe_and_restart_idempotent(self) -> None:
+        from phoenix_core.models import OrderRequest, OrderSide, OrderStatus, OrderType
+        from phoenix_core.production_rakuten_rss_adapter import (
+            ProductionRakutenRssAdapter,
+            RakutenRssTransportHealth,
+            TRANSPORT_SOURCE_COM_LIVE,
+        )
+        from phoenix_core.rakuten_rss_adapter import RakutenRssOrderUpdate, RakutenRssSubmitAck
+        from phoenix_core.rakuten_rss_broker import RakutenRssBroker
+        from phoenix_core.production_rakuten_rss_transport import ExcelComError, ProductionRakutenRssTransport
+
+        class ProductionObservationTransport:
+            def __init__(self) -> None:
+                self.update = RakutenRssOrderUpdate(
+                    status=OrderStatus.PARTIALLY_FILLED,
+                    fill_accounting_mode="CUMULATIVE_ORDER_EXECUTIONS",
+                    source_order_number="ORDER-7",
+                    source_reception_number="RECEPTION-7",
+                    cumulative_filled_quantity=40,
+                    cumulative_average_fill_price=1000.0,
+                    rss_order_id=7,
+                    rss_order_number="ORDER-7",
+                )
+
+            def health_check(self):
+                return RakutenRssTransportHealth(True, "ready", TRANSPORT_SOURCE_COM_LIVE)
+
+            def submit_order(self, order, broker_order_id):
+                return RakutenRssSubmitAck(OrderStatus.ACCEPTED, "accepted", rss_order_id=7, rss_order_number="ORDER-7")
+
+            def poll_order(self, broker_order_id):
+                return (self.update,)
+
+            def cancel_order(self, broker_order_id):
+                raise AssertionError("cancel is not part of this proof")
+
+            def executable_buy_price(self, ticker):
+                return 1000.0
+
+        transport = ProductionObservationTransport()
+        adapter = ProductionRakutenRssAdapter(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            transport=transport,
+        )
+        production_transport = ProductionRakutenRssTransport()
+        with self.assertRaisesRegex(ExcelComError, "PRODUCTION_FILL_SOURCE_AMBIGUOUS"):
+            production_transport._select_unique_authoritative_order(
+                (
+                    {"注文番号": "ORDER-7", "受付番号": "RECEPTION-7"},
+                    {"注文番号": "ORDER-7", "受付番号": "RECEPTION-8"},
+                ),
+                order_number="ORDER-7",
+            )
+        order = OrderRequest("7203.T", OrderSide.BUY, 100, OrderType.LIMIT, 1010.0, "phase6-fill")
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = Path(directory) / "rss.json"
+            broker = RakutenRssBroker(state_file=state_file, adapter=adapter, live_enabled=True)
+            broker.submit_order(order)
+            broker.refresh_pending_orders()
+            partial = broker.get_account_snapshot()
+            self.assertEqual(40, partial.positions[0].quantity)
+            restarted = RakutenRssBroker(state_file=state_file, adapter=adapter, live_enabled=True)
+            restarted.refresh_pending_orders()
+            self.assertEqual(40, restarted.get_account_snapshot().positions[0].quantity)
+            transport.update = RakutenRssOrderUpdate(
+                status=OrderStatus.FILLED,
+                fill_accounting_mode="CUMULATIVE_ORDER_EXECUTIONS",
+                source_order_number="ORDER-7",
+                source_reception_number="RECEPTION-7",
+                cumulative_filled_quantity=100,
+                cumulative_average_fill_price=1006.0,
+            )
+            restarted.refresh_pending_orders()
+            final = restarted.get_account_snapshot()
+            self.assertEqual(100, final.positions[0].quantity)
+            self.assertEqual(1006.0, final.positions[0].average_price)
+            with self.assertRaisesRegex(RuntimeError, "PRODUCTION_FILL_QUANTITY_MISMATCH"):
+                restarted._apply_update(
+                    restarted._orders["phase6-fill"],
+                    RakutenRssOrderUpdate(
+                        status=OrderStatus.PARTIALLY_FILLED,
+                        fill_accounting_mode="CUMULATIVE_ORDER_EXECUTIONS",
+                        source_order_number="ORDER-7",
+                        source_reception_number="RECEPTION-7",
+                        cumulative_filled_quantity=99,
+                        cumulative_average_fill_price=1006.0,
+                    ),
+                )
+            with self.assertRaisesRegex(RuntimeError, "FILL_EVENT_ID_NOT_PROVEN"):
+                restarted._apply_update(
+                    restarted._orders["phase6-fill"],
+                    RakutenRssOrderUpdate(status=OrderStatus.PARTIALLY_FILLED, fill_quantity=1, fill_price=1010.0),
+                )
+
+    def test_phase6_live_buy_quote_is_authoritative_and_caps_limit(self) -> None:
+        from phoenix_core.historical_validation_20y import D1EntryDecision
+        from phoenix_core.production_rakuten_rss_adapter import ProductionRakutenRssAdapter
+        from phoenix_core.production_rakuten_rss_transport import MockExcelComBackend, ProductionRakutenRssTransport
+        from phoenix_core.rakuten_rss_adapter import MockRakutenRssAdapter
+        from phoenix_core.rakuten_rss_broker import RakutenRssBroker
+        from phoenix_core.strategy_execution_runtime import (
+            RakutenLiveStrategyExecutionAdapter,
+            deterministic_entry_client_order_id,
+        )
+
+        backend = MockExcelComBackend(executable_prices={"7203.T": 101.25})
+        transport = ProductionRakutenRssTransport(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            armed=False,
+            backend=backend,
+        )
+        adapter = ProductionRakutenRssAdapter(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            transport=transport,
+        )
+        broker = RakutenRssBroker(adapter=adapter, live_enabled=True)
+        self.assertEqual(101.25, broker.executable_buy_price("7203.T"))
+        self.assertIsNone(broker.executable_buy_price("6758.T"))
+        self.assertEqual(0, transport.order_function_call_count)
+        decision = D1EntryDecision(
+            ticker="7203.T", company_name="Toyota", signal_date="2026-09-11",
+            execution_date="2026-09-12", signal_score=80.0, planned_quantity=100,
+            final_quantity=100, sizing_price=101.25, planned_risk_per_share=5.0,
+            stop_price_at_sizing=96.25, target_price_at_sizing=111.25,
+            rejection_reason="",
+        )
+        mock = MockRakutenRssAdapter(executable_prices={"7203.T": 101.25})
+        with tempfile.TemporaryDirectory() as directory:
+            live = RakutenLiveStrategyExecutionAdapter(
+                RakutenRssBroker(
+                    state_file=Path(directory) / "rss.json", adapter=mock, live_enabled=True
+                )
+            )
+            client_order_id = deterministic_entry_client_order_id(
+                decision.ticker, decision.signal_date, decision.execution_date
+            )
+            live.submit_entry(decision, client_order_id)
+            limit_price = mock.submitted_requests[0]["limit_price"]
+            sizing_price = decision.sizing_price
+            self.assertEqual(sizing_price, limit_price)
+
+    def test_phase6_live_adapter_preserves_identity_and_single_mutation_owner(self) -> None:
+        from phoenix_core.historical_validation_20y import D1EntryDecision
+        from phoenix_core.rakuten_rss_adapter import MockRakutenRssAdapter
+        from phoenix_core.rakuten_rss_broker import RakutenRssBroker
+        from phoenix_core.strategy_execution_runtime import (
+            RakutenLiveStrategyExecutionAdapter,
+            deterministic_entry_client_order_id,
+        )
+
+        decision = D1EntryDecision(
+            ticker="7203.T",
+            company_name="Toyota",
+            signal_date="2026-09-11",
+            execution_date="2026-09-12",
+            signal_score=80.0,
+            planned_quantity=100,
+            final_quantity=100,
+            sizing_price=101.25,
+            planned_risk_per_share=5.0,
+            stop_price_at_sizing=96.25,
+            target_price_at_sizing=111.25,
+            rejection_reason="",
+        )
+        client_order_id = deterministic_entry_client_order_id(
+            decision.ticker, decision.signal_date, decision.execution_date
+        )
+        mock = MockRakutenRssAdapter(executable_prices={"7203.T": 101.25})
+        with tempfile.TemporaryDirectory() as directory:
+            broker = RakutenRssBroker(
+                state_file=Path(directory) / "rss.json", adapter=mock, live_enabled=True
+            )
+            live = RakutenLiveStrategyExecutionAdapter(broker)
+            self.assertEqual(101.25, live.executable_buy_price("7203.T", pd.Timestamp("2026-09-12")))
+            result = live.submit_entry(decision, client_order_id)
+            self.assertEqual(100, result.quantity)
+            self.assertEqual(client_order_id, result.client_order_id)
+            self.assertEqual(101.25, mock.submitted_requests[0]["limit_price"])
+            self.assertEqual(1, mock.submitted_count)
+            live.refresh()
+            snapshot = live.reconcile()
+            self.assertEqual("RAKUTEN_RSS", live.account_snapshot().broker_name)
+            self.assertEqual(1, snapshot.nonterminal_order_count)
+            self.assertFalse(hasattr(live, "broker"))
 
 
 if __name__ == "__main__":

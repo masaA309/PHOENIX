@@ -1,0 +1,528 @@
+{
+  "candidate_id": "gov-git-activate-v2-20260902-061500z",
+  "candidate_sha256": "594541c250d3cff43c2e7d875b3825f5e1e743d830db8b7ab00395502fa45404",
+  "candidate_type": "GOVERNANCE",
+  "created_at_utc": "2026-09-02T06:15:00Z",
+  "expires_at_utc": "2026-09-09T06:15:00Z",
+  "agents_sha256": "291c10259b1601bf8201bc938c876a9afdcc0560f2567114b3bbe08e0ec9f58c",
+  "validator_version": "1.0.0",
+  "objective": "Commit and push exactly the ten approved permanent governance artifacts to origin/main without including backup, handoff, packet, runtime evidence, or any unrelated change.",
+  "workspace": "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX",
+  "task": "Run governance preflight, verify an initially empty Git index and exact artifact identities, stage exactly ten approved files, create one exact commit, push origin main, and verify local and remote commit identity.",
+  "allowed": [
+    "write the hash-fixed candidate under state/governance/incoming",
+    "write the preflight report under state/governance/reports",
+    "write bounded command evidence under state/governance/evidence/gov-git-activate-v2-20260902-061500z",
+    "run the preflight gate directly",
+    "run only manifest Git commands through governance_command_runner",
+    "stage exactly the ten approved governance artifacts",
+    "create one commit with the fixed message",
+    "push that commit to origin main"
+  ],
+  "forbidden": [
+    "modify any tracked or untracked file content",
+    "stage backup, handoff, packet, runtime evidence, or unrelated paths",
+    "run tests",
+    "amend, reset, checkout, clean, rebase, merge, force-push, or retry",
+    "read normal PHOENIX runtime, Excel, VBA, broker, RSS, order, or Disaster Recovery files"
+  ],
+  "safety": {
+    "required_states": [
+      {
+        "name": "PAPER",
+        "value": "MAINTAINED"
+      },
+      {
+        "name": "orders_submitted",
+        "value": 0
+      },
+      {
+        "name": "BRIDGE_ARMED",
+        "value": false
+      },
+      {
+        "name": "live_trading_change",
+        "value": false
+      },
+      {
+        "name": "broker_rss_send",
+        "value": false
+      }
+    ],
+    "runner_contract": {
+      "program": "./.venv/Scripts/python.exe",
+      "script": "tools/governance_command_runner.py",
+      "cwd": "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX",
+      "command_encoding": "Each commands[i].argv is encoded once as a compact JSON string array with ensure_ascii=false and separators comma/colon, and passed as the single value of --command.",
+      "stdout_template": "state/governance/evidence/gov-git-activate-v2-20260902-061500z/{label}.stdout.txt",
+      "stderr_template": "state/governance/evidence/gov-git-activate-v2-20260902-061500z/{label}.stderr.txt",
+      "max_stdout_bytes": 16384,
+      "max_stderr_bytes": 16384,
+      "exact_cli_order": [
+        "./.venv/Scripts/python.exe",
+        "tools/governance_command_runner.py",
+        "--command",
+        "<compact JSON string array from argv>",
+        "--cwd",
+        "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX",
+        "--stdout",
+        "<stdout_template with label>",
+        "--stderr",
+        "<stderr_template with label>",
+        "--max-stdout-bytes",
+        "16384",
+        "--max-stderr-bytes",
+        "16384"
+      ],
+      "execution_rule": "Execute each non-preflight command exactly once in listed order. Evaluate its fixed predicate immediately. Stop before the next command on any nonzero exit, output truncation, missing evidence file, or predicate failure. Never rerun a completed command."
+    },
+    "evaluation_contract": [
+      {
+        "command_index": 2,
+        "label": "01-branch",
+        "pass_predicate": "runner exit code is 0 and stdout after trimming CR/LF is exactly main"
+      },
+      {
+        "command_index": 3,
+        "label": "02-initial-index",
+        "pass_predicate": "runner exit code is 0 and stdout is empty after trimming whitespace"
+      },
+      {
+        "command_index": 4,
+        "label": "03-target-diff-check",
+        "pass_predicate": "runner exit code is 0 and stdout is empty after trimming whitespace"
+      },
+      {
+        "command_index": 5,
+        "label": "04-stage",
+        "pass_predicate": "runner exit code is 0"
+      },
+      {
+        "command_index": 6,
+        "label": "05-staged-files",
+        "pass_predicate": "runner exit code is 0 and the nonempty stdout line set equals exactly the ten paths in artifact_lock, with no duplicate or additional line"
+      },
+      {
+        "command_index": 7,
+        "label": "06-cached-diff-check",
+        "pass_predicate": "runner exit code is 0 and stdout is empty after trimming whitespace"
+      },
+      {
+        "command_index": 8,
+        "label": "07-commit",
+        "pass_predicate": "runner exit code is 0"
+      },
+      {
+        "command_index": 9,
+        "label": "08-push",
+        "pass_predicate": "runner exit code is 0"
+      },
+      {
+        "command_index": 10,
+        "label": "09-local-head",
+        "pass_predicate": "runner exit code is 0 and trimmed stdout matches exactly one 40-character lowercase hexadecimal commit SHA"
+      },
+      {
+        "command_index": 11,
+        "label": "10-remote-main",
+        "pass_predicate": "runner exit code is 0; stdout has exactly one tab-delimited line; field 1 equals the 09-local-head SHA and field 2 is exactly refs/heads/main"
+      },
+      {
+        "command_index": 12,
+        "label": "11-final-status",
+        "pass_predicate": "runner exit code is 0 and stdout is empty after trimming whitespace"
+      }
+    ]
+  },
+  "output": {
+    "complete": true,
+    "truncate": false,
+    "fields": [
+      "AGENTS_READ",
+      "CHATGPT_SEND_POLICY_GATE",
+      "CODEX_EXECUTION_PREFLIGHT_GATE",
+      "CANDIDATE_SHA256",
+      "GIT_RESULT",
+      "COMMIT_SHA",
+      "REMOTE_SHA",
+      "STAGED_FILES",
+      "PUSH_RESULT",
+      "GIT_STATUS_EXACT_TARGETS",
+      "PAPER",
+      "orders_submitted",
+      "BRIDGE_ARMED",
+      "COMMAND_COUNT",
+      "COMMAND_LOG",
+      "FILES_READ",
+      "FILES_WRITTEN",
+      "TESTS_RUN",
+      "UNREQUESTED_ACTIONS",
+      "SCOPE_VIOLATION",
+      "AGENTS_COMPLIANCE"
+    ]
+  },
+  "execution_manifest": {
+    "commands": [
+      {
+        "preflight": true,
+        "argv": [
+          "./.venv/Scripts/python.exe",
+          "tools/codex_execution_preflight_gate.py",
+          "--candidate",
+          "state/governance/incoming/gov-git-activate-v2-20260902-061500z.json",
+          "--agents",
+          "AGENTS.md",
+          "--ledger",
+          "knowledge/failure_class_ledger.json",
+          "--synonyms",
+          "config/governance/root_cause_synonyms.json",
+          "--report",
+          "state/governance/reports/gov-git-activate-v2-20260902-061500z.report.json"
+        ]
+      },
+      {
+        "via_runner": true,
+        "argv": [
+          "git",
+          "branch",
+          "--show-current"
+        ]
+      },
+      {
+        "via_runner": true,
+        "argv": [
+          "git",
+          "diff",
+          "--cached",
+          "--name-only"
+        ]
+      },
+      {
+        "via_runner": true,
+        "argv": [
+          "git",
+          "diff",
+          "--check",
+          "--",
+          "AGENTS.md",
+          "tools/codex_execution_preflight_gate.py",
+          "tools/governance_command_runner.py",
+          "config/governance/codex_candidate.schema.json",
+          "config/governance/evidence_graph.schema.json",
+          "config/governance/failure_class.schema.json",
+          "config/governance/gate_report.schema.json",
+          "config/governance/root_cause_synonyms.json",
+          "knowledge/failure_class_ledger.json",
+          "tests/test_codex_execution_preflight_gate.py"
+        ]
+      },
+      {
+        "via_runner": true,
+        "argv": [
+          "git",
+          "add",
+          "--",
+          "AGENTS.md",
+          "tools/codex_execution_preflight_gate.py",
+          "tools/governance_command_runner.py",
+          "config/governance/codex_candidate.schema.json",
+          "config/governance/evidence_graph.schema.json",
+          "config/governance/failure_class.schema.json",
+          "config/governance/gate_report.schema.json",
+          "config/governance/root_cause_synonyms.json",
+          "knowledge/failure_class_ledger.json",
+          "tests/test_codex_execution_preflight_gate.py"
+        ]
+      },
+      {
+        "via_runner": true,
+        "argv": [
+          "git",
+          "diff",
+          "--cached",
+          "--name-only"
+        ]
+      },
+      {
+        "via_runner": true,
+        "argv": [
+          "git",
+          "diff",
+          "--cached",
+          "--check"
+        ]
+      },
+      {
+        "via_runner": true,
+        "argv": [
+          "git",
+          "commit",
+          "-m",
+          "governance: add permanent execution gates"
+        ]
+      },
+      {
+        "via_runner": true,
+        "argv": [
+          "git",
+          "push",
+          "origin",
+          "main"
+        ]
+      },
+      {
+        "via_runner": true,
+        "argv": [
+          "git",
+          "rev-parse",
+          "HEAD"
+        ]
+      },
+      {
+        "via_runner": true,
+        "argv": [
+          "git",
+          "ls-remote",
+          "origin",
+          "refs/heads/main"
+        ]
+      },
+      {
+        "via_runner": true,
+        "argv": [
+          "git",
+          "status",
+          "--short",
+          "--",
+          "AGENTS.md",
+          "tools/codex_execution_preflight_gate.py",
+          "tools/governance_command_runner.py",
+          "config/governance/codex_candidate.schema.json",
+          "config/governance/evidence_graph.schema.json",
+          "config/governance/failure_class.schema.json",
+          "config/governance/gate_report.schema.json",
+          "config/governance/root_cause_synonyms.json",
+          "knowledge/failure_class_ledger.json",
+          "tests/test_codex_execution_preflight_gate.py"
+        ]
+      }
+    ]
+  },
+  "proof_targets": [
+    {
+      "proof_id": "PT-GIT-01",
+      "claim": "Exactly the ten approved governance artifacts are committed and the identical commit is present at origin/main."
+    }
+  ],
+  "evidence_graph": [
+    {
+      "proof_id": "PT-GIT-01",
+      "claim": "Exactly the ten approved governance artifacts are committed and the identical commit is present at origin/main.",
+      "owner": "USER",
+      "writer": "git via governance_command_runner",
+      "reader": "ChatGPT",
+      "update_trigger": "single approved governance Git finalization run",
+      "persistence_source": "state/governance/reports/gov-git-activate-v2-20260902-061500z-*.txt",
+      "runtime_identity": "candidate gov-git-activate-v2-20260902-061500z plus resulting commit SHA",
+      "time_window": "this one Git finalization run",
+      "evidence_kind": "ATOMIC_BUNDLE",
+      "exact_evidence_source": "bounded runner outputs for branch, initial index, staged names, commit, push, local HEAD, and remote main",
+      "bundle_members": [
+        "gov-git-activate-v2-20260902-061500z-branch.stdout.txt",
+        "gov-git-activate-v2-20260902-061500z-initial-index.stdout.txt",
+        "gov-git-activate-v2-20260902-061500z-staged-files.stdout.txt",
+        "gov-git-activate-v2-20260902-061500z-commit.stdout.txt",
+        "gov-git-activate-v2-20260902-061500z-push.stdout.txt",
+        "gov-git-activate-v2-20260902-061500z-local-head.stdout.txt",
+        "gov-git-activate-v2-20260902-061500z-remote-main.stdout.txt",
+        "gov-git-activate-v2-20260902-061500z-final-status.stdout.txt"
+      ],
+      "exact_command": "the fixed argv arrays in execution_manifest.commands, each executed once through governance_command_runner except preflight",
+      "expected_shape": "main branch; initially empty index; exact ten staged paths; commit exit 0; push exit 0; 40-hex local SHA equals remote refs/heads/main SHA; exact target status empty",
+      "pass_predicate": "all atomic bundle members satisfy expected_shape",
+      "fail_predicate": "any atomic bundle member is missing, nonzero, mismatched, or contains an unapproved staged path",
+      "not_proven_predicate": "bounded evidence is incomplete or local-to-remote SHA equality cannot be established",
+      "side_effects": "Git index update, one local commit, and one push to origin/main",
+      "failure_path": "stop immediately without retry; before commit leave no commit, after staging leave exact staged state, after local commit leave commit unpushed if push fails"
+    }
+  ],
+  "failure_classes": [
+    {
+      "proposed_root_cause_text": "self-reported pass without independent evidence",
+      "declared_failure_class_ids": [
+        "FC-SELF-REPORTED-PASS"
+      ],
+      "resolved_root_cause_code": "self-reported pass without independent evidence"
+    },
+    {
+      "proposed_root_cause_text": "shell boundary variable expansion",
+      "declared_failure_class_ids": [
+        "FC-SHELL-BOUNDARY-EXPANSION"
+      ],
+      "resolved_root_cause_code": "shell boundary variable expansion"
+    },
+    {
+      "proposed_root_cause_text": "oversized chat output transport",
+      "declared_failure_class_ids": [
+        "FC-OUTPUT-TRANSPORT-OVERSIZED"
+      ],
+      "resolved_root_cause_code": "oversized chat output transport"
+    },
+    {
+      "proposed_root_cause_text": "static instruction contradiction",
+      "declared_failure_class_ids": [
+        "FC-STATIC-CONTRADICTION"
+      ],
+      "resolved_root_cause_code": "static instruction contradiction"
+    },
+    {
+      "proposed_root_cause_text": "wrong artifact execution",
+      "declared_failure_class_ids": [
+        "FC-WRONG-ARTIFACT-EXECUTION"
+      ],
+      "resolved_root_cause_code": "wrong artifact execution"
+    },
+    {
+      "proposed_root_cause_text": "unmitigated failure class recurrence",
+      "declared_failure_class_ids": [
+        "FC-UNMITIGATED-RECURRENCE"
+      ],
+      "resolved_root_cause_code": "unmitigated failure class recurrence"
+    }
+  ],
+  "runtime_preconditions": [
+    {
+      "name": "explicit_user_git_authorization",
+      "proven": true,
+      "evidence": "User explicitly authorized commit and push for exactly ten permanent governance files and excluded all others."
+    },
+    {
+      "name": "bootstrap_acceptance",
+      "proven": true,
+      "evidence": "CONTINUATION_RESULT PASS; 28 tests PASS; ledger CLOSED G-001 through G-006; scope violation NO."
+    },
+    {
+      "name": "artifact_identity",
+      "proven": true,
+      "evidence": "All ten artifact SHA-256 values are fixed in artifact_lock."
+    },
+    {
+      "name": "trading_safety",
+      "proven": true,
+      "evidence": "PAPER maintained, orders_submitted 0, BRIDGE_ARMED False, no runtime action in this Git-only run."
+    }
+  ],
+  "rollback_stop": {
+    "failure_path": "Stop on the first non-PASS preflight, non-main branch, non-empty initial index, identity mismatch, staged-set mismatch, command failure, or local/remote SHA mismatch; do not retry.",
+    "stop_before": "Any Git staging, commit, or push unless preflight PASS and all preceding fixed checks PASS.",
+    "rollback_scope": "No destructive rollback. Before commit, leave only the exact approved staged set if failure occurs after git add. After commit, leave the local commit if push fails. Report exact state and stop."
+  },
+  "result_branches": {
+    "PASS": "exact ten-file commit created, pushed to origin/main, and local SHA equals remote main SHA",
+    "FAIL": "stop at first failure without retry or alternate command",
+    "NOT_PROVEN": "stop without Git mutation when preflight or pre-mutation evidence is incomplete"
+  },
+  "user_machine_operations": [],
+  "shell_transport": {
+    "layers": [
+      "Codex",
+      "governance_command_runner",
+      "git"
+    ],
+    "command": [
+      "./.venv/Scripts/python.exe",
+      "tools/governance_command_runner.py"
+    ],
+    "script_path": "",
+    "script_sha256": ""
+  },
+  "output_budget": {
+    "max_stdout_bytes": 8192,
+    "max_stderr_bytes": 8192,
+    "declared_stdout_bytes": 4096,
+    "declared_stderr_bytes": 4096
+  },
+  "artifact_lock": [
+    {
+      "existing": true,
+      "path": "AGENTS.md",
+      "sha256": "291c10259b1601bf8201bc938c876a9afdcc0560f2567114b3bbe08e0ec9f58c"
+    },
+    {
+      "existing": true,
+      "path": "tools/codex_execution_preflight_gate.py",
+      "sha256": "d3bac0771380e341f9b51e20b157a4129386b48f98a909baac277a9642d8a814"
+    },
+    {
+      "existing": true,
+      "path": "tools/governance_command_runner.py",
+      "sha256": "8419ab5c53cd58f8f9ab6f27a36508c9840862c18217b1b04fc8fc156511d029"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/codex_candidate.schema.json",
+      "sha256": "95e89f34ba4e5a416d59b0944f5ca320c23e44c01df697107aedfff006faf461"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/evidence_graph.schema.json",
+      "sha256": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/failure_class.schema.json",
+      "sha256": "d2423cb1d4b1c1803e2263d8ed10ecc72bb82acb3b9cb6e30eac01720f2086a0"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/gate_report.schema.json",
+      "sha256": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/root_cause_synonyms.json",
+      "sha256": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1"
+    },
+    {
+      "existing": true,
+      "path": "knowledge/failure_class_ledger.json",
+      "sha256": "12a0c025fdb69fdb321e0574c48d1ac0fe5407364bc769207987c8326361a954"
+    },
+    {
+      "existing": true,
+      "path": "tests/test_codex_execution_preflight_gate.py",
+      "sha256": "51702bb419a1eaa5e17eeae5c6f483b27fe3b6302de3dafcd2690baaea723e4f"
+    }
+  ],
+  "review_inputs": [
+    {
+      "review_type": "MECHANICAL_REVIEW",
+      "actor": "codex-bootstrap-tests",
+      "provider": "openai",
+      "context_id": "governance-bootstrap-20260901",
+      "completed": true,
+      "prior_free_text_conclusion": false
+    },
+    {
+      "review_type": "COMPLETENESS_REVIEW",
+      "actor": "chatgpt",
+      "provider": "openai",
+      "context_id": "governance-v1.3-final-review-20260901",
+      "completed": true,
+      "prior_free_text_conclusion": false
+    },
+    {
+      "review_type": "SUBSTITUTE_COMPLETENESS_REVIEW",
+      "actor": "chatgpt",
+      "provider": "openai",
+      "context_id": "governance-v1.2-v1.3-substitute-review-20260901",
+      "completed": true,
+      "prior_free_text_conclusion": false
+    }
+  ],
+  "review_requirements": [
+    "MECHANICAL_REVIEW",
+    "COMPLETENESS_REVIEW",
+    "SUBSTITUTE_COMPLETENESS_REVIEW"
+  ]
+}

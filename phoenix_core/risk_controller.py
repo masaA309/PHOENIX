@@ -16,9 +16,9 @@ class RiskConfig:
     max_daily_loss_pct: float = 0.03
     max_drawdown_pct: float = 0.10
     max_positions: int | None = None
-    max_total_invested_pct: float = 0.95
+    max_total_invested_pct: float = 0.80
     max_single_position_pct: float = 0.30
-    max_orders_per_run: int = 3
+    max_orders_per_run: int | None = None
     max_consecutive_losses: int = 3
     minimum_cash_reserve_pct: float = 0.10
     block_on_broker_health_failure: bool = True
@@ -50,7 +50,7 @@ class RiskConfig:
             raise ValueError("breadth_thresholdは0以上1以下にしてください")
         if self.bear_max_total_invested_pct < 0 or self.bear_max_total_invested_pct > 1:
             raise ValueError("bear_max_total_invested_pctは0以上1以下にしてください")
-        if self.max_orders_per_run <= 0:
+        if self.max_orders_per_run is not None and self.max_orders_per_run <= 0:
             raise ValueError("max_orders_per_runは1以上にしてください")
         if self.max_consecutive_losses < 0:
             raise ValueError("max_consecutive_lossesは0以上にしてください")
@@ -307,6 +307,10 @@ def evaluate_orders(
     projected_cash = snapshot.cash_yen
     projected_market_value = snapshot.market_value_yen
     projected_positions = {p.ticker: p.market_value for p in snapshot.positions}
+    projected_owned_quantities = {
+        p.ticker: int(getattr(p, "economics_tracked_quantity", 0))
+        for p in snapshot.positions
+    }
 
     for order in orders:
         try:
@@ -318,10 +322,23 @@ def evaluate_orders(
         value = round(order.quantity * order.limit_price, 2)
 
         if order.side is OrderSide.SELL:
+            owned_quantity = projected_owned_quantities.get(order.ticker, 0)
+            if owned_quantity < order.quantity:
+                decisions.append(
+                    _reject(
+                        order,
+                        (
+                            f"PHOENIX保有株数不足: 売却 {order.quantity}株 / "
+                            f"PHOENIX保有 {owned_quantity}株"
+                        ),
+                    )
+                )
+                continue
             accepted.append(order)
             projected_cash += value
             projected_market_value = max(projected_market_value - value, 0.0)
             projected_position_value = max(projected_positions.get(order.ticker, 0.0) - value, 0.0)
+            projected_owned_quantities[order.ticker] = owned_quantity - order.quantity
             if projected_position_value > 0:
                 projected_positions[order.ticker] = projected_position_value
             elif order.ticker in projected_positions:
@@ -343,7 +360,7 @@ def evaluate_orders(
             decisions.append(_reject(order, state.halt_reason))
             continue
 
-        if len(accepted) >= config.max_orders_per_run:
+        if config.max_orders_per_run is not None and len(accepted) >= config.max_orders_per_run:
             decisions.append(_reject(order, "1回の最大発注件数を超過"))
             continue
 

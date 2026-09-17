@@ -1,0 +1,2 @@
+218:Python: ./.venv/Scripts/python.exe
+219:.venv削除・再作成禁止。

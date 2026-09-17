@@ -1,0 +1,90 @@
+.F....F.............................................................Heartbeat audit log write failed: OSError: read only
+......................PHOENIX START BLOCKED BY REPOSITORY GUARDIAN: GIT_ROOT_MISMATCH
+.F.PHOENIX START BLOCKED BY POSITION RECONCILIATION: STATE_JSON_MISSING
+.FFFEF...............PHOENIX START BLOCKED BY REPOSITORY GUARDIAN: GIT_ROOT_MISMATCH
+.PHOENIX START BLOCKED BY POSITION RECONCILIATION: STATE_JSON_MISSING
+.......
+======================================================================
+ERROR: test_position_reconciliation_exit_two_does_not_restart (tests.test_phoenix_heartbeat.WatchdogHeartbeatIntegrationTest.test_position_reconciliation_exit_two_does_not_restart)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\tests\test_phoenix_heartbeat.py", line 808, in test_position_reconciliation_exit_two_does_not_restart
+    self.assertEqual("1", counter_file.read_text(encoding="utf-8"))
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ashtc\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\pathlib.py", line 1027, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ashtc\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\pathlib.py", line 1013, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\ashtc\\AppData\\Local\\Temp\\tmpeyueepz5\\position_reconciliation_launch_count.txt'
+
+======================================================================
+FAIL: test_monitor_only_previous_state_is_ready_for_recovery_and_watchdog (tests.test_monitor_only.MonitorOnlyDisasterRecoveryTest.test_monitor_only_previous_state_is_ready_for_recovery_and_watchdog)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\tests\test_monitor_only.py", line 519, in test_monitor_only_previous_state_is_ready_for_recovery_and_watchdog
+    self.assertEqual(STATUS_READY, result.recovery_status)
+AssertionError: 'READY' != 'BLOCKED'
+- READY
++ BLOCKED
+
+
+======================================================================
+FAIL: test_monitor_only_environment_and_script_allowlist_disable_trading (tests.test_monitor_only.MonitorOnlyGateTest.test_monitor_only_environment_and_script_allowlist_disable_trading)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\tests\test_monitor_only.py", line 124, in test_monitor_only_environment_and_script_allowlist_disable_trading
+    self.assertEqual(
+AssertionError: Items in the first set but not the second:
+'vba_bridge.py'
+Items in the second set but not the first:
+'market_regime_ai.py'
+
+======================================================================
+FAIL: test_heartbeat_starts_after_ready_gates_before_existing_processing (tests.test_phoenix_heartbeat.RunPhoenixHeartbeatIntegrationTest.test_heartbeat_starts_after_ready_gates_before_existing_processing)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\tests\test_phoenix_heartbeat.py", line 509, in test_heartbeat_starts_after_ready_gates_before_existing_processing
+    self.assertIsInstance(stopped.exception.__cause__, RuntimeError)
+AssertionError: AttributeError("'types.SimpleNamespace' object has no attribute 'mode'") is not an instance of <class 'RuntimeError'>
+
+======================================================================
+FAIL: test_heartbeat_stopping_while_process_lives_is_lost (tests.test_phoenix_heartbeat.WatchdogHeartbeatIntegrationTest.test_heartbeat_stopping_while_process_lives_is_lost)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\tests\test_phoenix_heartbeat.py", line 754, in test_heartbeat_stopping_while_process_lives_is_lost
+    self.assertEqual(EXIT_RESTART_LIMIT, watchdog.run())
+AssertionError: 1 != 2
+
+======================================================================
+FAIL: test_missing_heartbeat_uses_bounded_restart (tests.test_phoenix_heartbeat.WatchdogHeartbeatIntegrationTest.test_missing_heartbeat_uses_bounded_restart)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\tests\test_phoenix_heartbeat.py", line 730, in test_missing_heartbeat_uses_bounded_restart
+    self.assertEqual(EXIT_RESTART_LIMIT, watchdog.run())
+AssertionError: 1 != 2
+
+======================================================================
+FAIL: test_mode_mismatch_stops_without_restart (tests.test_phoenix_heartbeat.WatchdogHeartbeatIntegrationTest.test_mode_mismatch_stops_without_restart)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\tests\test_phoenix_heartbeat.py", line 787, in test_mode_mismatch_stops_without_restart
+    self.assertIn("HEARTBEAT_SAFETY_STOP", names)
+AssertionError: 'HEARTBEAT_SAFETY_STOP' not found in ['WATCHDOG_STARTING', 'LIVE_MODE_FIXED', 'LOCK_ACQUIRED', 'CONFIGURATION_ERROR', 'LOCK_RELEASED', 'WATCHDOG_STOPPED']
+
+======================================================================
+FAIL: test_valid_heartbeat_is_processed_while_child_runs (tests.test_phoenix_heartbeat.WatchdogHeartbeatIntegrationTest.test_valid_heartbeat_is_processed_while_child_runs)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\tests\test_phoenix_heartbeat.py", line 686, in test_valid_heartbeat_is_processed_while_child_runs
+    events = self.wait_for_watchdog_event("PROCESS_IDLE")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\tests\test_phoenix_heartbeat.py", line 618, in wait_for_watchdog_event
+    self.fail(f"timed out waiting for {event_name}")
+AssertionError: timed out waiting for PROCESS_IDLE
+
+----------------------------------------------------------------------
+Ran 122 tests in 5.894s
+
+FAILED (failures=7, errors=1)

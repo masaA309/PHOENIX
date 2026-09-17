@@ -589,6 +589,39 @@ class PaperBrokerEconomicsStateStep19Test(unittest.TestCase):
             self.assertEqual("REJECTED", result.status.value)
             self.assertEqual(before, path.read_bytes())
 
+    def test_selling_legacy_baseline_position_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "broker.json"
+            legacy = {
+                "state_version": 1,
+                "broker_name": "PAPER",
+                "initial_cash_yen": 300_000.0,
+                "cash_yen": 250_000.0,
+                "commission_rate": 0.0,
+                "realized_pnl_yen": 0.0,
+                "positions": {"1111.T": {"quantity": 100, "average_price": 500.0, "market_price": 500.0}},
+                "processed_client_order_ids": [],
+            }
+            path.write_text(json.dumps(legacy), encoding="utf-8")
+            broker = PaperBroker(state_file=path)
+            broker.initialize_economics_baseline()
+            before = path.read_bytes()
+            result = broker.submit_order(paper_order("SELL-LEGACY", OrderSide.SELL, 100.0))
+            self.assertEqual("REJECTED", result.status.value)
+            self.assertIn("PHOENIX保有株数不足", result.message)
+            self.assertEqual(before, path.read_bytes())
+
+    def test_sell_decrements_phoenix_owned_quantity_and_preserves_legacy_quantity(self) -> None:
+        broker = PaperBroker()
+        broker.submit_order(paper_order("BUY-OWNED", OrderSide.BUY, 400.0))
+        broker._positions["1111.T"].quantity = 150  # type: ignore[attr-defined]
+        result = broker.submit_order(paper_order("SELL-OWNED", OrderSide.SELL, 450.0))
+        self.assertEqual("FILLED", result.status.value)
+        snapshot = broker.get_account_snapshot()
+        self.assertEqual(50, snapshot.positions[0].quantity)
+        self.assertEqual(0, snapshot.positions[0].economics_tracked_quantity)
+        self.assertEqual(0, snapshot.positions[0].phoenix_owned_quantity)
+
     def test_self_hashed_tampered_eligible_pnl_is_rejected_on_reload(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "broker.json"

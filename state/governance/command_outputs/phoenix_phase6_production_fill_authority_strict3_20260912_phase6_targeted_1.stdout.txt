@@ -1,0 +1,168 @@
+TEST_LABEL=PHASE6_TARGETED
+TEST_COMMAND=C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\.venv\Scripts\python.exe -X utf8 -B -m pytest -p no:cacheprovider tests/test_historical_validation_20y.py -q -k phase6_
+RAW_STDOUT_BEGIN
+..F                                                                      [100%]
+================================== FAILURES ===================================
+_ HistoricalValidation20yTest.test_phase6_production_fill_semantics_are_safe_and_restart_idempotent _
+
+self = <tests.test_historical_validation_20y.HistoricalValidation20yTest testMethod=test_phase6_production_fill_semantics_are_safe_and_restart_idempotent>
+
+    def test_phase6_production_fill_semantics_are_safe_and_restart_idempotent(self) -> None:
+        from phoenix_core.models import OrderRequest, OrderSide, OrderStatus, OrderType
+        from phoenix_core.production_rakuten_rss_adapter import (
+            ProductionRakutenRssAdapter,
+            RakutenRssTransportHealth,
+            TRANSPORT_SOURCE_COM_LIVE,
+        )
+        from phoenix_core.rakuten_rss_adapter import RakutenRssOrderUpdate, RakutenRssSubmitAck
+        from phoenix_core.rakuten_rss_broker import RakutenRssBroker
+        from phoenix_core.production_rakuten_rss_transport import ExcelComError, ProductionRakutenRssTransport
+    
+        class ProductionObservationTransport:
+            def __init__(self) -> None:
+                self.update = RakutenRssOrderUpdate(
+                    status=OrderStatus.PARTIALLY_FILLED,
+                    fill_accounting_mode="CUMULATIVE_ORDER_EXECUTIONS",
+                    source_order_number="ORDER-7",
+                    source_reception_number="RECEPTION-7",
+                    cumulative_filled_quantity=40,
+                    cumulative_average_fill_price=1000.0,
+                    rss_order_id=7,
+                    rss_order_number="ORDER-7",
+                )
+    
+            def health_check(self):
+                return RakutenRssTransportHealth(True, "ready", TRANSPORT_SOURCE_COM_LIVE)
+    
+            def submit_order(self, order, broker_order_id):
+                return RakutenRssSubmitAck(OrderStatus.ACCEPTED, "accepted", rss_order_id=7, rss_order_number="ORDER-7")
+    
+            def poll_order(self, broker_order_id):
+                return (self.update,)
+    
+            def cancel_order(self, broker_order_id):
+                raise AssertionError("cancel is not part of this proof")
+    
+            def executable_buy_price(self, ticker):
+                return 1000.0
+    
+        transport = ProductionObservationTransport()
+        adapter = ProductionRakutenRssAdapter(
+            live_trading_enabled=True,
+            production_transport_enabled=True,
+            transport=transport,
+        )
+        production_transport = ProductionRakutenRssTransport()
+        with self.assertRaisesRegex(ExcelComError, "PRODUCTION_FILL_SOURCE_AMBIGUOUS"):
+            production_transport._select_unique_authoritative_order(
+                (
+                    {"注文番号": "ORDER-7", "受付番号": "RECEPTION-7"},
+                    {"注文番号": "ORDER-7", "受付番号": "RECEPTION-8"},
+                ),
+                order_number="ORDER-7",
+            )
+        order = OrderRequest("7203.T", OrderSide.BUY, 100, OrderType.LIMIT, 1010.0, "phase6-fill")
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = Path(directory) / "rss.json"
+            broker = RakutenRssBroker(state_file=state_file, adapter=adapter, live_enabled=True)
+            broker.submit_order(order)
+            broker.refresh_pending_orders()
+            partial = broker.get_account_snapshot()
+            self.assertEqual(40, partial.positions[0].quantity)
+>           restarted = RakutenRssBroker(state_file=state_file, adapter=adapter, live_enabled=True)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_historical_validation_20y.py:2459: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+phoenix_core\rakuten_rss_broker.py:204: in __init__
+    self._load_state()
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <phoenix_core.rakuten_rss_broker.RakutenRssBroker object at 0x000001C138BF7500>
+
+    def _load_state(self) -> None:
+        if self._state_file is None or not self._state_file.exists():
+            return
+        try:
+            payload = json.loads(self._state_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError(
+                f"Rakuten RSS Broker状態ファイルを読み込めません: {self._state_file}"
+            ) from error
+        if not isinstance(payload, dict):
+            raise ValueError("Rakuten RSS Broker状態のルートはJSONオブジェクトにしてください")
+        version = payload.get("state_version")
+        if type(version) is not int or version != self.STATE_VERSION:
+            raise ValueError("未対応のRakuten RSS Broker状態バージョンです")
+    
+        self._cash_yen = round(float(payload.get("cash_yen", self._initial_cash_yen)), 2)
+        self._realized_pnl_yen = round(float(payload.get("realized_pnl_yen", 0.0)), 2)
+        self._commission_rate = float(payload.get("commission_rate", self._commission_rate))
+        self._live_enabled = bool(payload.get("live_trading_enabled", self._live_enabled))
+        self._kill_switch_engaged = bool(payload.get("kill_switch_engaged", False))
+        self._kill_switch_reason = str(payload.get("kill_switch_reason", ""))
+    
+        positions = payload.get("positions", {})
+        if not isinstance(positions, dict):
+            raise ValueError("positionsはJSONオブジェクトにしてください")
+        self._positions = {}
+        for ticker, value in positions.items():
+            if not isinstance(value, dict):
+                raise ValueError("positionはJSONオブジェクトにしてください")
+            normalized_ticker = str(ticker).strip().upper()
+            self._positions[normalized_ticker] = _MutablePosition(
+                quantity=int(value.get("quantity", 0)),
+                average_price=round(float(value.get("average_price", 0.0)), 4),
+                market_price=round(float(value.get("market_price", 0.0)), 2),
+                economics_tracked_quantity=int(value.get("economics_tracked_quantity", 0)),
+                economics_tracked_cost_basis_yen=round(
+                    float(value.get("economics_tracked_cost_basis_yen", 0.0)),
+                    2,
+                ),
+            )
+    
+        orders = payload.get("orders", {})
+        if not isinstance(orders, dict):
+            raise ValueError("ordersはJSONオブジェクトにしてください")
+        self._orders = {}
+        for client_order_id, value in orders.items():
+            if not isinstance(value, dict):
+                raise ValueError("order recordはJSONオブジェクトにしてください")
+            record = dict(value)
+            record.setdefault("client_order_id", client_order_id)
+            record.setdefault("rss_order_id", 0)
+            record.setdefault("rss_order_number", "")
+            record.setdefault("broker_observation_state", str(record.get("status", OrderStatus.PENDING.value)))
+            record.setdefault("cancel_observation_state", "")
+            record.setdefault("last_authoritative_rss_status", -1)
+            record.setdefault("fill_accounting_mode", "")
+            record.setdefault("source_order_number", "")
+            record.setdefault("source_reception_number", "")
+            record.setdefault("cumulative_filled_quantity", 0)
+            record.setdefault("cumulative_average_fill_price", 0.0)
+            applied = record.get("applied_fill_events")
+            if applied is not None:
+                if not isinstance(applied, dict) or any(not isinstance(key, str) or not key for key in applied):
+                    raise ValueError("applied_fill_events is invalid")
+                total_quantity = 0
+                total_notional = 0.0
+                for item in applied.values():
+                    if not isinstance(item, dict) or type(item.get("quantity")) is not int or item["quantity"] <= 0:
+                        raise ValueError("applied fill event quantity is invalid")
+                    price = item.get("price")
+                    if isinstance(price, bool) or not isinstance(price, Real) or not math.isfinite(float(price)) or price <= 0:
+                        raise ValueError("applied fill event price is invalid")
+                    total_quantity += item["quantity"]
+                    total_notional += item["quantity"] * float(price)
+                if total_quantity != int(record.get("filled_quantity", 0)) or total_quantity > int(record.get("quantity", 0)):
+>                   raise ValueError("applied fill event quantity does not match cumulative fill")
+E                   ValueError: applied fill event quantity does not match cumulative fill
+
+phoenix_core\rakuten_rss_broker.py:1384: ValueError
+=========================== short test summary info ===========================
+FAILED tests/test_historical_validation_20y.py::HistoricalValidation20yTest::test_phase6_production_fill_semantics_are_safe_and_restart_idempotent
+1 failed, 2 passed, 67 deselected in 1.00s
+RAW_STDOUT_END
+RAW_STDERR_BEGIN
+RAW_STDERR_END
+RETURN_CODE=1

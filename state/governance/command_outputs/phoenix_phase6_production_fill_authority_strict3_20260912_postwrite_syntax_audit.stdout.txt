@@ -1,0 +1,9 @@
+POSTWRITE_SYNTAX_AUDIT
+SYNTAX_COMMAND=python -X utf8 builtin compile(source,path,'exec') + ast.parse(source)
+SYNTAX_OK:phoenix_core/rakuten_rss_adapter.py
+SYNTAX_OK:phoenix_core/rakuten_rss_broker.py
+SYNTAX_OK:phoenix_core/production_rakuten_rss_adapter.py
+SYNTAX_OK:phoenix_core/production_rakuten_rss_transport.py
+SYNTAX_OK:tests/test_historical_validation_20y.py
+POSTWRITE_SYNTAX_RESULT=PASS
+RETURN_CODE=0

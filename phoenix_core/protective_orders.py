@@ -424,7 +424,106 @@ class ProtectiveOrderLedger:
     def can_submit_new_buy(self) -> bool:
         if not self.transport_connected or self.reconcile_required:
             return False
-        return all(record.protective_order_state == PROTECTED for record in self.records.values())
+        return all(record.is_ready() for record in self.records.values())
+
+    def sync_confirmed_buy_fill(
+        self, ticker: str, quantity: int, entry_price: float, target_price: float,
+        stop_price: float, *, buy_order_id: Optional[str] = None,
+        verified_at: Optional[datetime] = None, broker_position_id: Optional[str] = None,
+    ) -> ProtectiveOrderRecord:
+        import math
+        if type(quantity) is not int or quantity <= 0:
+            raise ValueError("confirmed protection quantity must be positive")
+        if not buy_order_id or not all(math.isfinite(float(value)) and value > 0 for value in (entry_price, target_price, stop_price)):
+            raise ValueError("confirmed protection identity and prices are required")
+        _require_price_relation(stop_price, entry_price, target_price)
+        existing = self.records.get(ticker)
+        if existing is None:
+            return self.register_buy_fill(ticker, quantity, entry_price, target_price, stop_price,
+                                          buy_order_id=buy_order_id, verified_at=verified_at,
+                                          broker_position_id=broker_position_id)
+        if existing.buy_order_id and existing.buy_order_id != buy_order_id:
+            raise ValueError("confirmed protection buy identity conflict")
+        if existing.broker_position_id and broker_position_id and existing.broker_position_id != broker_position_id:
+            raise ValueError("confirmed protection position identity conflict")
+        if quantity < existing.quantity:
+            raise ValueError("confirmed protection quantity regressed")
+        if quantity == existing.quantity:
+            if (not _price_matches(existing.entry_price, entry_price)
+                    or not _price_matches(existing.target_price, target_price)
+                    or not _price_matches(existing.stop_price, stop_price)):
+                raise ValueError("confirmed protection economics conflict")
+            return existing
+        submitted = bool(existing.protective_order_id or existing.protective_order_acceptance_state)
+        next_state = existing.protective_order_state
+        if next_state != CRITICAL and (next_state in {PROTECTED, RECONCILING} or submitted):
+            next_state = RECONCILING
+        updated = replace(existing, quantity=quantity, entry_price=entry_price,
+                          target_price=target_price, stop_price=stop_price,
+                          buy_order_id=buy_order_id or existing.buy_order_id,
+                          broker_position_id=broker_position_id or existing.broker_position_id,
+                          protective_order_state=next_state,
+                          reconcile_required=(next_state == RECONCILING),
+                          last_verified_at=_coerce_timestamp(verified_at))
+        self.records[ticker] = updated
+        self.reconcile_required = self.reconcile_required or next_state == RECONCILING
+        return updated
+
+    def to_payload(self) -> dict[str, object]:
+        from dataclasses import asdict
+        return {
+            "transport_connected": self.transport_connected,
+            "reconcile_required": self.reconcile_required,
+            "records": {
+                ticker: {
+                    key: (_protective_datetime_to_text(value) if isinstance(value, datetime) else value)
+                    for key, value in asdict(record).items()
+                }
+                for ticker, record in sorted(self.records.items())
+            },
+        }
+
+    @classmethod
+    def from_payload(cls, payload: object) -> "ProtectiveOrderLedger":
+        if not isinstance(payload, dict):
+            raise ValueError("protective_ledger must be an object")
+        records_payload = payload.get("records", {})
+        if not isinstance(records_payload, dict):
+            raise ValueError("protective records must be an object")
+        if type(payload.get("transport_connected", True)) is not bool or type(payload.get("reconcile_required", False)) is not bool:
+            raise ValueError("protective ledger flags must be boolean")
+        ledger = cls(transport_connected=payload.get("transport_connected", True),
+                     reconcile_required=payload.get("reconcile_required", False))
+        for ticker, raw in records_payload.items():
+            if not isinstance(raw, dict):
+                raise ValueError("protective record must be an object")
+            data = dict(raw)
+            for key in ("protected_at", "last_verified_at"):
+                data[key] = _protective_datetime_from_text(data.get(key))
+            record = ProtectiveOrderRecord(**data)
+            if record.ticker != ticker or record.quantity <= 0:
+                raise ValueError("protective record identity is invalid")
+            if record.protective_order_state not in _ACTIVE_STATES | {UNPROTECTED}:
+                raise ValueError("protective record state is invalid")
+            if not record.buy_order_id:
+                raise ValueError("positive protective record requires buy_order_id")
+            _require_price_relation(record.stop_price, record.entry_price, record.target_price)
+            if record.protective_order_state == PROTECTED and not record.protective_order_id:
+                raise ValueError("PROTECTED record requires protective_order_id")
+            ledger.records[str(ticker)] = record
+        return ledger
 
     def snapshot(self, ticker: str) -> ProtectiveOrderRecord:
         return self._get(ticker)
+
+
+def _protective_datetime_to_text(value: Optional[datetime]) -> Optional[str]:
+    return value.isoformat() if value is not None else None
+
+
+def _protective_datetime_from_text(value: object) -> Optional[datetime]:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str):
+        raise ValueError("protective datetime must be text")
+    return datetime.fromisoformat(value)

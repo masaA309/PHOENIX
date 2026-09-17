@@ -76,6 +76,39 @@ def _canonical_event_sha256(event: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _canonical_immutable_order_payload(order: OrderRequest) -> dict[str, Any]:
+    def safe(value: Any) -> Any:
+        if value is None or isinstance(value, (str, bool, int)):
+            return value
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise ValueError("Order metadata contains a non-finite value")
+            return value
+        if isinstance(value, (list, tuple)):
+            return [safe(item) for item in value]
+        if isinstance(value, dict):
+            if not all(isinstance(key, str) for key in value):
+                raise ValueError("Order metadata keys must be strings")
+            return {key: safe(value[key]) for key in sorted(value)}
+        raise ValueError("Order metadata must be recursively JSON-safe")
+
+    return {
+        "client_order_id": order.client_order_id,
+        "ticker": order.ticker.strip().upper(),
+        "side": order.side.value,
+        "quantity": order.quantity,
+        "order_type": order.order_type.value,
+        "limit_price": float(order.limit_price),
+        "strategy_name": order.strategy_name,
+        "metadata": safe(order.metadata),
+    }
+
+
+def _immutable_order_payload_sha256(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _optional_int(value: Any, default: int = -1) -> int:
     try:
         if value is None or value == "":
@@ -100,6 +133,25 @@ class _MutablePosition:
     market_price: float
     economics_tracked_quantity: int = 0
     economics_tracked_cost_basis_yen: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class RakutenRssOrderObservation:
+    client_order_id: str
+    broker_order_id: str
+    ticker: str
+    side: OrderSide
+    requested_quantity: int
+    requested_price: float
+    filled_quantity: int
+    filled_price: float
+    status: OrderStatus
+    rss_order_id: int
+    rss_order_number: str
+    broker_observation_state: str
+    cancel_observation_state: str
+    last_authoritative_rss_status: int
+    updated_at: datetime
 
 
 class RakutenRssBroker(BrokerAdapter):
@@ -186,6 +238,19 @@ class RakutenRssBroker(BrokerAdapter):
                 checked_at=_now_jst(),
             )
 
+    def executable_buy_price(self, ticker: str) -> float | None:
+        normalized = str(ticker).strip().upper()
+        if not normalized:
+            return None
+        with self._lock:
+            try:
+                value = self._adapter.executable_buy_price(normalized)
+                if value is None:
+                    return None
+                price = float(value)
+            except Exception:
+                return None
+            return price if math.isfinite(price) and price > 0 else None
     def initialize_economics_baseline(self) -> bool:
         with self._lock:
             if self._loaded_state_version == self.STATE_VERSION:
@@ -206,6 +271,11 @@ class RakutenRssBroker(BrokerAdapter):
             self._fill_events.clear()
             self._kill_switch_engaged = False
             self._kill_switch_reason = ""
+            ledger = getattr(self, "_phoenix_protective_ledger", None)
+            if ledger is not None:
+                ledger.records.clear()
+                ledger.reconcile_required = False
+                ledger.transport_connected = True
             self._save_state()
 
     def set_market_price(self, ticker: str, market_price: float) -> None:
@@ -233,6 +303,7 @@ class RakutenRssBroker(BrokerAdapter):
                     quantity=position.quantity,
                     average_price=position.average_price,
                     market_price=position.market_price,
+                    economics_tracked_quantity=position.economics_tracked_quantity,
                 )
                 for ticker, position in sorted(self._positions.items())
                 if position.quantity > 0
@@ -250,9 +321,21 @@ class RakutenRssBroker(BrokerAdapter):
         ticker = order.ticker.strip().upper()
 
         with self._lock:
+            payload = _canonical_immutable_order_payload(order)
+            payload_hash = _immutable_order_payload_sha256(payload)
             existing = self._orders.get(order.client_order_id)
             if existing is not None:
-                return self._result_from_record(existing)
+                stored_payload = existing.get("immutable_payload")
+                stored_hash = existing.get("immutable_payload_sha256")
+                if stored_payload is None and stored_hash is None:
+                    raise RuntimeError("CLIENT_ORDER_ID_PAYLOAD_NOT_PROVEN")
+                if stored_payload != payload or stored_hash != payload_hash:
+                    raise RuntimeError("CLIENT_ORDER_ID_PAYLOAD_CONFLICT")
+                if existing.get("execution_lifecycle_state") != "PREPARED":
+                    return self._result_from_record(existing)
+
+            if self._state_file is None:
+                raise RuntimeError("EXECUTION_STATE_PERSISTENCE_REQUIRED")
 
             broker_health = self.health_check()
             if not broker_health.healthy:
@@ -264,6 +347,10 @@ class RakutenRssBroker(BrokerAdapter):
 
             if order.side is OrderSide.BUY:
                 can_submit, reason = self._validate_buy(order, ticker)
+                if can_submit and existing is not None and not _phoenix_can_submit_new_buy(
+                    self, exclude_client_order_id=order.client_order_id
+                ):
+                    raise RuntimeError("AUTO_LIVE_PROTECTION_BLOCKED")
             elif order.side is OrderSide.SELL:
                 can_submit, reason = self._validate_sell(order, ticker)
             else:
@@ -272,35 +359,51 @@ class RakutenRssBroker(BrokerAdapter):
             if not can_submit:
                 return self._record_rejected(order=order, ticker=ticker, message=reason)
 
-            broker_order_id = f"RSS-{uuid4().hex[:16].upper()}"
-            submitted_at = _now_jst()
+            if existing is None:
+                broker_order_id = f"RSS-{uuid4().hex[:16].upper()}"
+                submitted_at = _now_jst()
+                record = self._new_record(
+                    order=order, ticker=ticker, broker_order_id=broker_order_id,
+                    status=OrderStatus.PENDING, message="Prepared for durable submit",
+                    submitted_at=submitted_at, updated_at=submitted_at,
+                    broker_observation_state="PREPARED",
+                )
+                record["immutable_payload"] = payload
+                record["immutable_payload_sha256"] = payload_hash
+                self._set_execution_lifecycle(record, "PREPARED")
+                self._orders[order.client_order_id] = record
+                self._save_state()
+            else:
+                record = existing
+                broker_order_id = str(record["broker_order_id"])
+                submitted_at = _parse_iso(str(record["submitted_at"]))
+            self._set_execution_lifecycle(record, "SUBMIT_ATTEMPTED")
+            record["broker_observation_state"] = "SUBMIT_ATTEMPTED"
+            self._save_state()
             try:
                 ack = self._adapter.submit_order(order, broker_order_id)
             except Exception as error:  # pragma: no cover - adapter failure is fail-closed
-                return self._record_rejected(
-                    order=order,
-                    ticker=ticker,
-                    message=f"Rakuten RSS adapter submit failed: {error}",
-                    broker_order_id=broker_order_id,
-                    submitted_at=submitted_at,
-                    rss_order_id=0,
-                    authoritative_rss_status=-1,
-                )
+                record["status"] = OrderStatus.PENDING.value
+                record["message"] = f"Rakuten RSS adapter submit uncertain: {error}"
+                record["broker_observation_state"] = "RECONCILE_PENDING"
+                record["updated_at"] = _iso(_now_jst())
+                self._set_execution_lifecycle(record, "RECONCILE_PENDING")
+                self._save_state()
+                return self._result_from_record(record)
 
             if ack.status is OrderStatus.REJECTED:
-                return self._record_rejected(
-                    order=order,
-                    ticker=ticker,
-                    message=ack.message or "Rakuten RSS adapter rejected the order",
-                    broker_order_id=broker_order_id,
-                    submitted_at=submitted_at,
-                    rss_order_id=_optional_int(getattr(ack, "rss_order_id", 0), 0),
-                    rss_order_number=_optional_text(getattr(ack, "rss_order_number", "")),
-                    authoritative_rss_status=_optional_int(
-                        getattr(ack, "authoritative_rss_status", getattr(ack, "rss_order_status", -1)),
-                        -1,
-                    ),
+                record["status"] = OrderStatus.REJECTED.value
+                record["message"] = ack.message or "Rakuten RSS adapter rejected the order"
+                record["updated_at"] = _iso(ack.submitted_at)
+                record["broker_observation_state"] = OrderStatus.REJECTED.value
+                record["rss_order_id"] = _optional_int(getattr(ack, "rss_order_id", 0), 0)
+                record["rss_order_number"] = _optional_text(getattr(ack, "rss_order_number", ""))
+                record["last_authoritative_rss_status"] = _optional_int(
+                    getattr(ack, "authoritative_rss_status", getattr(ack, "rss_order_status", -1)), -1
                 )
+                self._set_execution_lifecycle(record, OrderStatus.REJECTED.value)
+                self._save_state()
+                return self._result_from_record(record)
 
             rss_order_id = _optional_int(getattr(ack, "rss_order_id", 0), 0)
             rss_order_number = _optional_text(getattr(ack, "rss_order_number", ""))
@@ -316,23 +419,81 @@ class RakutenRssBroker(BrokerAdapter):
             else:
                 message = ack.message or f"Rakuten RSS tracked order requires reconciliation: {ack.status.value}"
 
-            record = self._new_record(
-                order=order,
-                ticker=ticker,
-                broker_order_id=broker_order_id,
-                status=record_status,
-                message=message,
-                submitted_at=submitted_at,
-                updated_at=ack.submitted_at,
-                rss_order_id=rss_order_id,
-                rss_order_number=rss_order_number,
-                broker_observation_state=ack.status.value,
-                cancel_observation_state="",
-                last_authoritative_rss_status=authoritative_rss_status,
-            )
-            self._orders[order.client_order_id] = record
+            record.update({
+                "status": record_status.value, "message": message,
+                "updated_at": _iso(ack.submitted_at), "rss_order_id": rss_order_id,
+                "rss_order_number": rss_order_number, "broker_observation_state": ack.status.value,
+                "cancel_observation_state": "", "last_authoritative_rss_status": authoritative_rss_status,
+            })
+            self._set_execution_lifecycle(record, record_status.value)
             self._save_state()
             return self._result_from_record(record)
+
+    def _set_execution_lifecycle(self, record: dict[str, Any], state: str) -> None:
+        history = record.setdefault("execution_lifecycle_history", [])
+        if not isinstance(history, list):
+            raise ValueError("execution_lifecycle_history must be a list")
+        if record.get("execution_lifecycle_state") == state:
+            return
+        record["execution_lifecycle_state"] = state
+        history.append({"state": state, "at": _iso(_now_jst())})
+
+    def reconcile_order(self, client_order_id: str, *, now: datetime | None = None) -> list[OrderResult]:
+        with self._lock:
+            record = self._orders.get(client_order_id)
+            if record is None:
+                raise ValueError(f"client_order_idが見つかりません: {client_order_id}")
+            results = [self._result_from_record(record)] if int(record.get("filled_quantity", 0)) > 0 else []
+            if record.get("execution_lifecycle_state") == "PREPARED":
+                return results
+            if OrderStatus(record["status"]) in FINAL_STATUSES:
+                return results
+            if record.get("execution_lifecycle_state") == "SUBMIT_ATTEMPTED":
+                self._set_execution_lifecycle(record, "RECONCILE_PENDING")
+                record["broker_observation_state"] = "RECONCILE_PENDING"
+                self._save_state()
+            try:
+                updates = self._adapter.poll_order(str(record["broker_order_id"]))
+            except Exception as error:
+                record["broker_observation_state"] = "RECONCILE_PENDING"
+                record["message"] = f"Reconciliation observation failed: {error}"
+                self._set_execution_lifecycle(record, "RECONCILE_PENDING")
+                self._save_state()
+                return results or [self._result_from_record(record)]
+            for update in updates:
+                result = self._apply_update(record, update)
+                results.append(result)
+                self._save_state()
+            return results
+
+    def sync_confirmed_buy_fill_protection(
+        self, *, client_order_id: str, broker_order_id: str, ticker: str,
+        quantity: int, entry_price: float, target_price: float, stop_price: float,
+        observed_at: datetime,
+    ) -> Any:
+        with self._lock:
+            normalized = ticker.strip().upper()
+            record = self._orders.get(client_order_id)
+            position = self._positions.get(normalized)
+            if (record is None or record.get("broker_order_id") != broker_order_id
+                    or record.get("ticker") != normalized or record.get("side") != OrderSide.BUY.value
+                    or int(record.get("filled_quantity", 0)) != quantity
+                    or round(float(record.get("filled_price", 0.0)), 2) != round(entry_price, 2)
+                    or position is None or position.quantity != quantity
+                    or round(position.average_price, 2) != round(entry_price, 2)):
+                raise ValueError("Confirmed BUY protection crosswalk mismatch")
+            synced = _phoenix_protective_ledger(self).sync_confirmed_buy_fill(
+                normalized, quantity, entry_price, target_price, stop_price,
+                buy_order_id=broker_order_id, broker_position_id=normalized,
+                verified_at=observed_at,
+            )
+            self._save_state()
+            return synced
+
+    def get_protective_snapshot(self, ticker: str) -> Any:
+        import copy
+        from dataclasses import asdict
+        return copy.deepcopy(asdict(_phoenix_protective_ledger(self).snapshot(ticker)))
 
     def refresh_pending_orders(
         self,
@@ -403,6 +564,41 @@ class RakutenRssBroker(BrokerAdapter):
                 for record in self._orders.values()
                 if OrderStatus(record["status"]) in PENDING_STATUSES
             )
+
+    def get_order_observations(self) -> tuple[RakutenRssOrderObservation, ...]:
+        with self._lock:
+            observations = []
+            for record in sorted(
+                self._orders.values(),
+                key=lambda item: str(item.get("client_order_id", "")),
+            ):
+                filled_quantity = int(record.get("filled_quantity", 0))
+                filled_notional = float(record.get("filled_notional_yen", 0.0))
+                filled_price = (
+                    round(filled_notional / filled_quantity, 2)
+                    if filled_quantity > 0
+                    else round(float(record.get("filled_price", 0.0)), 2)
+                )
+                observations.append(
+                    RakutenRssOrderObservation(
+                        client_order_id=str(record.get("client_order_id", "")),
+                        broker_order_id=str(record.get("broker_order_id", "")),
+                        ticker=str(record.get("ticker", "")),
+                        side=OrderSide(str(record.get("side", OrderSide.BUY.value))),
+                        requested_quantity=int(record.get("quantity", 0)),
+                        requested_price=round(float(record.get("requested_price", 0.0)), 2),
+                        filled_quantity=filled_quantity,
+                        filled_price=filled_price,
+                        status=OrderStatus(str(record.get("status", OrderStatus.PENDING.value))),
+                        rss_order_id=_optional_int(record.get("rss_order_id", 0), 0),
+                        rss_order_number=_optional_text(record.get("rss_order_number", "")),
+                        broker_observation_state=_optional_text(record.get("broker_observation_state", "")),
+                        cancel_observation_state=_optional_text(record.get("cancel_observation_state", "")),
+                        last_authoritative_rss_status=_optional_int(record.get("last_authoritative_rss_status", -1), -1),
+                        updated_at=_parse_iso(str(record["updated_at"])),
+                    )
+                )
+            return tuple(observations)
 
     def cancel_order(self, client_order_id: str, message: str | None = None) -> OrderResult:
         with self._lock:
@@ -518,6 +714,11 @@ class RakutenRssBroker(BrokerAdapter):
                 f"保有株数不足: 売却 {order.quantity}株 / "
                 f"保有 {held}株"
             )
+        if current.economics_tracked_quantity < order.quantity:
+            return False, (
+                f"PHOENIX保有株数不足: 売却 {order.quantity}株 / "
+                f"PHOENIX保有 {current.economics_tracked_quantity}株"
+            )
         return True, ""
 
     def _new_record(
@@ -568,6 +769,7 @@ class RakutenRssBroker(BrokerAdapter):
             "economics_eligible_commission_yen": 0.0,
             "economics_eligible_realized_pnl_before_commission_yen": 0.0,
             "adverse_slippage_yen": 0.0,
+            "applied_fill_events": {},
         }
 
     def _record_rejected(
@@ -597,6 +799,9 @@ class RakutenRssBroker(BrokerAdapter):
             cancel_observation_state="",
             last_authoritative_rss_status=authoritative_rss_status,
         )
+        payload = _canonical_immutable_order_payload(order)
+        record["immutable_payload"] = payload
+        record["immutable_payload_sha256"] = _immutable_order_payload_sha256(payload)
         self._orders[order.client_order_id] = record
         self._save_state()
         return self._result_from_record(record)
@@ -613,7 +818,8 @@ class RakutenRssBroker(BrokerAdapter):
             getattr(update, "authoritative_rss_status", getattr(update, "rss_order_status", -1)),
             -1,
         )
-        record["rss_order_id"] = update_rss_order_id
+        if update_rss_order_id:
+            record["rss_order_id"] = update_rss_order_id
         if update_rss_order_number:
             record["rss_order_number"] = update_rss_order_number
         if update_authoritative_rss_status != -1:
@@ -627,8 +833,13 @@ class RakutenRssBroker(BrokerAdapter):
             record["broker_observation_state"] = status.value
             return self._result_from_record(record)
         if status in {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED}:
+            if update.fill_accounting_mode == "CUMULATIVE_ORDER_EXECUTIONS":
+                return self._apply_cumulative_fill(record, update)
             if update.fill_quantity <= 0:
                 raise ValueError("fill_quantityは1以上にしてください")
+            fill_event_id = str(update.fill_event_id).strip()
+            if not fill_event_id:
+                raise RuntimeError("FILL_EVENT_ID_NOT_PROVEN")
             return self._apply_fill(
                 record,
                 fill_quantity=update.fill_quantity,
@@ -636,6 +847,7 @@ class RakutenRssBroker(BrokerAdapter):
                 status=status,
                 message=update.message,
                 updated_at=update.updated_at,
+                fill_event_id=fill_event_id,
             )
         if status is OrderStatus.TIMED_OUT:
             record["message"] = update.message or "Order timed out waiting for Excel/RSS result; reconciliation continues."
@@ -660,7 +872,33 @@ class RakutenRssBroker(BrokerAdapter):
         status: OrderStatus,
         message: str,
         updated_at: datetime,
+        fill_event_id: str,
     ) -> OrderResult:
+        if type(fill_quantity) is not int or fill_quantity <= 0:
+            raise ValueError("fill_quantity must be a positive integer")
+        if isinstance(fill_price, bool) or not isinstance(fill_price, Real) or not math.isfinite(float(fill_price)) or fill_price <= 0:
+            raise ValueError("fill_price must be finite and positive")
+        event_id = str(fill_event_id).strip()
+        if not event_id:
+            raise RuntimeError("FILL_EVENT_ID_NOT_PROVEN")
+        events = record.get("applied_fill_events")
+        if events is None:
+            if int(record.get("filled_quantity", 0)) > 0:
+                raise RuntimeError("FILL_EVENT_ID_NOT_PROVEN")
+            events = {}
+            record["applied_fill_events"] = events
+        if not isinstance(events, dict):
+            raise ValueError("applied_fill_events must be an object")
+        economics = {"quantity": fill_quantity, "price": round(float(fill_price), 2)}
+        prior = events.get(event_id)
+        if prior is not None:
+            if prior != economics:
+                raise RuntimeError("FILL_EVENT_ID_CONFLICT")
+            record["status"] = status.value
+            record["message"] = message or record.get("message", "")
+            record["updated_at"] = _iso(updated_at)
+            self._set_execution_lifecycle(record, status.value)
+            return self._result_from_record(record)
         current_quantity = int(record["filled_quantity"])
         requested_quantity = int(record["quantity"])
         remaining_quantity = requested_quantity - current_quantity
@@ -753,6 +991,7 @@ class RakutenRssBroker(BrokerAdapter):
         }
         event["event_sha256"] = _canonical_event_sha256(event)
         self._fill_events.append(event)
+        events[event_id] = economics
 
         record["status"] = (
             OrderStatus.FILLED.value
@@ -761,6 +1000,85 @@ class RakutenRssBroker(BrokerAdapter):
         )
         record["message"] = message or record["message"] or status.value
         record["updated_at"] = _iso(updated_at)
+        self._set_execution_lifecycle(record, record["status"])
+        return self._result_from_record(record)
+
+    def _apply_cumulative_fill(
+        self,
+        record: dict[str, Any],
+        update: RakutenRssOrderUpdate,
+    ) -> OrderResult:
+        q0 = int(record.get("cumulative_filled_quantity", record.get("filled_quantity", 0)))
+        p0 = float(record.get("cumulative_average_fill_price", record.get("filled_price", 0.0)))
+        q1 = int(update.cumulative_filled_quantity)
+        p1 = float(update.cumulative_average_fill_price)
+        if q1 < q0 or q1 > int(record["quantity"]):
+            raise RuntimeError("PRODUCTION_FILL_QUANTITY_MISMATCH")
+        source = (str(update.source_order_number).strip(), str(update.source_reception_number).strip())
+        prior_source = (str(record.get("source_order_number", "")).strip(), str(record.get("source_reception_number", "")).strip())
+        if not all(source) or (all(prior_source) and source != prior_source):
+            raise RuntimeError("PRODUCTION_FILL_SOURCE_AMBIGUOUS")
+        if record.get("fill_accounting_mode") not in (None, "", "CUMULATIVE_ORDER_EXECUTIONS"):
+            raise RuntimeError("PRODUCTION_FILL_SOURCE_NOT_PROVEN")
+        if q1 == q0:
+            if q1 and round(p1, 8) != round(p0, 8):
+                raise RuntimeError("PRODUCTION_FILL_QUANTITY_MISMATCH")
+            return self._result_from_record(record)
+        if not math.isfinite(p1) or p1 <= 0:
+            raise RuntimeError("PRODUCTION_FILL_SOURCE_NOT_PROVEN")
+        delta_quantity = q1 - q0
+        delta_notional = q1 * p1 - q0 * p0
+        delta_price = delta_notional / delta_quantity
+        if not math.isfinite(delta_price) or delta_price <= 0:
+            raise RuntimeError("PRODUCTION_FILL_QUANTITY_MISMATCH")
+        ticker = str(record["ticker"])
+        side = OrderSide(str(record["side"]))
+        requested_price = float(record["requested_price"])
+        result = (
+            self._apply_buy_fill(ticker=ticker, fill_quantity=delta_quantity, fill_price=delta_price, requested_price=requested_price)
+            if side is OrderSide.BUY
+            else self._apply_sell_fill(ticker=ticker, fill_quantity=delta_quantity, fill_price=delta_price, requested_price=requested_price)
+        )
+        record["filled_quantity"] = q1
+        record["filled_notional_yen"] = round(q1 * p1, 2)
+        record["filled_price"] = round(p1, 2)
+        record["last_fill_quantity"] = delta_quantity
+        record["last_fill_price"] = round(delta_price, 2)
+        for key in ("commission_yen", "cash_delta_yen", "cost_basis_released_yen", "realized_pnl_before_commission_yen", "economics_eligible_commission_yen", "economics_eligible_realized_pnl_before_commission_yen", "adverse_slippage_yen"):
+            record[key] = round(float(record[key]) + float(result[key]), 2)
+        record["economics_eligible_quantity"] = int(record["economics_eligible_quantity"]) + int(result["economics_eligible_quantity"])
+        event = {
+            "schema_version": self.FILL_EVENT_VERSION,
+            "event_id": f"FILL|{record['broker_order_id']}|{len(self._fill_events) + 1}",
+            "broker_name": self.broker_name,
+            "broker_order_id": record["broker_order_id"],
+            "client_order_id": record["client_order_id"],
+            "ticker": ticker,
+            "side": side.value,
+            "status": update.status.value,
+            "filled_quantity": delta_quantity,
+            "filled_price": round(delta_price, 2),
+            "gross_amount_yen": round(delta_quantity * delta_price, 2),
+            "commission_yen": result["commission_yen"],
+            "cash_delta_yen": result["cash_delta_yen"],
+            "cost_basis_released_yen": result["cost_basis_released_yen"],
+            "realized_pnl_before_commission_yen": result["realized_pnl_before_commission_yen"],
+            "economics_eligible_quantity": result["economics_eligible_quantity"],
+            "economics_eligible_commission_yen": result["economics_eligible_commission_yen"],
+            "economics_eligible_realized_pnl_before_commission_yen": result["economics_eligible_realized_pnl_before_commission_yen"],
+            "adverse_slippage_yen": result["adverse_slippage_yen"],
+            "created_at": _iso(update.updated_at),
+        }
+        event["event_sha256"] = _canonical_event_sha256(event)
+        self._fill_events.append(event)
+        record["fill_accounting_mode"] = "CUMULATIVE_ORDER_EXECUTIONS"
+        record["source_order_number"], record["source_reception_number"] = source
+        record["cumulative_filled_quantity"] = q1
+        record["cumulative_average_fill_price"] = p1
+        record["status"] = OrderStatus.FILLED.value if q1 >= int(record["quantity"]) else OrderStatus.PARTIALLY_FILLED.value
+        record["message"] = update.message or record.get("message", "")
+        record["updated_at"] = _iso(update.updated_at)
+        self._set_execution_lifecycle(record, record["status"])
         return self._result_from_record(record)
 
     def _apply_buy_fill(
@@ -835,33 +1153,30 @@ class RakutenRssBroker(BrokerAdapter):
         realized_before_commission = round(gross - acquisition_cost, 2)
         realized_pnl = round(realized_before_commission - commission, 2)
 
-        legacy_quantity = max(0, current.quantity - current.economics_tracked_quantity)
-        eligible_quantity = min(
-            current.economics_tracked_quantity,
-            max(0, fill_quantity - legacy_quantity),
+        if current.economics_tracked_quantity < fill_quantity:
+            raise ValueError(
+                f"PHOENIX保有株数不足: 売却 {fill_quantity}株 / "
+                f"PHOENIX保有 {current.economics_tracked_quantity}株"
+            )
+        eligible_quantity = fill_quantity
+        tracked_average = (
+            current.economics_tracked_cost_basis_yen
+            / current.economics_tracked_quantity
         )
-        if eligible_quantity > 0:
-            tracked_average = (
-                current.economics_tracked_cost_basis_yen
-                / current.economics_tracked_quantity
-            )
-            eligible_cost_basis = round(tracked_average * eligible_quantity, 2)
-            eligible_realized_before_commission = round(
-                eligible_quantity * fill_price - eligible_cost_basis,
-                2,
-            )
-            eligible_commission = round(
-                commission * eligible_quantity / fill_quantity,
-                2,
-            )
-            current.economics_tracked_quantity -= eligible_quantity
+        eligible_cost_basis = round(tracked_average * eligible_quantity, 2)
+        eligible_realized_before_commission = round(
+            eligible_quantity * fill_price - eligible_cost_basis,
+            2,
+        )
+        eligible_commission = commission
+        current.economics_tracked_quantity -= eligible_quantity
+        if current.economics_tracked_quantity == 0:
+            current.economics_tracked_cost_basis_yen = 0.0
+        else:
             current.economics_tracked_cost_basis_yen = round(
                 current.economics_tracked_cost_basis_yen - eligible_cost_basis,
                 2,
             )
-        else:
-            eligible_realized_before_commission = 0.0
-            eligible_commission = 0.0
 
         current.quantity -= fill_quantity
         current.market_price = round(fill_price, 2)
@@ -964,8 +1279,15 @@ class RakutenRssBroker(BrokerAdapter):
                 }
                 for ticker, position in sorted(self._positions.items())
             },
-            "orders": self._orders,
+            "orders": {
+                client_order_id: {
+                    **record,
+                    "applied_fill_events": record.get("applied_fill_events"),
+                }
+                for client_order_id, record in self._orders.items()
+            },
             "fill_events": self._fill_events,
+            "protective_ledger": _phoenix_protective_ledger(self).to_payload() if ProtectiveOrderLedger is not None else None,
         }
 
     def _save_state(self) -> None:
@@ -973,16 +1295,14 @@ class RakutenRssBroker(BrokerAdapter):
             return
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
         temporary = self._state_file.with_suffix(self._state_file.suffix + ".tmp")
-        temporary.write_text(
-            json.dumps(
-                self._state_payload(),
-                ensure_ascii=False,
-                indent=2,
-                allow_nan=False,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        content = json.dumps(
+            self._state_payload(), ensure_ascii=False, indent=2, allow_nan=False
+        ) + "\n"
+        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+            handle.flush()
+            import os
+            os.fsync(handle.fileno())
         temporary.replace(self._state_file)
         self._loaded_state_version = self.STATE_VERSION
 
@@ -1041,12 +1361,73 @@ class RakutenRssBroker(BrokerAdapter):
             record.setdefault("broker_observation_state", str(record.get("status", OrderStatus.PENDING.value)))
             record.setdefault("cancel_observation_state", "")
             record.setdefault("last_authoritative_rss_status", -1)
+            record.setdefault("fill_accounting_mode", "")
+            record.setdefault("source_order_number", "")
+            record.setdefault("source_reception_number", "")
+            record.setdefault("cumulative_filled_quantity", 0)
+            record.setdefault("cumulative_average_fill_price", 0.0)
+            applied = record.get("applied_fill_events")
+            cumulative_mode = record.get("fill_accounting_mode") == "CUMULATIVE_ORDER_EXECUTIONS"
+            if applied is not None:
+                if not isinstance(applied, dict) or any(not isinstance(key, str) or not key for key in applied):
+                    raise ValueError("applied_fill_events is invalid")
+                total_quantity = 0
+                total_notional = 0.0
+                for item in applied.values():
+                    if not isinstance(item, dict) or type(item.get("quantity")) is not int or item["quantity"] <= 0:
+                        raise ValueError("applied fill event quantity is invalid")
+                    price = item.get("price")
+                    if isinstance(price, bool) or not isinstance(price, Real) or not math.isfinite(float(price)) or price <= 0:
+                        raise ValueError("applied fill event price is invalid")
+                    total_quantity += item["quantity"]
+                    total_notional += item["quantity"] * float(price)
+                if (not cumulative_mode and total_quantity != int(record.get("filled_quantity", 0))) or total_quantity > int(record.get("quantity", 0)):
+                    raise ValueError("applied fill event quantity does not match cumulative fill")
+                if total_quantity and round(total_notional / total_quantity, 2) != round(float(record.get("filled_price", 0.0)), 2):
+                    raise ValueError("applied fill event economics do not match cumulative fill")
+            immutable_payload = record.get("immutable_payload")
+            immutable_hash = record.get("immutable_payload_sha256")
+            if (immutable_payload is None) != (immutable_hash is None):
+                raise ValueError("immutable order payload is incomplete")
+            if immutable_payload is not None:
+                if not isinstance(immutable_payload, dict) or _immutable_order_payload_sha256(immutable_payload) != immutable_hash:
+                    raise ValueError("immutable order payload hash mismatch")
+                for key, expected in (("client_order_id", record.get("client_order_id")), ("ticker", record.get("ticker")),
+                                      ("side", record.get("side")), ("quantity", record.get("quantity"))):
+                    if immutable_payload.get(key) != expected:
+                        raise ValueError("immutable order payload identity mismatch")
+            history = record.get("execution_lifecycle_history", [])
+            if not isinstance(history, list) or any(not isinstance(item, dict) for item in history):
+                raise ValueError("execution lifecycle history is invalid")
             self._orders[str(client_order_id)] = record
 
         fill_events = payload.get("fill_events", [])
         if not isinstance(fill_events, list):
             raise ValueError("fill_eventsはJSON配列にしてください")
         self._fill_events = [dict(event) for event in fill_events if isinstance(event, dict)]
+        if ProtectiveOrderLedger is not None:
+            ledger_payload = payload.get("protective_ledger")
+            self._phoenix_protective_ledger = ProtectiveOrderLedger.from_payload(ledger_payload) if ledger_payload is not None else ProtectiveOrderLedger()
+            ledger = self._phoenix_protective_ledger
+            for ticker, position in self._positions.items():
+                record = ledger.records.get(ticker)
+                if record is None:
+                    ledger.reconcile_required = True
+                    continue
+                mismatch = record.quantity != position.quantity or round(record.entry_price, 2) != round(position.average_price, 2)
+                buy = self._orders.get(record.buy_order_id or "")
+                if record.buy_order_id and (buy is None or buy.get("broker_order_id") != record.buy_order_id or buy.get("ticker") != ticker):
+                    mismatch = True
+                if mismatch:
+                    if record.protective_order_state != "CRITICAL":
+                        from dataclasses import replace
+                        ledger.records[ticker] = replace(record, protective_order_state="RECONCILING", reconcile_required=True)
+                    ledger.reconcile_required = True
+            for ticker, record in list(ledger.records.items()):
+                if ticker not in self._positions and record.protective_order_state != "CRITICAL":
+                    from dataclasses import replace
+                    ledger.records[ticker] = replace(record, protective_order_state="RECONCILING", reconcile_required=True)
+                    ledger.reconcile_required = True
         self._loaded_state_version = self.STATE_VERSION
 
 
@@ -1323,7 +1704,7 @@ def _phoenix_refresh_transport(self):
     if ledger is None:
         return None
     try:
-        healthy = bool(_phoenix_original_health_check(self))
+        healthy = bool(_phoenix_original_health_check(self).healthy)
     except Exception:
         ledger.mark_transport_disconnected()
         raise
@@ -1337,12 +1718,36 @@ def _phoenix_refresh_transport(self):
     return healthy
 
 
-def _phoenix_submit_order(self, order, *args, **kwargs):
+def _phoenix_can_submit_new_buy(self, *, exclude_client_order_id=None):
     ledger = _phoenix_protective_ledger(self)
+    if ledger is None:
+        return False
+    if not ledger.can_submit_new_buy():
+        return False
+    for client_order_id, order in getattr(self, "_orders", {}).items():
+        if client_order_id == exclude_client_order_id:
+            continue
+        if order.get("execution_lifecycle_state") in {"PREPARED", "SUBMIT_ATTEMPTED", "RECONCILE_PENDING"}:
+            return False
+    for ticker, position in getattr(self, "_positions", {}).items():
+        if position.quantity <= 0:
+            continue
+        record = ledger.records.get(ticker)
+        if record is None or record.quantity != position.quantity or round(record.entry_price, 2) != round(position.average_price, 2):
+            return False
+    for ticker, record in ledger.records.items():
+        position = getattr(self, "_positions", {}).get(ticker)
+        if position is None or position.quantity != record.quantity or round(position.average_price, 2) != round(record.entry_price, 2):
+            return False
+    return True
+
+
+def _phoenix_submit_order(self, order, *args, **kwargs):
     side_name = _phoenix_side_name(_phoenix_value(order, "side", "order_side", "trade_side"))
-    if side_name == "BUY":
+    existing = getattr(self, "_orders", {}).get(_phoenix_value(order, "client_order_id", default=""))
+    if side_name == "BUY" and existing is None:
         healthy = _phoenix_refresh_transport(self)
-        if ledger is not None and not ledger.can_submit_new_buy():
+        if not self.can_submit_new_buy():
             raise RuntimeError("AUTO_LIVE_PROTECTION_BLOCKED")
         if not bool(healthy):
             raise RuntimeError("AUTO_LIVE_PROTECTION_BLOCKED")
@@ -1355,27 +1760,7 @@ def _phoenix_submit_order(self, order, *args, **kwargs):
     if ticker is None:
         return result
 
-    if side_name == "BUY" and _phoenix_is_success(result):
-        if _phoenix_has_protective_prices(order):
-            quantity = _phoenix_quantity(order)
-            entry_price = _phoenix_entry_price(order)
-            target_price = _phoenix_target_price(order)
-            stop_price = _phoenix_stop_price(order)
-        else:
-            quantity = None
-            entry_price = None
-            target_price = None
-            stop_price = None
-        if quantity is not None and entry_price is not None and target_price is not None and stop_price is not None:
-            ledger.register_buy_fill(
-                ticker,
-                quantity,
-                float(entry_price),
-                float(target_price),
-                float(stop_price),
-                buy_order_id=_phoenix_order_id(result) or _phoenix_order_id(order),
-            )
-    elif side_name == "SELL":
+    if side_name == "SELL" and (existing is None or existing.get("execution_lifecycle_state") == "PREPARED"):
         record = ledger.records.get(ticker)
         if record is not None and record.protective_order_state in {"PROTECTING", "RECONCILING"}:
             if _phoenix_is_success(result):
@@ -1396,7 +1781,7 @@ def _phoenix_submit_order(self, order, *args, **kwargs):
 if "RakutenRssBroker" in globals():
     _phoenix_original_health_check = RakutenRssBroker.health_check
     _phoenix_original_submit_order = RakutenRssBroker.submit_order
-    RakutenRssBroker.can_submit_new_buy = lambda self: _phoenix_protective_ledger(self).can_submit_new_buy() if _phoenix_protective_ledger(self) is not None else True
+    RakutenRssBroker.can_submit_new_buy = _phoenix_can_submit_new_buy
     RakutenRssBroker.mark_transport_disconnected = lambda self: _phoenix_protective_ledger(self).mark_transport_disconnected() if _phoenix_protective_ledger(self) is not None else None
     RakutenRssBroker.mark_transport_reconnected = lambda self: _phoenix_protective_ledger(self).mark_transport_reconnected() if _phoenix_protective_ledger(self) is not None else None
     RakutenRssBroker.begin_reconcile = lambda self, ticker: _phoenix_protective_ledger(self).begin_reconcile(ticker) if _phoenix_protective_ledger(self) is not None else None

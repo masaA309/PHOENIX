@@ -301,6 +301,44 @@ class PendingOrder:
     estimated_entry_price: float = 0.0
 
 
+@dataclass(frozen=True, slots=True)
+class StrategyAccountView:
+    cash_yen: float
+    market_value_yen: float
+    equity_yen: float
+    current_exposure_yen: float
+    current_portfolio_risk_yen: float
+
+
+@dataclass(frozen=True, slots=True)
+class D1EntryDecision:
+    ticker: str
+    company_name: str
+    signal_date: str
+    execution_date: str
+    signal_score: float
+    planned_quantity: int
+    final_quantity: int
+    sizing_price: float
+    planned_risk_per_share: float
+    stop_price_at_sizing: float
+    target_price_at_sizing: float
+    rejection_reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class ConfirmedExecutionFill:
+    client_order_id: str
+    broker_order_id: str
+    ticker: str
+    side: str
+    filled_quantity: int
+    fill_price: float
+    commission_yen: float
+    observed_at: str
+    final: bool
+
+
 @dataclass(slots=True)
 class EntryCandidate:
     ticker: str
@@ -1219,6 +1257,651 @@ def _market_breadth_above_ma_long_ratio(
     return above / eligible
 
 
+@dataclass(slots=True)
+class StrategyRuntimeState:
+    config: HistoricalValidationConfig
+    strategy: BacktestStrategyParameters
+    uses_membership: bool
+    name_lookup: dict[str, str]
+    membership_lookup: dict[str, Any]
+    positions: dict[str, PositionState] = field(default_factory=dict)
+    pending_orders: dict[pd.Timestamp, list[PendingOrder]] = field(default_factory=dict)
+    trades: list[TradeRecord] = field(default_factory=list)
+    equity_rows: list[dict[str, Any]] = field(default_factory=list)
+    risk_v2_research_rows: list[dict[str, Any]] = field(default_factory=list)
+    rejected_due_to_lot: int = 0
+    rejected_due_to_buying_power: int = 0
+    diagnostics_counts: Counter[tuple[int, str]] = field(default_factory=Counter)
+    cash: float = 0.0
+    reserved_cash: float = 0.0
+    peak_equity: float = 0.0
+    session_index: int = 0
+    last_completed_strategy_session: Any = None
+
+
+def create_strategy_runtime_state(
+    universe: pd.DataFrame,
+    config: HistoricalValidationConfig,
+) -> StrategyRuntimeState:
+    normalized_universe = _normalize_universe_for_validation(pd.DataFrame(universe))
+    uses_membership = "member_periods" in normalized_universe.columns
+    name_lookup = {
+        normalize_ticker_code(row["ticker"]): normalize_text(row.get("company_name"), normalize_ticker_code(row["ticker"]))
+        for _, row in normalized_universe.iterrows()
+    }
+    membership_lookup = {
+        normalize_ticker_code(row["ticker"]): row.get("member_periods", [])
+        for _, row in normalized_universe.iterrows()
+    }
+    return StrategyRuntimeState(
+        config=config,
+        strategy=config.strategy_parameters(),
+        uses_membership=uses_membership,
+        name_lookup=name_lookup,
+        membership_lookup=membership_lookup,
+        cash=float(config.initial_capital_yen),
+        peak_equity=float(config.initial_capital_yen),
+    )
+
+
+def evaluate_d1_entry(
+    state: StrategyRuntimeState,
+    pending: PendingOrder,
+    *,
+    current_date: pd.Timestamp,
+    sizing_price: float,
+    account: StrategyAccountView,
+    same_session_committed_exposure_yen: float = 0.0,
+    same_session_committed_risk_yen: float = 0.0,
+) -> D1EntryDecision:
+    estimated_entry_price = pending.estimated_entry_price
+    planned_risk_per_share = estimated_entry_price - pending.stop_price
+    stop_price_at_sizing = sizing_price - planned_risk_per_share
+    target_price_at_sizing = (
+        sizing_price + planned_risk_per_share * state.config.target_r_multiplier
+    )
+    final_quantity = 0
+    rejection_reason = ""
+
+    if sizing_price > 0 and estimated_entry_price > 0 and planned_risk_per_share > 0:
+        current_exposure = (
+            account.current_exposure_yen + same_session_committed_exposure_yen
+        )
+        current_portfolio_risk = (
+            account.current_portfolio_risk_yen + same_session_committed_risk_yen
+        )
+        recalculated_quantity = calculate_shares(
+            current_equity=account.equity_yen,
+            available_cash=account.cash_yen,
+            entry_price=sizing_price,
+            stop_price=stop_price_at_sizing,
+            current_exposure=current_exposure,
+            config=state.config,
+            current_portfolio_risk_yen=current_portfolio_risk,
+        )
+        final_quantity = min(pending.quantity, recalculated_quantity)
+        if final_quantity < state.config.lot_size:
+            rejection_reason = _classify_share_rejection_reason(
+                current_equity=account.equity_yen,
+                available_cash=account.cash_yen,
+                entry_price=sizing_price,
+                stop_price=stop_price_at_sizing,
+                current_exposure=current_exposure,
+                config=state.config,
+                d1=True,
+                current_portfolio_risk_yen=current_portfolio_risk,
+            )
+
+    return D1EntryDecision(
+        ticker=pending.ticker,
+        company_name=pending.company_name,
+        signal_date=pending.signal_date,
+        execution_date=current_date.date().isoformat(),
+        signal_score=pending.signal_score,
+        planned_quantity=pending.quantity,
+        final_quantity=final_quantity,
+        sizing_price=sizing_price,
+        planned_risk_per_share=planned_risk_per_share,
+        stop_price_at_sizing=stop_price_at_sizing,
+        target_price_at_sizing=target_price_at_sizing,
+        rejection_reason=rejection_reason,
+    )
+
+
+def apply_confirmed_entry_fill(
+    state: StrategyRuntimeState,
+    pending: PendingOrder,
+    decision: D1EntryDecision,
+    fill: ConfirmedExecutionFill,
+) -> PositionState:
+    ticker = normalize_ticker_code(pending.ticker)
+    if decision.rejection_reason:
+        raise ValueError("Rejected D+1 decisions cannot be filled")
+    if decision.final_quantity < state.config.lot_size:
+        raise ValueError("Confirmed entry quantity is below lot size")
+    if str(fill.side).strip().upper() != "BUY":
+        raise ValueError("Confirmed entry fill must be BUY")
+    if not ticker or ticker != normalize_ticker_code(decision.ticker) or ticker != normalize_ticker_code(fill.ticker):
+        raise ValueError("Pending order, decision, and fill ticker must match")
+    if pending.signal_date != decision.signal_date or pending.entry_date != decision.execution_date:
+        raise ValueError("Pending order and decision entry identity must match")
+    if type(fill.filled_quantity) is not int or not 0 < fill.filled_quantity <= decision.final_quantity:
+        raise ValueError("Confirmed entry fill quantity is invalid")
+    if not _is_positive_finite_price(float(fill.fill_price)):
+        raise ValueError("Confirmed entry fill price must be finite and positive")
+    if not math.isfinite(float(fill.commission_yen)) or fill.commission_yen < 0:
+        raise ValueError("Confirmed entry commission must be finite and non-negative")
+    if not _is_positive_finite_price(float(decision.planned_risk_per_share)):
+        raise ValueError("Planned risk per share must be finite and positive")
+
+    existing = state.positions.get(ticker)
+    if existing is not None:
+        if (
+            existing.company_name != decision.company_name
+            or existing.signal_date != decision.signal_date
+            or existing.entry_date != decision.execution_date
+        ):
+            raise ValueError("Confirmed cumulative fill conflicts with the existing position identity")
+        if fill.filled_quantity < existing.quantity:
+            raise ValueError("Confirmed cumulative fill quantity regressed")
+        cumulative_cost = round(float(fill.fill_price) * fill.filled_quantity + float(fill.commission_yen), 2)
+        if fill.filled_quantity == existing.quantity:
+            expected_stop = float(fill.fill_price) - decision.planned_risk_per_share
+            expected_target = float(fill.fill_price) + decision.planned_risk_per_share * state.config.target_r_multiplier
+            if (round(existing.entry_cost_yen, 2) != cumulative_cost
+                    or round(existing.entry_price, 4) != round(float(fill.fill_price), 4)
+                    or round(existing.actual_stop_price, 4) != round(expected_stop, 4)
+                    or round(existing.actual_target_price, 4) != round(expected_target, 4)):
+                raise ValueError("Confirmed cumulative fill economics conflict")
+            return existing
+
+    actual_stop_price = float(fill.fill_price) - decision.planned_risk_per_share
+    actual_target_price = (
+        fill.fill_price
+        + decision.planned_risk_per_share * state.config.target_r_multiplier
+    )
+    position = PositionState(
+        ticker=ticker,
+        company_name=decision.company_name,
+        signal_date=decision.signal_date,
+        entry_date=decision.execution_date,
+        entry_session_index=state.session_index,
+        entry_price=float(fill.fill_price),
+        quantity=fill.filled_quantity,
+        stop_price=actual_stop_price,
+        target_price=actual_target_price,
+        signal_score=decision.signal_score,
+        entry_cost_yen=(
+            float(fill.fill_price) * fill.filled_quantity
+            + float(fill.commission_yen)
+        ),
+        actual_stop_price=actual_stop_price,
+        actual_target_price=actual_target_price,
+    )
+    state.positions[ticker] = position
+    if existing is None:
+        state.diagnostics_counts[(pd.Timestamp(decision.execution_date).year, "D1_FILLED")] += 1
+    return position
+
+
+def step_strategy_runtime(
+    state: StrategyRuntimeState,
+    prepared_histories: Mapping[str, pd.DataFrame],
+    current_date: pd.Timestamp,
+    *,
+    historical_last_available_dates: Mapping[str, pd.Timestamp | None] | None = None,
+    historical_candidate_end: pd.Timestamp | None = None,
+) -> None:
+    session_index = state.session_index
+
+    def record_diagnostic(year: int, reason: str, amount: int = 1) -> None:
+        state.diagnostics_counts[(year, reason)] += amount
+
+    # A. Settle only open-gap exits before today's open fills.
+    for ticker in list(state.positions):
+        frame = normalize_history_frame(prepared_histories.get(ticker, pd.DataFrame()))
+        if frame.empty or current_date not in frame.index:
+            continue
+        position = state.positions[ticker]
+        row = frame.loc[current_date]
+        open_price = safe_float(row["Open"])
+        stop_price = position.actual_stop_price or position.stop_price
+        target_price = position.actual_target_price or position.target_price
+        exit_price = 0.0
+        reason = ""
+        if _is_positive_finite_price(open_price) and open_price <= stop_price:
+            exit_price = open_price * (1.0 - state.config.slippage_rate)
+            reason = "STOP_GAP"
+        elif _is_positive_finite_price(open_price) and open_price >= target_price:
+            exit_price = open_price * (1.0 - state.config.slippage_rate)
+            reason = "TARGET_GAP"
+        if reason and exit_price > 0:
+            state.cash += _close_position(
+                positions=state.positions,
+                ticker=ticker,
+                exit_date=current_date,
+                exit_price=exit_price,
+                reason=reason,
+                session_index=session_index,
+                config=state.config,
+                trades=state.trades,
+            )
+
+    todays_orders = state.pending_orders.pop(current_date, [])
+    state.reserved_cash = max(
+        state.reserved_cash - sum(order.estimated_cost_yen for order in todays_orders),
+        0.0,
+    )
+
+    open_market_value = 0.0
+    for ticker, position in state.positions.items():
+        frame = normalize_history_frame(prepared_histories.get(ticker, pd.DataFrame()))
+        if frame.empty:
+            continue
+        open_market_value += _history_open_at_or_before(frame, current_date) * position.quantity
+
+    open_equity = state.cash + open_market_value
+    same_day_open_exposure = 0.0
+    d1_portfolio_risk_baseline_yen = (
+        _positions_portfolio_risk_yen(state.positions)
+        + _pending_portfolio_risk_yen(state.pending_orders)
+    )
+    same_session_committed_risk_yen = 0.0
+    for order in sorted(todays_orders, key=lambda item: (-item.signal_score, item.ticker)):
+        if order.ticker in state.positions:
+            continue
+        if state.uses_membership and not _is_member_on_date(state.membership_lookup.get(order.ticker, []), current_date):
+            continue
+        frame = normalize_history_frame(prepared_histories.get(order.ticker, pd.DataFrame()))
+        if frame.empty or current_date not in frame.index:
+            continue
+        row = frame.loc[current_date]
+        open_price = safe_float(row["Open"])
+        if open_price <= 0:
+            continue
+        estimated_entry_price = order.estimated_entry_price
+        if estimated_entry_price <= 0:
+            continue
+        planned_risk_per_share = estimated_entry_price - order.stop_price
+        if planned_risk_per_share <= 0:
+            continue
+        actual_entry_price = open_price * (1.0 + state.config.slippage_rate)
+        available_cash = state.cash - state.reserved_cash
+        account = StrategyAccountView(
+            cash_yen=available_cash,
+            market_value_yen=open_market_value,
+            equity_yen=open_equity,
+            current_exposure_yen=open_market_value + state.reserved_cash,
+            current_portfolio_risk_yen=d1_portfolio_risk_baseline_yen,
+        )
+        decision = evaluate_d1_entry(
+            state,
+            order,
+            current_date=current_date,
+            sizing_price=actual_entry_price,
+            account=account,
+            same_session_committed_exposure_yen=same_day_open_exposure,
+            same_session_committed_risk_yen=same_session_committed_risk_yen,
+        )
+        quantity = decision.final_quantity
+        actual_stop_price = decision.stop_price_at_sizing
+        actual_target_price = decision.target_price_at_sizing
+        if quantity < state.config.lot_size:
+            # Separate cash/exposure shortages from risk or position-sizing shortages.
+            reason = decision.rejection_reason
+            if reason:
+                record_diagnostic(current_date.year, reason)
+            spendable_cash = max(available_cash - open_equity * state.config.minimum_cash_reserve_pct, 0.0)
+            lot_entry_value = actual_entry_price * state.config.lot_size
+            lot_cash_cost = lot_entry_value * (1.0 + state.config.commission_rate)
+            portfolio_capacity = max(
+                open_equity * state.config.max_total_invested_pct
+                - (account.current_exposure_yen + same_day_open_exposure),
+                0.0,
+            )
+            if spendable_cash + 1e-9 < lot_cash_cost or portfolio_capacity + 1e-9 < lot_entry_value:
+                state.rejected_due_to_buying_power += 1
+            else:
+                state.rejected_due_to_lot += 1
+            continue
+        reserved_cash_yen = actual_entry_price * quantity * (1.0 + state.config.commission_rate)
+        if reserved_cash_yen > available_cash + 1e-9:
+            state.rejected_due_to_buying_power += 1
+            continue
+        state.cash -= reserved_cash_yen
+        same_day_open_exposure += actual_entry_price * quantity
+        same_session_committed_risk_yen += max(
+            actual_entry_price - actual_stop_price,
+            0.0,
+        ) * quantity
+        state.positions[order.ticker] = PositionState(
+            ticker=order.ticker,
+            company_name=order.company_name,
+            signal_date=order.signal_date,
+            entry_date=current_date.date().isoformat(),
+            entry_session_index=session_index,
+            entry_price=actual_entry_price,
+            quantity=quantity,
+            stop_price=actual_stop_price,
+            target_price=actual_target_price,
+            signal_score=order.signal_score,
+            entry_cost_yen=reserved_cash_yen,
+            actual_stop_price=actual_stop_price,
+            actual_target_price=actual_target_price,
+        )
+        record_diagnostic(current_date.year, "D1_FILLED")
+
+    # D. After all open buys, settle intraday exits for any remaining positions.
+    for ticker in list(state.positions):
+        frame = normalize_history_frame(prepared_histories.get(ticker, pd.DataFrame()))
+        if frame.empty or current_date not in frame.index:
+            continue
+        position = state.positions[ticker]
+        row = frame.loc[current_date]
+        low_price = safe_float(row["Low"])
+        high_price = safe_float(row["High"])
+        close_price = safe_float(row["Close"])
+        stop_price = position.actual_stop_price or position.stop_price
+        target_price = position.actual_target_price or position.target_price
+        exit_price = 0.0
+        reason = ""
+        if _is_positive_finite_price(low_price) and low_price <= stop_price:
+            exit_price = stop_price * (1.0 - state.config.slippage_rate)
+            reason = "STOP"
+        elif _is_positive_finite_price(high_price) and high_price >= target_price:
+            exit_price = target_price * (1.0 - state.config.slippage_rate)
+            reason = "TARGET"
+        elif _is_positive_finite_price(close_price) and session_index - position.entry_session_index + 1 >= state.config.max_hold_sessions:
+            exit_price = close_price * (1.0 - state.config.slippage_rate)
+            reason = "TIME_EXIT"
+        elif historical_last_available_dates is not None:
+            last_available = historical_last_available_dates.get(ticker)
+            if last_available is not None and current_date >= last_available and _is_positive_finite_price(close_price):
+                exit_price = close_price * (1.0 - state.config.slippage_rate)
+                reason = "DATA_END"
+        if reason and exit_price > 0:
+            state.cash += _close_position(
+                positions=state.positions,
+                ticker=ticker,
+                exit_date=current_date,
+                exit_price=exit_price,
+                reason=reason,
+                session_index=session_index,
+                config=state.config,
+                trades=state.trades,
+            )
+
+    market_value = 0.0
+    for ticker, position in state.positions.items():
+        frame = normalize_history_frame(prepared_histories.get(ticker, pd.DataFrame()))
+        if frame.empty:
+            continue
+        market_value += _history_close_at_or_before(frame, current_date) * position.quantity
+
+    current_equity = state.cash + market_value
+
+    effective_max_total_invested_pct = state.config.max_total_invested_pct
+    if state.config.market_breadth_filter_enabled:
+        # Risk v2 market regime is evaluated only when the filter is enabled.
+        market_breadth_ratio = _market_breadth_above_ma_long_ratio(
+            prepared_histories=prepared_histories,
+            membership_lookup=state.membership_lookup,
+            current_date=current_date,
+            uses_membership=state.uses_membership,
+        )
+        market_regime = "NORMAL"
+        if (
+            market_breadth_ratio is not None
+            and market_breadth_ratio < state.config.market_breadth_bear_threshold
+        ):
+            market_regime = "BEAR"
+            effective_max_total_invested_pct = min(
+                state.config.max_total_invested_pct,
+                state.config.market_breadth_bear_max_total_invested_pct,
+            )
+        state.risk_v2_research_rows.append(
+            {
+                "date": current_date.date().isoformat(),
+                "market_regime": market_regime,
+                "market_breadth_above_ma_long_pct": (
+                    round(market_breadth_ratio * 100.0, 4)
+                    if market_breadth_ratio is not None
+                    else None
+                ),
+                "effective_max_total_invested_pct": round(
+                    effective_max_total_invested_pct,
+                    6,
+                ),
+            }
+        )
+
+    pending_tickers = {order.ticker for orders in state.pending_orders.values() for order in orders}
+    todays_entry_candidates: list[EntryCandidate] = []
+    for ticker, frame in prepared_histories.items():
+        if ticker in state.positions or ticker in pending_tickers:
+            continue
+        if state.uses_membership and not _is_member_on_date(state.membership_lookup.get(ticker, []), current_date):
+            continue
+        work = normalize_history_frame(frame)
+        if work.empty or current_date not in work.index:
+            continue
+        location = work.index.get_loc(current_date)
+        if not isinstance(location, (int, np.integer)):
+            continue
+        location = int(location)
+        if location < state.config.minimum_history_sessions - 1 or location + 1 >= len(work):
+            continue
+        signal_row = work.iloc[location]
+        if not is_entry_signal(signal_row, state.strategy):
+            continue
+        next_date = pd.Timestamp(work.index[location + 1]).normalize()
+        if state.uses_membership:
+            member_periods = state.membership_lookup.get(ticker, [])
+            if not _is_member_on_date(member_periods, current_date) or not _is_member_on_date(member_periods, next_date):
+                continue
+        raw_close = safe_float(signal_row["Close"])
+        atr = safe_float(signal_row.get("ATR"))
+        if raw_close <= 0 or atr <= 0:
+            continue
+        estimated_entry_price = raw_close * (1.0 + state.config.slippage_rate)
+        stop_price = estimated_entry_price - atr * state.config.stop_atr_multiplier
+        if stop_price <= 0 or stop_price >= estimated_entry_price:
+            continue
+        target_price = estimated_entry_price + (estimated_entry_price - stop_price) * state.config.target_r_multiplier
+        if historical_candidate_end is not None and next_date > historical_candidate_end:
+            continue
+        record_diagnostic(current_date.year, "SIGNAL_CANDIDATE")
+        todays_entry_candidates.append(
+            EntryCandidate(
+                ticker=ticker,
+                company_name=state.name_lookup.get(ticker, ticker),
+                signal_date=current_date.date().isoformat(),
+                entry_date=next_date.date().isoformat(),
+                entry_session_index=session_index + 1,
+                signal_score=signal_score(signal_row, state.strategy),
+                estimated_entry_price=estimated_entry_price,
+                stop_price=stop_price,
+                target_price=target_price,
+                next_date=next_date,
+            )
+        )
+
+    candidate_portfolio_risk_yen = (
+        _positions_portfolio_risk_yen(state.positions)
+        + _pending_portfolio_risk_yen(state.pending_orders)
+    )
+    for candidate in sorted(todays_entry_candidates, key=lambda item: (-item.signal_score, item.ticker)):
+        available_cash = state.cash - state.reserved_cash
+        current_exposure = market_value + state.reserved_cash
+        quantity = calculate_shares(
+            current_equity=current_equity,
+            available_cash=available_cash,
+            entry_price=candidate.estimated_entry_price,
+            stop_price=candidate.stop_price,
+            current_exposure=current_exposure,
+            config=state.config,
+            current_portfolio_risk_yen=candidate_portfolio_risk_yen,
+            max_total_invested_pct_override=effective_max_total_invested_pct,
+        )
+        if quantity < state.config.lot_size:
+            # Separate cash/exposure shortages from risk or position-sizing shortages.
+            reason = _classify_share_rejection_reason(
+                current_equity=current_equity,
+                available_cash=available_cash,
+                entry_price=candidate.estimated_entry_price,
+                stop_price=candidate.stop_price,
+                current_exposure=current_exposure,
+                config=state.config,
+                d1=False,
+                current_portfolio_risk_yen=candidate_portfolio_risk_yen,
+                max_total_invested_pct_override=effective_max_total_invested_pct,
+            )
+            if reason:
+                record_diagnostic(current_date.year, reason)
+            spendable_cash = max(available_cash - current_equity * state.config.minimum_cash_reserve_pct, 0.0)
+            lot_entry_value = candidate.estimated_entry_price * state.config.lot_size
+            lot_cash_cost = lot_entry_value * (1.0 + state.config.commission_rate)
+            portfolio_capacity = max(
+                current_equity * effective_max_total_invested_pct - current_exposure,
+                0.0,
+            )
+            if spendable_cash + 1e-9 < lot_cash_cost or portfolio_capacity + 1e-9 < lot_entry_value:
+                state.rejected_due_to_buying_power += 1
+            else:
+                state.rejected_due_to_lot += 1
+            continue
+        reserved_cash_yen = candidate.estimated_entry_price * quantity * (1.0 + state.config.commission_rate)
+        if reserved_cash_yen > available_cash + 1e-9:
+            state.rejected_due_to_buying_power += 1
+            continue
+        state.pending_orders.setdefault(candidate.next_date, []).append(
+            PendingOrder(
+                ticker=candidate.ticker,
+                company_name=candidate.company_name,
+                signal_date=candidate.signal_date,
+                entry_date=candidate.entry_date,
+                entry_session_index=candidate.entry_session_index,
+                quantity=quantity,
+                stop_price=candidate.stop_price,
+                target_price=candidate.target_price,
+                signal_score=candidate.signal_score,
+                estimated_cost_yen=reserved_cash_yen,
+                estimated_entry_price=candidate.estimated_entry_price,
+            )
+        )
+        state.reserved_cash += reserved_cash_yen
+        candidate_portfolio_risk_yen += max(
+            candidate.estimated_entry_price - candidate.stop_price,
+            0.0,
+        ) * quantity
+        record_diagnostic(current_date.year, "PENDING_CREATED")
+
+    state.peak_equity = max(state.peak_equity, current_equity)
+    drawdown_yen = state.peak_equity - current_equity
+    drawdown_pct = drawdown_yen / state.peak_equity * 100 if state.peak_equity > 0 else 0.0
+    state.equity_rows.append(
+        {
+            "date": current_date.date().isoformat(),
+            "cash_yen": round(state.cash, 2),
+            "reserved_cash_yen": round(state.reserved_cash, 2),
+            "available_cash_yen": round(state.cash - state.reserved_cash, 2),
+            "market_value_yen": round(market_value, 2),
+            "equity_yen": round(current_equity, 2),
+            "peak_equity_yen": round(state.peak_equity, 2),
+            "drawdown_yen": round(drawdown_yen, 2),
+            "drawdown_pct": round(drawdown_pct, 6),
+            "open_positions": len(state.positions),
+            "pending_orders": sum(len(value) for value in state.pending_orders.values()),
+        }
+    )
+    state.session_index += 1
+
+
+def _build_strategy_runtime_result(
+    state: StrategyRuntimeState,
+    requested_start_ts: pd.Timestamp,
+    requested_end_ts: pd.Timestamp,
+) -> HistoricalValidationResult:
+    trades_df = pd.DataFrame([asdict(trade) for trade in state.trades])
+    equity_df = pd.DataFrame(state.equity_rows)
+    risk_v2_research_df = pd.DataFrame(state.risk_v2_research_rows, columns=list(RISK_V2_RESEARCH_COLUMNS))
+    annual_df = build_period_returns(
+        equity_df,
+        trades_df,
+        "Y",
+        state.config.initial_capital_yen,
+    )
+    monthly_df = build_period_returns(
+        equity_df,
+        trades_df,
+        "M",
+        state.config.initial_capital_yen,
+    )
+    return HistoricalValidationResult(
+        trades=trades_df,
+        equity_curve=equity_df,
+        annual_returns=annual_df,
+        monthly_returns=monthly_df,
+        rejected_due_to_lot=state.rejected_due_to_lot,
+        rejected_due_to_buying_power=state.rejected_due_to_buying_power,
+        diagnostics=_build_diagnostics_frame(state.diagnostics_counts, requested_start_ts.year, requested_end_ts.year),
+        risk_v2_research=risk_v2_research_df,
+    )
+
+
+def finalize_historical_strategy_runtime(
+    state: StrategyRuntimeState,
+    prepared_histories: Mapping[str, pd.DataFrame],
+    final_date: pd.Timestamp,
+    requested_start_ts: pd.Timestamp,
+    requested_end_ts: pd.Timestamp,
+) -> HistoricalValidationResult:
+    for ticker in list(state.positions):
+        frame = normalize_history_frame(prepared_histories.get(ticker, pd.DataFrame()))
+        if frame.empty:
+            continue
+        final_close = _history_close_at_or_before(frame, final_date)
+        if final_close <= 0:
+            continue
+        exit_price = final_close * (1.0 - state.config.slippage_rate)
+        if exit_price <= 0:
+            continue
+        state.cash += _close_position(
+            positions=state.positions,
+            ticker=ticker,
+            exit_date=final_date,
+            exit_price=exit_price,
+            reason="END_OF_TEST",
+            session_index=state.session_index - 1,
+            config=state.config,
+            trades=state.trades,
+        )
+
+    state.pending_orders.clear()
+    state.reserved_cash = 0.0
+
+    if state.equity_rows:
+        final_market_value = 0.0
+        final_equity = state.cash + final_market_value
+        state.peak_equity = max(state.peak_equity, final_equity)
+        state.equity_rows[-1].update(
+            {
+                "cash_yen": round(state.cash, 2),
+                "reserved_cash_yen": 0.0,
+                "available_cash_yen": round(state.cash, 2),
+                "market_value_yen": round(final_market_value, 2),
+                "equity_yen": round(final_equity, 2),
+                "peak_equity_yen": round(state.peak_equity, 2),
+                "drawdown_yen": round(state.peak_equity - final_equity, 2),
+                "drawdown_pct": round((state.peak_equity - final_equity) / state.peak_equity * 100 if state.peak_equity > 0 else 0.0, 6),
+                "open_positions": len(state.positions),
+                "pending_orders": 0,
+            }
+        )
+
+    return _build_strategy_runtime_result(state, requested_start_ts, requested_end_ts)
+
+
 def simulate_validation(
     prepared_histories: Mapping[str, pd.DataFrame],
     universe: pd.DataFrame,
@@ -1240,460 +1923,18 @@ def simulate_validation(
     if not simulation_dates:
         raise HistoricalValidationError("No simulation dates are available in the requested window")
 
-    normalized_universe = _normalize_universe_for_validation(pd.DataFrame(universe))
-    uses_membership = "member_periods" in normalized_universe.columns
-    name_lookup = {
-        normalize_ticker_code(row["ticker"]): normalize_text(row.get("company_name"), normalize_ticker_code(row["ticker"]))
-        for _, row in normalized_universe.iterrows()
-    }
-    membership_lookup = {
-        normalize_ticker_code(row["ticker"]): row.get("member_periods", [])
-        for _, row in normalized_universe.iterrows()
-    }
     last_available_dates = {ticker: _last_available_date(frame) for ticker, frame in prepared_histories.items()}
-
-    positions: dict[str, PositionState] = {}
-    pending_orders: dict[pd.Timestamp, list[PendingOrder]] = {}
-    trades: list[TradeRecord] = []
-    equity_rows: list[dict[str, Any]] = []
-    risk_v2_research_rows: list[dict[str, Any]] = []
-    rejected_due_to_lot = 0
-    rejected_due_to_buying_power = 0
-    diagnostics_counts: Counter[tuple[int, str]] = Counter()
-
-    def record_diagnostic(year: int, reason: str, amount: int = 1) -> None:
-        diagnostics_counts[(year, reason)] += amount
-
-    cash = float(config.initial_capital_yen)
-    reserved_cash = 0.0
-    peak_equity = float(config.initial_capital_yen)
-    strategy = config.strategy_parameters()
-
-    for session_index, current_date in enumerate(simulation_dates):
-        # A. Settle only open-gap exits before today's open fills.
-        for ticker in list(positions):
-            frame = normalize_history_frame(prepared_histories.get(ticker, pd.DataFrame()))
-            if frame.empty or current_date not in frame.index:
-                continue
-            position = positions[ticker]
-            row = frame.loc[current_date]
-            open_price = safe_float(row["Open"])
-            stop_price = position.actual_stop_price or position.stop_price
-            target_price = position.actual_target_price or position.target_price
-            exit_price = 0.0
-            reason = ""
-            if _is_positive_finite_price(open_price) and open_price <= stop_price:
-                exit_price = open_price * (1.0 - config.slippage_rate)
-                reason = "STOP_GAP"
-            elif _is_positive_finite_price(open_price) and open_price >= target_price:
-                exit_price = open_price * (1.0 - config.slippage_rate)
-                reason = "TARGET_GAP"
-            if reason and exit_price > 0:
-                cash += _close_position(
-                    positions=positions,
-                    ticker=ticker,
-                    exit_date=current_date,
-                    exit_price=exit_price,
-                    reason=reason,
-                    session_index=session_index,
-                    config=config,
-                    trades=trades,
-                )
-
-        todays_orders = pending_orders.pop(current_date, [])
-        reserved_cash = max(
-            reserved_cash - sum(order.estimated_cost_yen for order in todays_orders),
-            0.0,
+    state = create_strategy_runtime_state(universe, config)
+    for current_date in simulation_dates:
+        step_strategy_runtime(
+            state,
+            prepared_histories,
+            current_date,
+            historical_last_available_dates=last_available_dates,
+            historical_candidate_end=requested_end_ts,
         )
-
-        open_market_value = 0.0
-        for ticker, position in positions.items():
-            frame = normalize_history_frame(prepared_histories.get(ticker, pd.DataFrame()))
-            if frame.empty:
-                continue
-            open_market_value += _history_open_at_or_before(frame, current_date) * position.quantity
-
-        open_equity = cash + open_market_value
-        same_day_open_exposure = 0.0
-        d1_portfolio_risk_yen = (
-            _positions_portfolio_risk_yen(positions)
-            + _pending_portfolio_risk_yen(pending_orders)
-        )
-        for order in sorted(todays_orders, key=lambda item: (-item.signal_score, item.ticker)):
-            if order.ticker in positions:
-                continue
-            if uses_membership and not _is_member_on_date(membership_lookup.get(order.ticker, []), current_date):
-                continue
-            frame = normalize_history_frame(prepared_histories.get(order.ticker, pd.DataFrame()))
-            if frame.empty or current_date not in frame.index:
-                continue
-            row = frame.loc[current_date]
-            open_price = safe_float(row["Open"])
-            if open_price <= 0:
-                continue
-            estimated_entry_price = order.estimated_entry_price
-            if estimated_entry_price <= 0:
-                continue
-            planned_risk_per_share = estimated_entry_price - order.stop_price
-            if planned_risk_per_share <= 0:
-                continue
-            actual_entry_price = open_price * (1.0 + config.slippage_rate)
-            actual_stop_price = actual_entry_price - planned_risk_per_share
-            actual_target_price = actual_entry_price + planned_risk_per_share * config.target_r_multiplier
-            available_cash = cash - reserved_cash
-            current_exposure = open_market_value + reserved_cash + same_day_open_exposure
-            quantity = calculate_shares(
-                current_equity=open_equity,
-                available_cash=available_cash,
-                entry_price=actual_entry_price,
-                stop_price=actual_stop_price,
-                current_exposure=current_exposure,
-                config=config,
-                current_portfolio_risk_yen=d1_portfolio_risk_yen,
-            )
-            quantity = min(order.quantity, quantity)
-            if quantity < config.lot_size:
-                # Separate cash/exposure shortages from risk or position-sizing shortages.
-                reason = _classify_share_rejection_reason(
-                    current_equity=open_equity,
-                    available_cash=available_cash,
-                    entry_price=actual_entry_price,
-                    stop_price=actual_stop_price,
-                    current_exposure=current_exposure,
-                    config=config,
-                    d1=True,
-                    current_portfolio_risk_yen=d1_portfolio_risk_yen,
-                )
-                if reason:
-                    record_diagnostic(current_date.year, reason)
-                spendable_cash = max(available_cash - open_equity * config.minimum_cash_reserve_pct, 0.0)
-                lot_entry_value = actual_entry_price * config.lot_size
-                lot_cash_cost = lot_entry_value * (1.0 + config.commission_rate)
-                portfolio_capacity = max(open_equity * config.max_total_invested_pct - current_exposure, 0.0)
-                if spendable_cash + 1e-9 < lot_cash_cost or portfolio_capacity + 1e-9 < lot_entry_value:
-                    rejected_due_to_buying_power += 1
-                else:
-                    rejected_due_to_lot += 1
-                continue
-            reserved_cash_yen = actual_entry_price * quantity * (1.0 + config.commission_rate)
-            if reserved_cash_yen > available_cash + 1e-9:
-                rejected_due_to_buying_power += 1
-                continue
-            cash -= reserved_cash_yen
-            same_day_open_exposure += actual_entry_price * quantity
-            d1_portfolio_risk_yen += max(
-                actual_entry_price - actual_stop_price,
-                0.0,
-            ) * quantity
-            positions[order.ticker] = PositionState(
-                ticker=order.ticker,
-                company_name=order.company_name,
-                signal_date=order.signal_date,
-                entry_date=current_date.date().isoformat(),
-                entry_session_index=session_index,
-                entry_price=actual_entry_price,
-                quantity=quantity,
-                stop_price=actual_stop_price,
-                target_price=actual_target_price,
-                signal_score=order.signal_score,
-                entry_cost_yen=reserved_cash_yen,
-                actual_stop_price=actual_stop_price,
-                actual_target_price=actual_target_price,
-            )
-            record_diagnostic(current_date.year, "D1_FILLED")
-
-        # D. After all open buys, settle intraday exits for any remaining positions.
-        for ticker in list(positions):
-            frame = normalize_history_frame(prepared_histories.get(ticker, pd.DataFrame()))
-            if frame.empty or current_date not in frame.index:
-                continue
-            position = positions[ticker]
-            row = frame.loc[current_date]
-            low_price = safe_float(row["Low"])
-            high_price = safe_float(row["High"])
-            close_price = safe_float(row["Close"])
-            stop_price = position.actual_stop_price or position.stop_price
-            target_price = position.actual_target_price or position.target_price
-            exit_price = 0.0
-            reason = ""
-            if _is_positive_finite_price(low_price) and low_price <= stop_price:
-                exit_price = stop_price * (1.0 - config.slippage_rate)
-                reason = "STOP"
-            elif _is_positive_finite_price(high_price) and high_price >= target_price:
-                exit_price = target_price * (1.0 - config.slippage_rate)
-                reason = "TARGET"
-            elif _is_positive_finite_price(close_price) and session_index - position.entry_session_index + 1 >= config.max_hold_sessions:
-                exit_price = close_price * (1.0 - config.slippage_rate)
-                reason = "TIME_EXIT"
-            else:
-                last_available = last_available_dates.get(ticker)
-                if last_available is not None and current_date >= last_available and _is_positive_finite_price(close_price):
-                    exit_price = close_price * (1.0 - config.slippage_rate)
-                    reason = "DATA_END"
-            if reason and exit_price > 0:
-                cash += _close_position(
-                    positions=positions,
-                    ticker=ticker,
-                    exit_date=current_date,
-                    exit_price=exit_price,
-                    reason=reason,
-                    session_index=session_index,
-                    config=config,
-                    trades=trades,
-                )
-
-        market_value = 0.0
-        for ticker, position in positions.items():
-            frame = normalize_history_frame(prepared_histories.get(ticker, pd.DataFrame()))
-            if frame.empty:
-                continue
-            market_value += _history_close_at_or_before(frame, current_date) * position.quantity
-
-        current_equity = cash + market_value
-
-        effective_max_total_invested_pct = config.max_total_invested_pct
-        if config.market_breadth_filter_enabled:
-            # Risk v2 market regime is evaluated only when the filter is enabled.
-            market_breadth_ratio = _market_breadth_above_ma_long_ratio(
-                prepared_histories=prepared_histories,
-                membership_lookup=membership_lookup,
-                current_date=current_date,
-                uses_membership=uses_membership,
-            )
-            market_regime = "NORMAL"
-            if (
-                market_breadth_ratio is not None
-                and market_breadth_ratio < config.market_breadth_bear_threshold
-            ):
-                market_regime = "BEAR"
-                effective_max_total_invested_pct = min(
-                    config.max_total_invested_pct,
-                    config.market_breadth_bear_max_total_invested_pct,
-                )
-            risk_v2_research_rows.append(
-                {
-                    "date": current_date.date().isoformat(),
-                    "market_regime": market_regime,
-                    "market_breadth_above_ma_long_pct": (
-                        round(market_breadth_ratio * 100.0, 4)
-                        if market_breadth_ratio is not None
-                        else None
-                    ),
-                    "effective_max_total_invested_pct": round(
-                        effective_max_total_invested_pct,
-                        6,
-                    ),
-                }
-            )
-
-        pending_tickers = {order.ticker for orders in pending_orders.values() for order in orders}
-        todays_entry_candidates: list[EntryCandidate] = []
-        for ticker, frame in prepared_histories.items():
-            if ticker in positions or ticker in pending_tickers:
-                continue
-            if uses_membership and not _is_member_on_date(membership_lookup.get(ticker, []), current_date):
-                continue
-            work = normalize_history_frame(frame)
-            if work.empty or current_date not in work.index:
-                continue
-            location = work.index.get_loc(current_date)
-            if not isinstance(location, (int, np.integer)):
-                continue
-            location = int(location)
-            if location < config.minimum_history_sessions - 1 or location + 1 >= len(work):
-                continue
-            signal_row = work.iloc[location]
-            if not is_entry_signal(signal_row, strategy):
-                continue
-            next_date = pd.Timestamp(work.index[location + 1]).normalize()
-            if uses_membership:
-                member_periods = membership_lookup.get(ticker, [])
-                if not _is_member_on_date(member_periods, current_date) or not _is_member_on_date(member_periods, next_date):
-                    continue
-            raw_close = safe_float(signal_row["Close"])
-            atr = safe_float(signal_row.get("ATR"))
-            if raw_close <= 0 or atr <= 0:
-                continue
-            estimated_entry_price = raw_close * (1.0 + config.slippage_rate)
-            stop_price = estimated_entry_price - atr * config.stop_atr_multiplier
-            if stop_price <= 0 or stop_price >= estimated_entry_price:
-                continue
-            target_price = estimated_entry_price + (estimated_entry_price - stop_price) * config.target_r_multiplier
-            if next_date > requested_end_ts:
-                continue
-            record_diagnostic(current_date.year, "SIGNAL_CANDIDATE")
-            todays_entry_candidates.append(
-                EntryCandidate(
-                    ticker=ticker,
-                    company_name=name_lookup.get(ticker, ticker),
-                    signal_date=current_date.date().isoformat(),
-                    entry_date=next_date.date().isoformat(),
-                    entry_session_index=session_index + 1,
-                    signal_score=signal_score(signal_row, strategy),
-                    estimated_entry_price=estimated_entry_price,
-                    stop_price=stop_price,
-                    target_price=target_price,
-                    next_date=next_date,
-                )
-            )
-
-        candidate_portfolio_risk_yen = (
-            _positions_portfolio_risk_yen(positions)
-            + _pending_portfolio_risk_yen(pending_orders)
-        )
-        for candidate in sorted(todays_entry_candidates, key=lambda item: (-item.signal_score, item.ticker)):
-            available_cash = cash - reserved_cash
-            current_exposure = market_value + reserved_cash
-            quantity = calculate_shares(
-                current_equity=current_equity,
-                available_cash=available_cash,
-                entry_price=candidate.estimated_entry_price,
-                stop_price=candidate.stop_price,
-                current_exposure=current_exposure,
-                config=config,
-                current_portfolio_risk_yen=candidate_portfolio_risk_yen,
-                max_total_invested_pct_override=effective_max_total_invested_pct,
-            )
-            if quantity < config.lot_size:
-                # Separate cash/exposure shortages from risk or position-sizing shortages.
-                reason = _classify_share_rejection_reason(
-                    current_equity=current_equity,
-                    available_cash=available_cash,
-                    entry_price=candidate.estimated_entry_price,
-                    stop_price=candidate.stop_price,
-                    current_exposure=current_exposure,
-                    config=config,
-                    d1=False,
-                    current_portfolio_risk_yen=candidate_portfolio_risk_yen,
-                    max_total_invested_pct_override=effective_max_total_invested_pct,
-                )
-                if reason:
-                    record_diagnostic(current_date.year, reason)
-                spendable_cash = max(available_cash - current_equity * config.minimum_cash_reserve_pct, 0.0)
-                lot_entry_value = candidate.estimated_entry_price * config.lot_size
-                lot_cash_cost = lot_entry_value * (1.0 + config.commission_rate)
-                portfolio_capacity = max(
-                    current_equity * effective_max_total_invested_pct - current_exposure,
-                    0.0,
-                )
-                if spendable_cash + 1e-9 < lot_cash_cost or portfolio_capacity + 1e-9 < lot_entry_value:
-                    rejected_due_to_buying_power += 1
-                else:
-                    rejected_due_to_lot += 1
-                continue
-            reserved_cash_yen = candidate.estimated_entry_price * quantity * (1.0 + config.commission_rate)
-            if reserved_cash_yen > available_cash + 1e-9:
-                rejected_due_to_buying_power += 1
-                continue
-            pending_orders.setdefault(candidate.next_date, []).append(
-                PendingOrder(
-                    ticker=candidate.ticker,
-                    company_name=candidate.company_name,
-                    signal_date=candidate.signal_date,
-                    entry_date=candidate.entry_date,
-                    entry_session_index=candidate.entry_session_index,
-                    quantity=quantity,
-                    stop_price=candidate.stop_price,
-                    target_price=candidate.target_price,
-                    signal_score=candidate.signal_score,
-                    estimated_cost_yen=reserved_cash_yen,
-                    estimated_entry_price=candidate.estimated_entry_price,
-                )
-            )
-            reserved_cash += reserved_cash_yen
-            candidate_portfolio_risk_yen += max(
-                candidate.estimated_entry_price - candidate.stop_price,
-                0.0,
-            ) * quantity
-            record_diagnostic(current_date.year, "PENDING_CREATED")
-
-        peak_equity = max(peak_equity, current_equity)
-        drawdown_yen = peak_equity - current_equity
-        drawdown_pct = drawdown_yen / peak_equity * 100 if peak_equity > 0 else 0.0
-        equity_rows.append(
-            {
-                "date": current_date.date().isoformat(),
-                "cash_yen": round(cash, 2),
-                "reserved_cash_yen": round(reserved_cash, 2),
-                "available_cash_yen": round(cash - reserved_cash, 2),
-                "market_value_yen": round(market_value, 2),
-                "equity_yen": round(current_equity, 2),
-                "peak_equity_yen": round(peak_equity, 2),
-                "drawdown_yen": round(drawdown_yen, 2),
-                "drawdown_pct": round(drawdown_pct, 6),
-                "open_positions": len(positions),
-                "pending_orders": sum(len(value) for value in pending_orders.values()),
-            }
-        )
-
-    final_date = simulation_dates[-1]
-    for ticker in list(positions):
-        frame = normalize_history_frame(prepared_histories.get(ticker, pd.DataFrame()))
-        if frame.empty:
-            continue
-        final_close = _history_close_at_or_before(frame, final_date)
-        if final_close <= 0:
-            continue
-        exit_price = final_close * (1.0 - config.slippage_rate)
-        if exit_price <= 0:
-            continue
-        cash += _close_position(
-            positions=positions,
-            ticker=ticker,
-            exit_date=final_date,
-            exit_price=exit_price,
-            reason="END_OF_TEST",
-            session_index=len(simulation_dates) - 1,
-            config=config,
-            trades=trades,
-        )
-
-    pending_orders.clear()
-    reserved_cash = 0.0
-
-    if equity_rows:
-        final_market_value = 0.0
-        final_equity = cash + final_market_value
-        peak_equity = max(peak_equity, final_equity)
-        equity_rows[-1].update(
-            {
-                "cash_yen": round(cash, 2),
-                "reserved_cash_yen": 0.0,
-                "available_cash_yen": round(cash, 2),
-                "market_value_yen": round(final_market_value, 2),
-                "equity_yen": round(final_equity, 2),
-                "peak_equity_yen": round(peak_equity, 2),
-                "drawdown_yen": round(peak_equity - final_equity, 2),
-                "drawdown_pct": round((peak_equity - final_equity) / peak_equity * 100 if peak_equity > 0 else 0.0, 6),
-                "open_positions": len(positions),
-                "pending_orders": 0,
-            }
-        )
-
-    trades_df = pd.DataFrame([asdict(trade) for trade in trades])
-    equity_df = pd.DataFrame(equity_rows)
-    risk_v2_research_df = pd.DataFrame(risk_v2_research_rows, columns=list(RISK_V2_RESEARCH_COLUMNS))
-    annual_df = build_period_returns(
-        equity_df,
-        trades_df,
-        "Y",
-        config.initial_capital_yen,
-    )
-    monthly_df = build_period_returns(
-        equity_df,
-        trades_df,
-        "M",
-        config.initial_capital_yen,
-    )
-    return HistoricalValidationResult(
-        trades=trades_df,
-        equity_curve=equity_df,
-        annual_returns=annual_df,
-        monthly_returns=monthly_df,
-        rejected_due_to_lot=rejected_due_to_lot,
-        rejected_due_to_buying_power=rejected_due_to_buying_power,
-        diagnostics=_build_diagnostics_frame(diagnostics_counts, requested_start_ts.year, requested_end_ts.year),
-        risk_v2_research=risk_v2_research_df,
+    return finalize_historical_strategy_runtime(
+        state, prepared_histories, simulation_dates[-1], requested_start_ts, requested_end_ts
     )
 
 

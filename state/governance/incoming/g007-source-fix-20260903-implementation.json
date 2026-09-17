@@ -1,0 +1,287 @@
+{
+  "agents_sha256": "291c10259b1601bf8201bc938c876a9afdcc0560f2567114b3bbe08e0ec9f58c",
+  "allowed": [
+    "write state/governance/incoming candidate",
+    "write state/governance/reports preflight report",
+    "write state/governance/evidence bounded command outputs",
+    "modify phoenix_disaster_recovery.py only for approved G-007 SOURCE_FIX",
+    "modify tests/test_phoenix_disaster_recovery.py only for approved G-007 tests",
+    "run focused G-007 unit tests",
+    "run tests.test_phoenix_disaster_recovery",
+    "run git diff --check",
+    "run target-only git diff --stat"
+  ],
+  "artifact_lock": [
+    {
+      "existing": true,
+      "path": "AGENTS.md",
+      "sha256": "291c10259b1601bf8201bc938c876a9afdcc0560f2567114b3bbe08e0ec9f58c"
+    },
+    {
+      "existing": true,
+      "path": "tools/codex_execution_preflight_gate.py",
+      "sha256": "d3bac0771380e341f9b51e20b157a4129386b48f98a909baac277a9642d8a814"
+    },
+    {
+      "existing": true,
+      "path": "tools/governance_command_runner.py",
+      "sha256": "8419ab5c53cd58f8f9ab6f27a36508c9840862c18217b1b04fc8fc156511d029"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/codex_candidate.schema.json",
+      "sha256": "95e89f34ba4e5a416d59b0944f5ca320c23e44c01df697107aedfff006faf461"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/evidence_graph.schema.json",
+      "sha256": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/failure_class.schema.json",
+      "sha256": "d2423cb1d4b1c1803e2263d8ed10ecc72bb82acb3b9cb6e30eac01720f2086a0"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/gate_report.schema.json",
+      "sha256": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/root_cause_synonyms.json",
+      "sha256": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1"
+    },
+    {
+      "existing": true,
+      "path": "knowledge/failure_class_ledger.json",
+      "sha256": "12a0c025fdb69fdb321e0574c48d1ac0fe5407364bc769207987c8326361a954"
+    }
+  ],
+  "candidate_id": "g007-source-fix-20260903-implementation",
+  "candidate_sha256": "3b3bd3199d38604a504063aa5b0e6047d96fba4d7f84ec04f7a44dc7e74109f1",
+  "candidate_type": "IMPLEMENTATION",
+  "created_at_utc": "2026-09-02T16:00:00Z",
+  "evidence_graph": [
+    {
+      "bundle_members": [
+        "g007-source-fix-20260903-implementation-focused.stdout.txt",
+        "g007-source-fix-20260903-implementation-module.stdout.txt",
+        "g007-source-fix-20260903-implementation-diff-check.stdout.txt",
+        "g007-source-fix-20260903-implementation-diff-stat.stdout.txt"
+      ],
+      "claim": "G-007 disaster recovery legacy migration is fixed in source and covered by focused and module tests without Git mutation.",
+      "evidence_kind": "ATOMIC_BUNDLE",
+      "exact_command": "fixed argv arrays in execution_manifest.commands",
+      "exact_evidence_source": "precondition hashes, focused unittest output, module unittest output, git diff --check output, target diff stat output",
+      "expected_shape": "preconditions match; focused tests pass; module tests pass; git diff --check exits 0; target diff stat is limited to two target files",
+      "fail_predicate": "any command exits nonzero or evidence is missing",
+      "failure_path": "stop immediately without git mutation or retry",
+      "not_proven_predicate": "bounded evidence incomplete",
+      "owner": "USER",
+      "pass_predicate": "all fixed evidence members satisfy expected_shape",
+      "persistence_source": "state/governance/evidence/g007-source-fix-20260903-implementation",
+      "proof_id": "PT-G007-01",
+      "reader": "USER",
+      "runtime_identity": "local PHOENIX workspace plus precondition source/test SHA values",
+      "side_effects": "only two target files and governance candidate/report/evidence may be written",
+      "time_window": "this one implementation run",
+      "update_trigger": "single approved G-007 SOURCE_FIX implementation run",
+      "writer": "Codex local implementation and governance_command_runner test evidence"
+    }
+  ],
+  "execution_manifest": {
+    "commands": [
+      {
+        "argv": [
+          "./.venv/Scripts/python.exe",
+          "tools/codex_execution_preflight_gate.py",
+          "--candidate",
+          "state/governance/incoming/g007-source-fix-20260903-implementation.json",
+          "--agents",
+          "AGENTS.md",
+          "--ledger",
+          "knowledge/failure_class_ledger.json",
+          "--synonyms",
+          "config/governance/root_cause_synonyms.json",
+          "--report",
+          "state/governance/reports/g007-source-fix-20260903-implementation.report.json"
+        ],
+        "preflight": true
+      },
+      {
+        "argv": [
+          "./.venv/Scripts/python.exe",
+          "-m",
+          "unittest",
+          "tests.test_phoenix_disaster_recovery.DisasterRecoveryStep40Test.test_watchdog_allows_exact_legacy_attempt_limit_state_once",
+          "tests.test_phoenix_disaster_recovery.DisasterRecoveryStep40Test.test_run_migrates_legacy_attempt_limit_and_persists_current_context",
+          "tests.test_phoenix_disaster_recovery.DisasterRecoveryStep40Test.test_migration_consumed_same_identity_blocks_both_entrypoints",
+          "tests.test_phoenix_disaster_recovery.DisasterRecoveryStep40Test.test_migrated_state_without_current_context_consumed_reason_is_singleton",
+          "tests.test_phoenix_disaster_recovery.DisasterRecoveryStep40Test.test_legacy_identity_normalizes_previous_position_reasons",
+          "tests.test_phoenix_disaster_recovery.DisasterRecoveryStep40Test.test_legacy_attempt_limit_migration_allows_distinct_unconsumed_identity",
+          "tests.test_phoenix_disaster_recovery.DisasterRecoveryStep40Test.test_fail_safe_state_never_uses_legacy_migration",
+          "tests.test_phoenix_disaster_recovery.DisasterRecoveryStep40Test.test_fail_safe_beats_consumed_identity_for_both_entrypoints",
+          "tests.test_phoenix_disaster_recovery.DisasterRecoveryStep40Test.test_initial_legacy_migration_is_not_blocked_by_missing_current_context",
+          "tests.test_phoenix_disaster_recovery.DisasterRecoveryStep40Test.test_nonlegacy_current_safety_context_missing_fails_closed",
+          "tests.test_phoenix_disaster_recovery.DisasterRecoveryStep40Test.test_consumed_identity_with_repository_mismatch_uses_hard_validation_reason"
+        ],
+        "via_runner": true
+      },
+      {
+        "argv": [
+          "./.venv/Scripts/python.exe",
+          "-m",
+          "unittest",
+          "tests.test_phoenix_disaster_recovery"
+        ],
+        "via_runner": true
+      },
+      {
+        "argv": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "via_runner": true
+      },
+      {
+        "argv": [
+          "git",
+          "diff",
+          "--stat",
+          "--",
+          "phoenix_disaster_recovery.py",
+          "tests/test_phoenix_disaster_recovery.py"
+        ],
+        "via_runner": true
+      }
+    ]
+  },
+  "expires_at_utc": "2026-09-09T16:00:00Z",
+  "failure_classes": [],
+  "forbidden": [
+    "git add",
+    "git commit",
+    "git push",
+    "git reset",
+    "git checkout",
+    "git clean",
+    "modify any other source or test file",
+    "runtime broker Excel live PAPER state or order processing",
+    "Claude audit",
+    "invent non-existing field names"
+  ],
+  "objective": "Implement the approved G-007 Disaster Recovery source fix candidate in exactly two target files, then run the fixed focused and module checks without Git mutation.",
+  "output": {
+    "complete": true,
+    "fields": [
+      "AGENTS_READ",
+      "PRECONDITION_RESULT",
+      "PREFLIGHT_RESULT",
+      "FILES_WRITTEN",
+      "FOCUSED_TEST_RESULT",
+      "MODULE_TEST_RESULT",
+      "TEST_COUNT",
+      "DIFF_CHECK",
+      "SOURCE_SHA256_AFTER",
+      "TEST_SHA256_AFTER",
+      "PAPER",
+      "orders_submitted",
+      "BRIDGE_ARMED",
+      "GIT_MUTATION",
+      "SCOPE_VIOLATION",
+      "SOURCE_CLOSED_ALLOWED"
+    ],
+    "truncate": false
+  },
+  "output_budget": {
+    "declared_stderr_bytes": 12000,
+    "declared_stdout_bytes": 12000,
+    "max_stderr_bytes": 20000,
+    "max_stdout_bytes": 20000
+  },
+  "proof_targets": [
+    {
+      "claim": "G-007 disaster recovery legacy migration is fixed in source and covered by focused and module tests without Git mutation.",
+      "proof_id": "PT-G007-01"
+    }
+  ],
+  "result_branches": {
+    "FAIL": "stop at first failure",
+    "NOT_PROVEN": "stop if preflight or evidence incomplete",
+    "PASS": "two target files modified and requested checks pass"
+  },
+  "review_inputs": [
+    {
+      "actor": "user-approved-candidate-design",
+      "completed": true,
+      "context_id": "g007-design-final-20260903",
+      "prior_free_text_conclusion": false,
+      "provider": "user",
+      "review_type": "MECHANICAL_REVIEW"
+    }
+  ],
+  "review_requirements": [
+    "MECHANICAL_REVIEW"
+  ],
+  "rollback_stop": {
+    "failure_path": "Stop on first precondition, preflight, edit, focused test, module test, diff check, or diff stat failure; do not commit, push, or retry alternate approaches.",
+    "rollback_scope": "No destructive rollback; report changed files and stop on failure.",
+    "stop_before": "Any source edit unless precondition hashes match and preflight PASS."
+  },
+  "runtime_preconditions": [
+    {
+      "evidence": "User supplied exact precondition SHA-256 values and this run verifies before edit.",
+      "name": "source_sha256_precondition",
+      "proven": true
+    },
+    {
+      "evidence": "No runtime broker Excel live PAPER or order processing commands are in manifest.",
+      "name": "trading_safety",
+      "proven": true
+    }
+  ],
+  "safety": {
+    "required_states": [
+      {
+        "name": "PAPER",
+        "value": "MAINTAINED"
+      },
+      {
+        "name": "orders_submitted",
+        "value": 0
+      },
+      {
+        "name": "BRIDGE_ARMED",
+        "value": false
+      },
+      {
+        "name": "live_trading_change",
+        "value": false
+      },
+      {
+        "name": "broker_rss_send",
+        "value": false
+      }
+    ]
+  },
+  "shell_transport": {
+    "command": [
+      "./.venv/Scripts/python.exe",
+      "tools/governance_command_runner.py"
+    ],
+    "layers": [
+      "Codex",
+      "PowerShell",
+      "Python",
+      "governance_command_runner"
+    ],
+    "script_path": "",
+    "script_sha256": ""
+  },
+  "task": "Apply the fixed G-007 SOURCE_FIX to phoenix_disaster_recovery.py and tests/test_phoenix_disaster_recovery.py after source/test SHA preconditions match, then run focused G-007 unit tests, the disaster recovery test module, git diff --check, and target-only git diff --stat.",
+  "user_machine_operations": [],
+  "validator_version": "1.0.0",
+  "workspace": "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX"
+}

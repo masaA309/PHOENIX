@@ -1,0 +1,668 @@
+{
+  "agents_sha256": "fdae145e26b6cfbd6379e081c1aea323142bd7eea2600c44a7cd6f9443cba591",
+  "allowed": [
+    "Implement only exact T1A scope.",
+    "Add pure raw-config preflight helpers inside existing write-scoped files.",
+    "Place raw mode preflight before the first operation that can persist, spawn, connect, observe a broker, or otherwise mutate external/runtime state.",
+    "Modify only listed existing tests; no new test module.",
+    "Run only three governed commands in declared order."
+  ],
+  "artifact_lock": [
+    {
+      "existing": true,
+      "path": "AGENTS.md",
+      "sha256": "fdae145e26b6cfbd6379e081c1aea323142bd7eea2600c44a7cd6f9443cba591"
+    },
+    {
+      "existing": true,
+      "path": "tools/codex_execution_preflight_gate.py",
+      "sha256": "c3285dc603d4a165dd4f5e4b1b0a5815e88d9a79fd14ccb0b7ab7f6b1667035c"
+    },
+    {
+      "existing": true,
+      "path": "tools/governance_command_runner.py",
+      "sha256": "e3aa02280f3c247419a0345c3e5932c428776b578a19d9a450b1b962255d567f"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/codex_candidate.schema.json",
+      "sha256": "d5138c905d08e5dffa556657e71569f54360d46fcf2d6fc8ec4bdfc91f8bb1f0"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/evidence_graph.schema.json",
+      "sha256": "a84cfa934b5fa36af423e262f1528daa428d3cfda76f2020597d9edb338ca3ce"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/failure_class.schema.json",
+      "sha256": "fb8af14f515724fdf93137546547627c2ad91922d4d26a6780b349775e5c3e9e"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/gate_report.schema.json",
+      "sha256": "69397a896278a4419379ef5cb6d4eddea531c7e72176723c369258726a2eaeb8"
+    },
+    {
+      "existing": true,
+      "path": "config/governance/root_cause_synonyms.json",
+      "sha256": "456740ec977ba51bec8983c3bb227c62c8bf602095b1780520e0410ace501bb1"
+    },
+    {
+      "existing": true,
+      "path": "knowledge/failure_class_ledger.json",
+      "sha256": "b93e1d9ce313905cafbeb9433a37c757614bceab91b37c27412dd0de573d2e99"
+    },
+    {
+      "existing": true,
+      "path": "tests/test_codex_execution_preflight_gate.py",
+      "sha256": "e131c0647a6849a5703ea5c0dd44d64ca4d8a95e855a0802e6034de56295642c"
+    },
+    {
+      "existing": true,
+      "path": "execution_core.py",
+      "sha256": "9806255171579fbf7c26d750eb03459aa57db9e3e4b73b52cd32eabb91028e4c"
+    },
+    {
+      "existing": true,
+      "path": "realtime_gateway.py",
+      "sha256": "2b70bc331dfa8d4458b546a0dacc4d60309d5426c13e5d1a8d060b362b0fa569"
+    },
+    {
+      "existing": true,
+      "path": "phoenix_core/broker.py",
+      "sha256": "08d6c172564a7ed8510510dde417e1187dcf0565ed1db249572c8be4908677be"
+    },
+    {
+      "existing": true,
+      "path": "phoenix_core/rakuten_rss_broker.py",
+      "sha256": "62534952f922b783766e5bd435468ea8257194afda3d92e7f389b527e35f13bf"
+    },
+    {
+      "existing": true,
+      "path": "phoenix_core/rakuten_rss_adapter.py",
+      "sha256": "22b1d16fc9b7f8107d7fb81d939820dad10215866c9d7c24c37f16a645c4e6d7"
+    },
+    {
+      "existing": true,
+      "path": "phoenix_core/production_rakuten_rss_adapter.py",
+      "sha256": "332a7428b7c9eb9bc31e1161f95d861fdb158c9e50ad53d239fcf9de6b6a20be"
+    },
+    {
+      "existing": true,
+      "path": "phoenix_core/production_rakuten_rss_transport.py",
+      "sha256": "5aefb02e550c2cd438147b1f302aec1e7699af21e2a967bf598812ccbf8f387b"
+    },
+    {
+      "existing": true,
+      "path": "phoenix_core/protective_order_hooks.py",
+      "sha256": "8275837c4dbb25563de07095d8bba35b3c125eb4029a646901a3daa93a717f96"
+    },
+    {
+      "existing": true,
+      "path": "state/governance/t1a_scope_verify_v2_20260906.py",
+      "sha256": "35679c201fe166b03ae834f0392fa5846c3f0245bad7a9a3ab0b00df2d1e8bf7"
+    },
+    {
+      "existing": true,
+      "path": "state/governance/t1a_prestate_snapshot_v2_20260906.json",
+      "sha256": "3fecaa59b8a95814eadd2c45074f15cdc9944bf7c22bc85309d338b92ad17a49"
+    }
+  ],
+  "candidate_id": "PHOENIX-T1A-LEGACY-LIVE-ZERO-SIDE-EFFECT-FREEZE-V2-20260906",
+  "candidate_sha256": "0a890012705e1281f355f1523456c508d8304518975841cef39f78a8b0331122",
+  "candidate_type": "IMPLEMENTATION",
+  "created_at_utc": "2026-09-06T12:28:15.847264+00:00",
+  "evidence_graph": [
+    {
+      "bundle_members": [
+        "state/governance/command_outputs/t1a_v2_tests.stdout.txt",
+        "state/governance/command_outputs/t1a_v2_postcheck.stdout.txt"
+      ],
+      "claim": "Every canonical legacy LIVE entrypoint blocks from raw config before project/runtime imports, broker construction, subprocess, network, lock, state, log, report, queue, heartbeat, recovery, monitoring, or other persistent/external mutation.",
+      "evidence_kind": "ATOMIC_BUNDLE",
+      "exact_command": "T1A_TESTS + T1A_POSTSTATE_VERIFY",
+      "exact_evidence_source": "state/governance/command_outputs/t1a_v2_tests.stdout.txt+state/governance/command_outputs/t1a_v2_postcheck.stdout.txt",
+      "expected_shape": "pytest PASS and/or verifier PASS with zero outside-scope/runtime mutation",
+      "fail_predicate": "governed command nonzero, assertion failure, output limit failure, or verifier mutation/drift finding",
+      "failure_path": "stop T1A; do not retry in the same run and do not advance to T0",
+      "not_proven_predicate": "required command output is absent, stale, candidate-mismatched, or not produced through the governance runner",
+      "owner": "ChatGPT candidate design; Codex fixed-scope implementation",
+      "pass_predicate": "all entrypoint zero-side-effect tests PASS and POSTSTATE reports PROTECTED_RUNTIME_MUTATION=0 and OUTSIDE_SCOPE_MUTATION=0",
+      "persistence_source": "state/governance/command_outputs/t1a_v2_tests.stdout.txt+state/governance/command_outputs/t1a_v2_postcheck.stdout.txt",
+      "proof_id": "PT-T1A-01_LEGACY_ENTRYPOINTS_ZERO_SIDE_EFFECT",
+      "reader": "ChatGPT post-implementation review",
+      "runtime_identity": "canonical PHOENIX root at HEAD 62a163b42b4c56047fc7deb79b058c2daaba7de6 plus candidate SHA-256",
+      "side_effects": "governance command-output sinks and test temporary directories only; no production/runtime/order mutation",
+      "time_window": "candidate lifetime and the single governed T1A execution cycle",
+      "update_trigger": "exact T1A governed command execution",
+      "writer": "governance_command_runner bounded command outputs"
+    },
+    {
+      "bundle_members": [],
+      "claim": "order_manager and order_bridge_gate fail closed in memory/stdout for legacy LIVE or invalid configuration before broker/risk/candidate/state/output persistence.",
+      "evidence_kind": "SINGLE",
+      "exact_command": "T1A_TESTS",
+      "exact_evidence_source": "state/governance/command_outputs/t1a_v2_tests.stdout.txt",
+      "expected_shape": "pytest PASS and/or verifier PASS with zero outside-scope/runtime mutation",
+      "fail_predicate": "governed command nonzero, assertion failure, output limit failure, or verifier mutation/drift finding",
+      "failure_path": "stop T1A before any follow-on implementation",
+      "not_proven_predicate": "required command output is absent, stale, candidate-mismatched, or not produced through the governance runner",
+      "owner": "ChatGPT candidate design; Codex fixed-scope implementation",
+      "pass_predicate": "Step42 order-manager/order-bridge zero-persistence tests PASS",
+      "persistence_source": "state/governance/command_outputs/t1a_v2_tests.stdout.txt",
+      "proof_id": "PT-T1A-02_ORDER_BRIDGE_ZERO_SIDE_EFFECT",
+      "reader": "ChatGPT post-implementation review",
+      "runtime_identity": "canonical PHOENIX root at HEAD 62a163b42b4c56047fc7deb79b058c2daaba7de6 plus candidate SHA-256",
+      "side_effects": "governance command-output sinks and test temporary directories only; no production/runtime/order mutation",
+      "time_window": "candidate lifetime and the single governed T1A execution cycle",
+      "update_trigger": "exact T1A governed command execution",
+      "writer": "governance_command_runner bounded command outputs"
+    },
+    {
+      "bundle_members": [],
+      "claim": "generic create_broker accepts only exact PAPER_SAFE/PaperBroker and never constructs legacy LIVE concrete transport/broker objects.",
+      "evidence_kind": "SINGLE",
+      "exact_command": "T1A_TESTS",
+      "exact_evidence_source": "state/governance/command_outputs/t1a_v2_tests.stdout.txt",
+      "expected_shape": "pytest PASS and/or verifier PASS with zero outside-scope/runtime mutation",
+      "fail_predicate": "governed command nonzero, assertion failure, output limit failure, or verifier mutation/drift finding",
+      "failure_path": "stop T1A",
+      "not_proven_predicate": "required command output is absent, stale, candidate-mismatched, or not produced through the governance runner",
+      "owner": "ChatGPT candidate design; Codex fixed-scope implementation",
+      "pass_predicate": "factory LIVE rejection/PAPER_SAFE regression test PASS",
+      "persistence_source": "state/governance/command_outputs/t1a_v2_tests.stdout.txt",
+      "proof_id": "PT-T1A-03_GENERIC_FACTORY_PAPER_ONLY",
+      "reader": "ChatGPT post-implementation review",
+      "runtime_identity": "canonical PHOENIX root at HEAD 62a163b42b4c56047fc7deb79b058c2daaba7de6 plus candidate SHA-256",
+      "side_effects": "governance command-output sinks and test temporary directories only; no production/runtime/order mutation",
+      "time_window": "candidate lifetime and the single governed T1A execution cycle",
+      "update_trigger": "exact T1A governed command execution",
+      "writer": "governance_command_runner bounded command outputs"
+    },
+    {
+      "bundle_members": [],
+      "claim": "direct pipeline and execute_events reject non-exact PaperBroker before broker observation, account snapshot, order construction, execution logging, or submit.",
+      "evidence_kind": "SINGLE",
+      "exact_command": "T1A_TESTS",
+      "exact_evidence_source": "state/governance/command_outputs/t1a_v2_tests.stdout.txt",
+      "expected_shape": "pytest PASS and/or verifier PASS with zero outside-scope/runtime mutation",
+      "fail_predicate": "governed command nonzero, assertion failure, output limit failure, or verifier mutation/drift finding",
+      "failure_path": "stop T1A",
+      "not_proven_predicate": "required command output is absent, stale, candidate-mismatched, or not produced through the governance runner",
+      "owner": "ChatGPT candidate design; Codex fixed-scope implementation",
+      "pass_predicate": "pipeline/execution exact-PaperBroker tests PASS",
+      "persistence_source": "state/governance/command_outputs/t1a_v2_tests.stdout.txt",
+      "proof_id": "PT-T1A-04_LIBRARY_EXECUTION_PAPER_ONLY",
+      "reader": "ChatGPT post-implementation review",
+      "runtime_identity": "canonical PHOENIX root at HEAD 62a163b42b4c56047fc7deb79b058c2daaba7de6 plus candidate SHA-256",
+      "side_effects": "governance command-output sinks and test temporary directories only; no production/runtime/order mutation",
+      "time_window": "candidate lifetime and the single governed T1A execution cycle",
+      "update_trigger": "exact T1A governed command execution",
+      "writer": "governance_command_runner bounded command outputs"
+    },
+    {
+      "bundle_members": [],
+      "claim": "phoenix_core root no longer exposes legacy concrete LIVE mutation capabilities and no longer autoimports protective_order_hooks; direct legacy modules remain regression-only.",
+      "evidence_kind": "SINGLE",
+      "exact_command": "T1A_TESTS",
+      "exact_evidence_source": "state/governance/command_outputs/t1a_v2_tests.stdout.txt",
+      "expected_shape": "pytest PASS and/or verifier PASS with zero outside-scope/runtime mutation",
+      "fail_predicate": "governed command nonzero, assertion failure, output limit failure, or verifier mutation/drift finding",
+      "failure_path": "stop T1A",
+      "not_proven_predicate": "required command output is absent, stale, candidate-mismatched, or not produced through the governance runner",
+      "owner": "ChatGPT candidate design; Codex fixed-scope implementation",
+      "pass_predicate": "isolated root-import capability/hook test PASS",
+      "persistence_source": "state/governance/command_outputs/t1a_v2_tests.stdout.txt",
+      "proof_id": "PT-T1A-05_ROOT_LEGACY_CAPABILITY_NOT_EXPOSED",
+      "reader": "ChatGPT post-implementation review",
+      "runtime_identity": "canonical PHOENIX root at HEAD 62a163b42b4c56047fc7deb79b058c2daaba7de6 plus candidate SHA-256",
+      "side_effects": "governance command-output sinks and test temporary directories only; no production/runtime/order mutation",
+      "time_window": "candidate lifetime and the single governed T1A execution cycle",
+      "update_trigger": "exact T1A governed command execution",
+      "writer": "governance_command_runner bounded command outputs"
+    },
+    {
+      "bundle_members": [],
+      "claim": "Pre-existing dirty work outside T1A, Step49 body below its import header, and protected config/state/report/execution/runtime/log content remain byte-identical.",
+      "evidence_kind": "SINGLE",
+      "exact_command": "T1A_POSTSTATE_VERIFY",
+      "exact_evidence_source": "state/governance/command_outputs/t1a_v2_postcheck.stdout.txt",
+      "expected_shape": "pytest PASS and/or verifier PASS with zero outside-scope/runtime mutation",
+      "fail_predicate": "governed command nonzero, assertion failure, output limit failure, or verifier mutation/drift finding",
+      "failure_path": "stop; do not reset automatically",
+      "not_proven_predicate": "required command output is absent, stale, candidate-mismatched, or not produced through the governance runner",
+      "owner": "ChatGPT candidate design; Codex fixed-scope implementation",
+      "pass_predicate": "POSTSTATE:PASS with OUTSIDE_SCOPE_MUTATION=0, PROTECTED_RUNTIME_MUTATION=0, unchanged Step49 body",
+      "persistence_source": "state/governance/command_outputs/t1a_v2_postcheck.stdout.txt",
+      "proof_id": "PT-T1A-06_PREEXISTING_DIRTY_AND_RUNTIME_STATE_PRESERVED",
+      "reader": "ChatGPT post-implementation review",
+      "runtime_identity": "canonical PHOENIX root at HEAD 62a163b42b4c56047fc7deb79b058c2daaba7de6 plus candidate SHA-256",
+      "side_effects": "governance command-output sinks and test temporary directories only; no production/runtime/order mutation",
+      "time_window": "candidate lifetime and the single governed T1A execution cycle",
+      "update_trigger": "exact T1A governed command execution",
+      "writer": "governance_command_runner bounded command outputs"
+    },
+    {
+      "bundle_members": [],
+      "claim": "PAPER_SAFE, PAPER monitor-only, zero-order skip, direct protective regression, adapter mock compatibility, and transport construction regressions remain intact.",
+      "evidence_kind": "SINGLE",
+      "exact_command": "T1A_TESTS",
+      "exact_evidence_source": "state/governance/command_outputs/t1a_v2_tests.stdout.txt",
+      "expected_shape": "pytest PASS and/or verifier PASS with zero outside-scope/runtime mutation",
+      "fail_predicate": "governed command nonzero, assertion failure, output limit failure, or verifier mutation/drift finding",
+      "failure_path": "stop without substitute tests",
+      "not_proven_predicate": "required command output is absent, stale, candidate-mismatched, or not produced through the governance runner",
+      "owner": "ChatGPT candidate design; Codex fixed-scope implementation",
+      "pass_predicate": "all selected regression tests PASS",
+      "persistence_source": "state/governance/command_outputs/t1a_v2_tests.stdout.txt",
+      "proof_id": "PT-T1A-07_PAPER_SAFE_AND_LEGACY_REGRESSION_PRESERVED",
+      "reader": "ChatGPT post-implementation review",
+      "runtime_identity": "canonical PHOENIX root at HEAD 62a163b42b4c56047fc7deb79b058c2daaba7de6 plus candidate SHA-256",
+      "side_effects": "governance command-output sinks and test temporary directories only; no production/runtime/order mutation",
+      "time_window": "candidate lifetime and the single governed T1A execution cycle",
+      "update_trigger": "exact T1A governed command execution",
+      "writer": "governance_command_runner bounded command outputs"
+    }
+  ],
+  "execution_manifest": {
+    "allowed_assertions": [
+      "legacy LIVE/invalid entrypoints zero persistent/external side effects",
+      "no broker construction/observation on blocked paths",
+      "generic factory exact PAPER_SAFE/PaperBroker only",
+      "pipeline/execute_events exact PaperBroker before observation",
+      "root no legacy concrete LIVE exposure or hook autoimport",
+      "PAPER_SAFE/PAPER monitor-only regressions pass",
+      "outside dirty/runtime/Step49 body unchanged"
+    ],
+    "allowed_behaviors": [
+      "Canonical script entrypoints classify raw mode before the first persistent/external side effect; existing import compatibility is preserved unless the import itself is the proven side effect being removed.",
+      "LIVE_ACTIVE/LIVE_RECONCILE_ONLY/legacy mode LIVE/missing/malformed/unknown config fail closed before persistent/external side effect.",
+      "Blocked branch may read minimum config and write stdout/stderr only, then exit nonzero.",
+      "PAPER_SAFE and PAPER monitor-only remain available.",
+      "order_bridge_gate blocked report/context is in-memory only; no persistence/broker/risk/candidate/config rewrite.",
+      "create_broker only exact PAPER_SAFE with paper broker/transport and all live/production/armed flags false; no concrete LIVE imports.",
+      "pipeline three boundaries use type(broker) is PaperBroker before observation/submit.",
+      "execute_events uses type(broker) is PaperBroker before event/order/log/broker work.",
+      "phoenix_core root removes RakutenRssBroker/ProductionRakutenRssAdapter/ProductionRakutenRssTransport/Win32ComExcelBackend exports and protective hook autoimport while retaining safe types.",
+      "Direct legacy modules remain regression-only; no new live core and no G011 claim.",
+      "Step49 only import header may change; body from first definition onward byte-identical."
+    ],
+    "allowed_commands": [
+      "T1A_PRESTATE_VERIFY",
+      "T1A_TESTS",
+      "T1A_POSTSTATE_VERIFY"
+    ],
+    "allowed_functions": [
+      "order_bridge_gate raw preflight + blocked-path build/run/dispatch/save functions",
+      "factory imports/_operating_mode_profile/create_broker",
+      "phoenix_core __init__ imports/__all__",
+      "pipeline _run_direct_pipeline_from_csv/_run_direct_pipeline/_execute_approved_orders",
+      "execution execute_events",
+      "order_manager raw preflight/main plus only import movement needed to keep the guard before order_bridge import",
+      "broker_gateway raw preflight/main; preserve import compatibility unless a change is strictly required",
+      "direct_pipeline_v7 raw preflight/main",
+      "execution_engine_v7 raw preflight/run/main",
+      "scheduled_runner_v7 raw pipeline preflight/_run_scheduled_refresh/main; preserve existing module attributes/import compatibility",
+      "run_phoenix raw direct config preflight/_run_main/main; preserve existing module attributes/import compatibility",
+      "Step42PreOrderGateTest T1A additions",
+      "Step42RunPhoenixIntegrationTest T1A additions",
+      "SchedulerStep7Test T1A addition",
+      "CandidateExecutionContractStep18Test T1A additions",
+      "Step47 import rewiring + T1A tests + explicit protective hook opt-in for legacy regression",
+      "Step48 import rewiring + existing mock interface test adjustment",
+      "Step49 import header only; body immutable"
+    ],
+    "allowed_tests": [
+      "tests/test_v7_step42.py::Step42PreOrderGateTest::test_t1a_legacy_live_modes_block_before_broker_and_persist_nothing",
+      "tests/test_v7_step42_run_phoenix.py::Step42RunPhoenixIntegrationTest::test_t1a_order_manager_legacy_live_exits_nonzero_without_persistence",
+      "tests/test_v7_step42_run_phoenix.py::Step42RunPhoenixIntegrationTest::test_t1a_run_phoenix_legacy_live_blocks_before_operational_side_effects",
+      "tests/test_v7_step7.py::SchedulerStep7Test::test_t1a_scheduled_runner_legacy_live_blocks_before_lock_subprocess_state_log_and_monitor",
+      "tests/test_v7_step18.py::CandidateExecutionContractStep18Test::test_t1a_direct_pipeline_script_legacy_live_blocks_before_broker_and_outputs",
+      "tests/test_v7_step18.py::CandidateExecutionContractStep18Test::test_t1a_execution_engine_script_legacy_live_blocks_before_broker_and_outputs",
+      "tests/test_v7_step18.py::CandidateExecutionContractStep18Test::test_t1a_direct_pipeline_rejects_non_paper_before_broker_observation",
+      "tests/test_v7_step18.py::CandidateExecutionContractStep18Test::test_t1a_execute_events_rejects_non_paper_before_account_observation",
+      "tests/test_v7_step18.py::CandidateExecutionContractStep18Test::test_all_skip_rows_produce_zero_orders",
+      "tests/test_v7_step47.py::RakutenRssBrokerStep47Test::test_t1a_factory_rejects_legacy_live_profiles_and_keeps_paper_safe",
+      "tests/test_v7_step47.py::RakutenRssBrokerStep47Test::test_t1a_broker_gateway_live_or_invalid_fails_closed_before_any_side_effect",
+      "tests/test_v7_step47.py::RakutenRssBrokerStep47Test::test_t1a_root_does_not_export_legacy_live_capabilities_or_autoimport_hooks",
+      "tests/test_v7_step47.py::RakutenRssBrokerStep47Test::test_protective_sell_confirms_only_after_rss_status_is_valid",
+      "tests/test_v7_step48.py::ProductionRakutenRssAdapterStep48Test::test_mock_interface_compat_and_no_real_calls",
+      "tests/test_v7_step49.py::ProductionRakutenRssTransportStep49Test::test_import_and_construct"
+    ],
+    "commands": [
+      {
+        "argv": [
+          "./.venv/Scripts/python.exe",
+          "-B",
+          "-X",
+          "utf8",
+          "state/governance/t1a_scope_verify_v2_20260906.py",
+          "--mode",
+          "pre"
+        ],
+        "command_id": "T1A_PRESTATE_VERIFY",
+        "preflight": false,
+        "via_runner": true
+      },
+      {
+        "argv": [
+          "./.venv/Scripts/python.exe",
+          "-B",
+          "-X",
+          "utf8",
+          "-m",
+          "pytest",
+          "-q",
+          "-p",
+          "no:cacheprovider",
+          "tests/test_v7_step42.py::Step42PreOrderGateTest::test_t1a_legacy_live_modes_block_before_broker_and_persist_nothing",
+          "tests/test_v7_step42_run_phoenix.py::Step42RunPhoenixIntegrationTest::test_t1a_order_manager_legacy_live_exits_nonzero_without_persistence",
+          "tests/test_v7_step42_run_phoenix.py::Step42RunPhoenixIntegrationTest::test_t1a_run_phoenix_legacy_live_blocks_before_operational_side_effects",
+          "tests/test_v7_step7.py::SchedulerStep7Test::test_t1a_scheduled_runner_legacy_live_blocks_before_lock_subprocess_state_log_and_monitor",
+          "tests/test_v7_step18.py::CandidateExecutionContractStep18Test::test_t1a_direct_pipeline_script_legacy_live_blocks_before_broker_and_outputs",
+          "tests/test_v7_step18.py::CandidateExecutionContractStep18Test::test_t1a_execution_engine_script_legacy_live_blocks_before_broker_and_outputs",
+          "tests/test_v7_step18.py::CandidateExecutionContractStep18Test::test_t1a_direct_pipeline_rejects_non_paper_before_broker_observation",
+          "tests/test_v7_step18.py::CandidateExecutionContractStep18Test::test_t1a_execute_events_rejects_non_paper_before_account_observation",
+          "tests/test_v7_step18.py::CandidateExecutionContractStep18Test::test_all_skip_rows_produce_zero_orders",
+          "tests/test_v7_step47.py::RakutenRssBrokerStep47Test::test_t1a_factory_rejects_legacy_live_profiles_and_keeps_paper_safe",
+          "tests/test_v7_step47.py::RakutenRssBrokerStep47Test::test_t1a_broker_gateway_live_or_invalid_fails_closed_before_any_side_effect",
+          "tests/test_v7_step47.py::RakutenRssBrokerStep47Test::test_t1a_root_does_not_export_legacy_live_capabilities_or_autoimport_hooks",
+          "tests/test_v7_step47.py::RakutenRssBrokerStep47Test::test_protective_sell_confirms_only_after_rss_status_is_valid",
+          "tests/test_v7_step48.py::ProductionRakutenRssAdapterStep48Test::test_mock_interface_compat_and_no_real_calls",
+          "tests/test_v7_step49.py::ProductionRakutenRssTransportStep49Test::test_import_and_construct"
+        ],
+        "command_id": "T1A_TESTS",
+        "preflight": false,
+        "via_runner": true
+      },
+      {
+        "argv": [
+          "./.venv/Scripts/python.exe",
+          "-B",
+          "-X",
+          "utf8",
+          "state/governance/t1a_scope_verify_v2_20260906.py",
+          "--mode",
+          "post"
+        ],
+        "command_id": "T1A_POSTSTATE_VERIFY",
+        "preflight": false,
+        "via_runner": true
+      }
+    ],
+    "forbidden_additions": [
+      "new source file",
+      "new test file",
+      "new production fallback",
+      "new LIVE authority",
+      "new observation/logging path",
+      "new test selector",
+      "new acceptance condition",
+      "new shell command",
+      "new runtime persistence",
+      "scope expansion"
+    ],
+    "proof_targets": [
+      "PT-T1A-01_LEGACY_ENTRYPOINTS_ZERO_SIDE_EFFECT",
+      "PT-T1A-02_ORDER_BRIDGE_ZERO_SIDE_EFFECT",
+      "PT-T1A-03_GENERIC_FACTORY_PAPER_ONLY",
+      "PT-T1A-04_LIBRARY_EXECUTION_PAPER_ONLY",
+      "PT-T1A-05_ROOT_LEGACY_CAPABILITY_NOT_EXPOSED",
+      "PT-T1A-06_PREEXISTING_DIRTY_AND_RUNTIME_STATE_PRESERVED",
+      "PT-T1A-07_PAPER_SAFE_AND_LEGACY_REGRESSION_PRESERVED"
+    ],
+    "read_files": [
+      "AGENTS.md",
+      "broker_gateway.py",
+      "config/governance/codex_candidate.schema.json",
+      "config/governance/evidence_graph.schema.json",
+      "config/governance/failure_class.schema.json",
+      "config/governance/gate_report.schema.json",
+      "config/governance/root_cause_synonyms.json",
+      "direct_pipeline_v7.py",
+      "execution_core.py",
+      "execution_engine_v7.py",
+      "knowledge/failure_class_ledger.json",
+      "order_manager.py",
+      "phoenix_core/__init__.py",
+      "phoenix_core/broker.py",
+      "phoenix_core/execution.py",
+      "phoenix_core/factory.py",
+      "phoenix_core/order_bridge_gate.py",
+      "phoenix_core/pipeline.py",
+      "phoenix_core/production_rakuten_rss_adapter.py",
+      "phoenix_core/production_rakuten_rss_transport.py",
+      "phoenix_core/protective_order_hooks.py",
+      "phoenix_core/rakuten_rss_adapter.py",
+      "phoenix_core/rakuten_rss_broker.py",
+      "realtime_gateway.py",
+      "run_phoenix.py",
+      "scheduled_runner_v7.py",
+      "state/governance/incoming/t1a_legacy_live_freeze_impl_v2_20260906.json",
+      "state/governance/reports/t1a_legacy_live_freeze_impl_v2_20260906.json",
+      "state/governance/t1a_prestate_snapshot_v2_20260906.json",
+      "state/governance/t1a_scope_verify_v2_20260906.py",
+      "tests/test_codex_execution_preflight_gate.py",
+      "tests/test_v7_step18.py",
+      "tests/test_v7_step42.py",
+      "tests/test_v7_step42_run_phoenix.py",
+      "tests/test_v7_step47.py",
+      "tests/test_v7_step48.py",
+      "tests/test_v7_step49.py",
+      "tests/test_v7_step7.py",
+      "tools/codex_execution_preflight_gate.py",
+      "tools/governance_command_runner.py"
+    ],
+    "write_files": [
+      "phoenix_core/order_bridge_gate.py",
+      "phoenix_core/factory.py",
+      "phoenix_core/__init__.py",
+      "phoenix_core/pipeline.py",
+      "phoenix_core/execution.py",
+      "order_manager.py",
+      "broker_gateway.py",
+      "direct_pipeline_v7.py",
+      "execution_engine_v7.py",
+      "scheduled_runner_v7.py",
+      "run_phoenix.py",
+      "tests/test_v7_step42.py",
+      "tests/test_v7_step42_run_phoenix.py",
+      "tests/test_v7_step7.py",
+      "tests/test_v7_step18.py",
+      "tests/test_v7_step47.py",
+      "tests/test_v7_step48.py",
+      "tests/test_v7_step49.py",
+      "state/governance/command_outputs/t1a_v2_precheck.stdout.txt",
+      "state/governance/command_outputs/t1a_v2_precheck.stderr.txt",
+      "state/governance/command_outputs/t1a_v2_tests.stdout.txt",
+      "state/governance/command_outputs/t1a_v2_tests.stderr.txt",
+      "state/governance/command_outputs/t1a_v2_postcheck.stdout.txt",
+      "state/governance/command_outputs/t1a_v2_postcheck.stderr.txt"
+    ]
+  },
+  "expires_at_utc": "2026-09-06T18:28:15.847264+00:00",
+  "failure_classes": [
+    {
+      "action": "REMEDIATE",
+      "declared_failure_class_ids": [
+        "G-008"
+      ],
+      "prevention_control_evidence": {
+        "read-only observation boundary": "PT-T1A-01_LEGACY_ENTRYPOINTS_ZERO_SIDE_EFFECT"
+      },
+      "proposed_root_cause_text": "observation path causes write side effect",
+      "registration": null,
+      "resolved_root_cause_code": "observation path causes write side effect",
+      "target_prevention_controls": [
+        "read-only observation boundary"
+      ]
+    },
+    {
+      "action": "REMEDIATE",
+      "declared_failure_class_ids": [
+        "G-009"
+      ],
+      "prevention_control_evidence": {
+        "live runtime provenance lock": "PT-T1A-01_LEGACY_ENTRYPOINTS_ZERO_SIDE_EFFECT"
+      },
+      "proposed_root_cause_text": "live runtime provenance divergence",
+      "registration": null,
+      "resolved_root_cause_code": "live runtime provenance divergence",
+      "target_prevention_controls": [
+        "live runtime provenance lock"
+      ]
+    },
+    {
+      "action": "REMEDIATE",
+      "declared_failure_class_ids": [
+        "G-010"
+      ],
+      "prevention_control_evidence": {
+        "single live economic mutation authority": "PT-T1A-04_LIBRARY_EXECUTION_PAPER_ONLY"
+      },
+      "proposed_root_cause_text": "live authority boundary violation",
+      "registration": null,
+      "resolved_root_cause_code": "live authority boundary violation",
+      "target_prevention_controls": [
+        "single live economic mutation authority"
+      ]
+    }
+  ],
+  "forbidden": [
+    "Any change outside write_files.",
+    "Any T0/T1B/T2/G011/live-core/release work.",
+    "Any Git mutation.",
+    "Any real order/RSS/COM/VBA/LIVE promotion/BRIDGE_ARMED change.",
+    "Any undeclared test/investigation/fallback/log/assertion/state/acceptance/command.",
+    "Any same-run retry or repair after failure."
+  ],
+  "objective": "Freeze every canonical legacy LIVE execution entrypoint before any persistent/external side effect, while preserving PAPER_SAFE behavior and all pre-existing local dirty work.",
+  "output": {
+    "complete": true,
+    "required_fields": [
+      "AGENTS_READ",
+      "PREFLIGHT_GATE",
+      "PRESTATE",
+      "IMPLEMENTATION_RESULT",
+      "TEST_RESULT",
+      "POSTSTATE",
+      "SCOPE_VIOLATION_PROPOSED",
+      "AGENTS_COMPLIANCE",
+      "REAL_ORDERS",
+      "GIT_MUTATION",
+      "CHANGED_FILES",
+      "POSTSTATE_SHA256"
+    ],
+    "truncate": false
+  },
+  "output_budget": {
+    "declared_stderr_bytes": 16384,
+    "declared_stdout_bytes": 16384,
+    "max_stderr_bytes": 262144,
+    "max_stdout_bytes": 262144
+  },
+  "proof_targets": [
+    "PT-T1A-01_LEGACY_ENTRYPOINTS_ZERO_SIDE_EFFECT",
+    "PT-T1A-02_ORDER_BRIDGE_ZERO_SIDE_EFFECT",
+    "PT-T1A-03_GENERIC_FACTORY_PAPER_ONLY",
+    "PT-T1A-04_LIBRARY_EXECUTION_PAPER_ONLY",
+    "PT-T1A-05_ROOT_LEGACY_CAPABILITY_NOT_EXPOSED",
+    "PT-T1A-06_PREEXISTING_DIRTY_AND_RUNTIME_STATE_PRESERVED",
+    "PT-T1A-07_PAPER_SAFE_AND_LEGACY_REGRESSION_PRESERVED"
+  ],
+  "result_branches": {
+    "ALL_COMMANDS_PASS": "Return to ChatGPT for mandatory whole-flow virtual E2E; do not start T0.",
+    "GATE_FAIL_OR_NOT_PROVEN": "Stop before implementation.",
+    "GATE_PASS": "Codex may PRESTATE once, implement exact scope, TEST once, then POSTSTATE once on PASS.",
+    "POSTSTATE_FAIL": "Stop; T1A not accepted.",
+    "PRESTATE_FAIL": "Stop before edits.",
+    "TEST_FAIL": "Stop without retry; no POSTSTATE."
+  },
+  "review_inputs": [
+    {
+      "actor": "ChatGPT",
+      "candidate_actor": "ChatGPT",
+      "candidate_context_id": "T1A-V2-SEMANTIC-FREEZE-20260906",
+      "candidate_provider": "OpenAI",
+      "completed": true,
+      "context_id": "T1A-V2-COMPLETENESS-REVIEW-20260906",
+      "prior_free_text_conclusion": false,
+      "provider": "OpenAI",
+      "review_type": "COMPLETENESS_REVIEW"
+    }
+  ],
+  "review_requirements": [
+    "MECHANICAL_REVIEW",
+    "COMPLETENESS_REVIEW"
+  ],
+  "rollback_stop": {
+    "failure_path": "Any Gate/PRESTATE/scope/test/POSTSTATE failure stops immediately.",
+    "rollback_scope": "Do not reset automatically; preserve pre-existing dirty work and failed target state for ChatGPT analysis; correction requires new candidate and whole virtual E2E from start.",
+    "stop_before": "No retry, alternate test, repair, T0/T1B, Git or live/order action in same run."
+  },
+  "runtime_preconditions": [
+    {
+      "evidence": "prep aborts unless canonical root/main/62a163 match",
+      "name": "canonical_root_head_branch",
+      "proven": true
+    },
+    {
+      "evidence": "prep verifies exact user-observed SHA256 for original 13",
+      "name": "original_t1a_targets_unchanged",
+      "proven": true
+    },
+    {
+      "evidence": "prep requires 5 newly added scope targets git-clean at locked HEAD",
+      "name": "new_scope_targets_clean",
+      "proven": true
+    },
+    {
+      "evidence": "snapshot binds outside diff/staged/untracked, Step49 body, protected runtime trees",
+      "name": "dirty_and_runtime_baseline_captured",
+      "proven": true
+    }
+  ],
+  "safety": {
+    "legacy_live_block_side_effect_policy": "raw config reads and stdout/stderr only; no repo/runtime persistence, subprocess, network, broker, heartbeat, recovery, monitoring, queue, report, or order mutation",
+    "paper_safe_behavior": "preserve existing PAPER_SAFE and PAPER monitor-only behavior",
+    "required_states": [
+      {
+        "name": "REAL_ORDERS",
+        "value": 0
+      },
+      {
+        "name": "ORDERS_SUBMITTED",
+        "value": 0
+      },
+      {
+        "name": "BRIDGE_ARMED",
+        "value": false
+      },
+      {
+        "name": "LIVE_RELEASE",
+        "value": false
+      },
+      {
+        "name": "GIT_MUTATION",
+        "value": 0
+      }
+    ]
+  },
+  "shell_transport": {
+    "command": [
+      "./.venv/Scripts/python.exe",
+      "-B",
+      "-X",
+      "utf8"
+    ],
+    "layers": [
+      "Git Bash",
+      "Python argv"
+    ]
+  },
+  "task": "T1A LEGACY_LIVE_FREEZE v2: zero-side-effect fail-closed legacy LIVE boundary",
+  "user_machine_operations": [],
+  "validator_version": "1.1.0",
+  "workspace": "C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX"
+}

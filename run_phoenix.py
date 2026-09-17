@@ -159,7 +159,7 @@ TASKS: list[dict[str, Any]] = [
         "name": "LINE・Discord通知",
         "script": "notify.py",
         "required": True,
-        "enabled": True,
+        "enabled": False,
     },
 ]
 

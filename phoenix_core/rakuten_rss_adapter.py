@@ -44,6 +44,12 @@ class RakutenRssOrderUpdate:
     rss_order_id: int = 0
     rss_order_number: str = ""
     authoritative_rss_status: int = -1
+    fill_event_id: str = ""
+    fill_accounting_mode: str = "EVENT"
+    source_order_number: str = ""
+    source_reception_number: str = ""
+    cumulative_filled_quantity: int = 0
+    cumulative_average_fill_price: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +79,9 @@ class RakutenRssAdapter(Protocol):
     def cancel_order(self, broker_order_id: str) -> RakutenRssCancelAck:
         raise NotImplementedError
 
+    def executable_buy_price(self, ticker: str) -> float | None:
+        raise NotImplementedError
+
 
 @dataclass(slots=True)
 class _MockScript:
@@ -96,6 +105,7 @@ class MockRakutenRssAdapter(RakutenRssAdapter):
         healthy: bool = True,
         live_trading_enabled: bool = True,
         message: str = "MOCK_RSS_READY",
+        executable_prices: dict[str, float] | None = None,
     ) -> None:
         self._healthy = healthy
         self._live_trading_enabled = live_trading_enabled
@@ -103,6 +113,10 @@ class MockRakutenRssAdapter(RakutenRssAdapter):
         self._scripts_by_client_order_id: dict[str, _MockScript] = {}
         self._scripts_by_broker_order_id: dict[str, _MockScript] = {}
         self.submitted_requests: list[dict[str, Any]] = []
+        self._executable_prices = {
+            str(ticker).strip().upper(): float(price)
+            for ticker, price in (executable_prices or {}).items()
+        }
 
     @property
     def submitted_count(self) -> int:
@@ -168,6 +182,7 @@ class MockRakutenRssAdapter(RakutenRssAdapter):
         rss_order_id: int = 0,
         rss_order_number: str = "",
         authoritative_rss_status: int = -1,
+        fill_event_id: str = "",
     ) -> None:
         script = self._scripts_by_client_order_id.get(client_order_id)
         if script is None:
@@ -183,6 +198,7 @@ class MockRakutenRssAdapter(RakutenRssAdapter):
                 rss_order_id=int(rss_order_id),
                 rss_order_number=str(rss_order_number),
                 authoritative_rss_status=int(authoritative_rss_status),
+                fill_event_id=str(fill_event_id),
             )
         )
 
@@ -192,6 +208,9 @@ class MockRakutenRssAdapter(RakutenRssAdapter):
             live_trading_enabled=self._live_trading_enabled,
             message=self._message,
         )
+
+    def executable_buy_price(self, ticker: str) -> float | None:
+        return self._executable_prices.get(str(ticker).strip().upper())
 
     def submit_order(
         self,

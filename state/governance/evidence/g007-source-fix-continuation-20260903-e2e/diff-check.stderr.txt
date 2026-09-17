@@ -1,0 +1,11 @@
+warning: in the working copy of 'config/v7_direct_pipeline_config.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'install_v7_scheduler.ps1', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'phoenix_core/broker.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'phoenix_core/order_bridge_gate.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'phoenix_core/production_rakuten_rss_transport.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'phoenix_core/rakuten_rss_broker.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'phoenix_disaster_recovery.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'phoenix_watchdog.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_phoenix_disaster_recovery.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_v7_step49.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'uninstall_v7_scheduler.ps1', LF will be replaced by CRLF the next time Git touches it

@@ -1,0 +1,23 @@
+[2026-09-03 00:43:07] WATCHDOG_STARTING max_restarts=3 target=C:\Users\ashtc\AppData\Local\Temp\tmpj5ncw5a7\run_phoenix.py | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] LIVE_MODE_FIXED live_trading=True order_capability=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] LOCK_ACQUIRED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmpj5ncw5a7\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] PROCESS_LAUNCHED pid=41972 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] PROCESS_STARTED pid=41972 startup_grace_seconds=0.0 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] REPOSITORY_GUARDIAN_BLOCKED backoff_seconds=0.0 blocked_attempt=1 exit_code=2 reason=startup_safety_gate_exit_2 restart_suppressed=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] LOCK_RELEASED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmpj5ncw5a7\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] WATCHDOG_STOPPED exit_code=2 reason=completed restarts_are_bounded=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] WATCHDOG_STARTING max_restarts=2 target=C:\Users\ashtc\AppData\Local\Temp\tmplps5pten\run_phoenix.py | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] LIVE_MODE_FIXED live_trading=True order_capability=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] LOCK_ACQUIRED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmplps5pten\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] PROCESS_LAUNCHED pid=57212 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] PROCESS_STARTED pid=57212 startup_grace_seconds=0.0 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] DISASTER_RECOVERY_STATE_CHECKED reason=RECOVERY_CONFIRMATION_REQUIRED recovery_attempt=1 recovery_status=RECOVERY_REQUIRED restart_allowed=True | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] ABNORMAL_EXIT exit_code=1 restarts_used=0 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] RESTART_SCHEDULED backoff_seconds=0.0 restart_number=1 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] PROCESS_LAUNCHED pid=47364 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] PROCESS_STARTED pid=47364 startup_grace_seconds=0.0 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] PROCESS_EXITED exit_code=0 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] PROCESS_IDLE exit_code=0 pid=47364 reason=child_exit_code_0 | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] SAFE_STOP reason=unit_test | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] LOCK_RELEASED lock_file=C:\Users\ashtc\AppData\Local\Temp\tmplps5pten\logs\phoenix_watchdog.lock | Mode: LIVE | Orders submitted: 0
+[2026-09-03 00:43:07] WATCHDOG_STOPPED exit_code=0 reason=unit_test restarts_are_bounded=True | Mode: LIVE | Orders submitted: 0

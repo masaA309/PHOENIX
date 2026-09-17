@@ -1,0 +1,33 @@
+
+=================================== ERRORS ====================================
+__________ ERROR collecting tests/test_historical_validation_20y.py ___________
+.venv\Lib\site-packages\_pytest\python.py:508: in importtestmodule
+    mod = import_path(
+.venv\Lib\site-packages\_pytest\pathlib.py:596: in import_path
+    importlib.import_module(module_name)
+..\..\..\..\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\Lib\importlib\__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+<frozen importlib._bootstrap>:1331: in _find_and_load_unlocked
+    ???
+<frozen importlib._bootstrap>:935: in _load_unlocked
+    ???
+.venv\Lib\site-packages\_pytest\assertion\rewrite.py:188: in exec_module
+    exec(co, module.__dict__)
+tests\test_historical_validation_20y.py:14: in <module>
+    from phoenix_core import historical_validation_20y as hv
+phoenix_core\__init__.py:29: in <module>
+    from phoenix_core.factory import create_broker
+phoenix_core\factory.py:13: in <module>
+    from phoenix_core.rakuten_rss_broker import RakutenRssBroker
+E     File "C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\phoenix_core\rakuten_rss_broker.py", line 1143
+E       + "\n"
+E   IndentationError: unexpected indent
+=========================== short test summary info ===========================
+ERROR tests/test_historical_validation_20y.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 1.92s

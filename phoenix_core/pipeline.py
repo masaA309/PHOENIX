@@ -19,6 +19,10 @@ from phoenix_core.candidate_input_guard import (
 )
 from phoenix_core.models import OrderRequest, OrderResult, OrderStatus
 from phoenix_core.performance_tracker import atomic_write
+from phoenix_core.rakuten_rss_broker import RakutenRssBroker
+from phoenix_core.strategy_execution_runtime import (
+    create_rakuten_live_execution_adapter,
+)
 from phoenix_core.position_sizer import (
     PositionSizingConfig,
     SizingDecision,
@@ -76,8 +80,17 @@ def _execute_approved_orders(
     orders: Iterable[OrderRequest],
 ) -> list[OrderResult]:
     results: list[OrderResult] = []
+    live_adapter = (
+        create_rakuten_live_execution_adapter(broker)
+        if isinstance(broker, RakutenRssBroker)
+        else None
+    )
     for order in orders:
-        results.append(broker.submit_order(order))
+        results.append(
+            live_adapter.submit_order_request(order)
+            if live_adapter is not None
+            else broker.submit_order(order)
+        )
     return results
 
 

@@ -8,8 +8,8 @@
   "position_sizing": {
     "risk_per_trade_pct": 0.01,
     "max_position_pct": 0.30,
-    "max_total_invested_pct": 0.95,
-    "minimum_cash_reserve_pct": 0.0,
+    "max_total_invested_pct": 0.8,
+    "minimum_cash_reserve_pct": 0.1,
     "fallback_stop_distance_pct": 0.03,
     "lot_size": 100,
     "maximum_quantity_per_ticker": 1000,

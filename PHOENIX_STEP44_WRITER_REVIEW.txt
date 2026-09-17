@@ -1,0 +1,3104 @@
+
+===== FILE FULL: phoenix_watchdog.py =====
+000001: from __future__ import annotations
+000002: 
+000003: from dataclasses import dataclass
+000004: from datetime import datetime
+000005: import argparse
+000006: import json
+000007: import os
+000008: from pathlib import Path
+000009: import signal
+000010: import subprocess
+000011: import sys
+000012: import threading
+000013: import time
+000014: from types import FrameType
+000015: from typing import Any
+000016: from uuid import uuid4
+000017: from zoneinfo import ZoneInfo
+000018: 
+000019: from phoenix_disaster_recovery import (
+000020:     DEFAULT_MAX_RECOVERY_ATTEMPTS,
+000021:     inspect_recovery_state_for_watchdog,
+000022: )
+000023: from phoenix_heartbeat import (
+000024:     HEARTBEAT_TIMEOUT_SECONDS,
+000025:     HeartbeatEventLogger,
+000026:     HeartbeatValidation,
+000027:     inspect_heartbeat,
+000028: )
+000029: from phoenix_core.production_rakuten_rss_transport import ProductionRakutenRssTransport
+000030: 
+000031: 
+000032: ROOT_DIR = Path(__file__).resolve().parent
+000033: LOG_DIR = ROOT_DIR / "logs"
+000034: TARGET_SCRIPT = ROOT_DIR / "run_phoenix.py"
+000035: LOCK_FILE = LOG_DIR / "phoenix_watchdog.lock"
+000036: HEARTBEAT_PATH = ROOT_DIR / "runtime" / "guardian" / "heartbeat.json"
+000037: RECOVERY_STATE_PATH = ROOT_DIR / "runtime" / "guardian" / "recovery_state.json"
+000038: 
+000039: MODE = "PAPER"
+000040: ORDERS_SUBMITTED = 0
+000041: MAX_RESTARTS_HARD_LIMIT = 10
+000042: FILE_READY_HEARTBEAT_SECONDS = 30.0
+000043: STEP44_READY_MAX_AGE_SECONDS = 90.0
+000044: JST = ZoneInfo("Asia/Tokyo")
+000045: 
+000046: EXIT_OK = 0
+000047: EXIT_RESTART_LIMIT = 1
+000048: EXIT_CONFIGURATION_ERROR = 2
+000049: EXIT_ALREADY_RUNNING = 3
+000050: EXIT_HEARTBEAT_FAILURE = 70
+000051: 
+000052: 
+000053: class WatchdogError(RuntimeError):
+000054:     """Base error for fail-safe WatchDog shutdowns."""
+000055: 
+000056: 
+000057: class AlreadyRunningError(WatchdogError):
+000058:     """Raised when another WatchDog owns the lock."""
+000059: 
+000060: 
+000061: class UnsafeLockError(WatchdogError):
+000062:     """Raised when a lock cannot safely be classified as stale."""
+000063: 
+000064: 
+000065: @dataclass(frozen=True)
+000066: class MonitorConfig:
+000067:     max_restarts: int = 3
+000068:     backoff_base_seconds: float = 5.0
+000069:     backoff_max_seconds: float = 60.0
+000070:     startup_grace_seconds: float = 2.0
+000071:     poll_seconds: float = 1.0
+000072:     termination_grace_seconds: float = 10.0
+000073:     stale_lock_seconds: float = 6 * 60 * 60
+000074:     heartbeat_timeout_seconds: float = HEARTBEAT_TIMEOUT_SECONDS
+000075: 
+000076:     def __post_init__(self) -> None:
+000077:         if not 0 <= self.max_restarts <= MAX_RESTARTS_HARD_LIMIT:
+000078:             raise ValueError(
+000079:                 "max_restarts must be between 0 and "
+000080:                 f"{MAX_RESTARTS_HARD_LIMIT}"
+000081:             )
+000082:         if self.backoff_base_seconds < 0:
+000083:             raise ValueError("backoff_base_seconds must be non-negative")
+000084:         if self.backoff_max_seconds < self.backoff_base_seconds:
+000085:             raise ValueError(
+000086:                 "backoff_max_seconds must be greater than or equal to "
+000087:                 "backoff_base_seconds"
+000088:             )
+000089:         if self.startup_grace_seconds < 0:
+000090:             raise ValueError("startup_grace_seconds must be non-negative")
+000091:         if self.poll_seconds <= 0:
+000092:             raise ValueError("poll_seconds must be positive")
+000093:         if self.termination_grace_seconds <= 0:
+000094:             raise ValueError("termination_grace_seconds must be positive")
+000095:         if self.stale_lock_seconds <= 0:
+000096:             raise ValueError("stale_lock_seconds must be positive")
+000097:         if self.heartbeat_timeout_seconds <= 0:
+000098:             raise ValueError("heartbeat_timeout_seconds must be positive")
+000099: 
+000100:     def backoff_seconds(self, restart_number: int) -> float:
+000101:         if restart_number < 1:
+000102:             raise ValueError("restart_number must be at least 1")
+000103:         return min(
+000104:             self.backoff_max_seconds,
+000105:             self.backoff_base_seconds * (2 ** (restart_number - 1)),
+000106:         )
+000107: 
+000108: 
+000109: class EventLogger:
+000110:     """Append-only JSON Lines and text logging under PHOENIX/logs."""
+000111: 
+000112:     def __init__(self, log_dir: Path) -> None:
+000113:         self.log_dir = Path(log_dir)
+000114:         self.log_dir.mkdir(parents=True, exist_ok=True)
+000115:         self._write_lock = threading.Lock()
+000116: 
+000117:     @property
+000118:     def text_path(self) -> Path:
+000119:         return self.log_dir / f"phoenix_watchdog_{datetime.now():%Y%m%d}.txt"
+000120: 
+000121:     @property
+000122:     def json_path(self) -> Path:
+000123:         return self.log_dir / f"phoenix_watchdog_{datetime.now():%Y%m%d}.jsonl"
+000124: 
+000125:     def emit(self, event: str, **details: Any) -> None:
+000126:         now = datetime.now().astimezone()
+000127:         payload: dict[str, Any] = {
+000128:             "timestamp": now.isoformat(timespec="seconds"),
+000129:             "event": event,
+000130:             "mode": MODE,
+000131:             "orders_submitted": ORDERS_SUBMITTED,
+000132:         }
+000133:         payload.update(details)
+000134:         json_line = json.dumps(
+000135:             payload,
+000136:             ensure_ascii=False,
+000137:             sort_keys=True,
+000138:             default=str,
+000139:         )
+000140:         detail_text = " ".join(
+000141:             f"{key}={value}"
+000142:             for key, value in sorted(details.items())
+000143:         )
+000144:         text_line = (
+000145:             f"[{now:%Y-%m-%d %H:%M:%S}] {event}"
+000146:             + (f" {detail_text}" if detail_text else "")
+000147:             + f" | Mode: {MODE} | Orders submitted: {ORDERS_SUBMITTED}"
+000148:         )
+000149: 
+000150:         with self._write_lock:
+000151:             with self.json_path.open("a", encoding="utf-8", newline="\n") as file:
+000152:                 file.write(json_line + "\n")
+000153:             with self.text_path.open("a", encoding="utf-8", newline="\n") as file:
+000154:                 file.write(text_line + "\n")
+000155:             print(text_line, flush=True)
+000156: 
+000157: 
+000158: def _pid_is_alive(pid: int) -> bool:
+000159:     if pid <= 0:
+000160:         return False
+000161:     if pid == os.getpid():
+000162:         return True
+000163:     try:
+000164:         os.kill(pid, 0)
+000165:     except PermissionError:
+000166:         return True
+000167:     except (OSError, OverflowError):
+000168:         return False
+000169:     return True
+000170: 
+000171: 
+000172: class ProcessLock:
+000173:     """Atomic PID lock with conservative stale-lock recovery."""
+000174: 
+000175:     def __init__(
+000176:         self,
+000177:         path: Path,
+000178:         logger: EventLogger,
+000179:         stale_after_seconds: float,
+000180:     ) -> None:
+000181:         self.path = Path(path)
+000182:         self.logger = logger
+000183:         self.stale_after_seconds = stale_after_seconds
+000184:         self.token = uuid4().hex
+000185:         self.acquired = False
+000186: 
+000187:     def acquire(self) -> None:
+000188:         self.path.parent.mkdir(parents=True, exist_ok=True)
+000189:         for _ in range(3):
+000190:             try:
+000191:                 descriptor = os.open(
+000192:                     self.path,
+000193:                     os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+000194:                     0o600,
+000195:                 )
+000196:             except FileExistsError:
+000197:                 if self._remove_if_stale():
+000198:                     continue
+000199:                 raise AlreadyRunningError(
+000200:                     f"active WatchDog lock exists: {self.path}"
+000201:                 )
+000202: 
+000203:             try:
+000204:                 payload = {
+000205:                     "pid": os.getpid(),
+000206:                     "token": self.token,
+000207:                     "created_at": datetime.now().astimezone().isoformat(
+000208:                         timespec="seconds"
+000209:                     ),
+000210:                     "mode": MODE,
+000211:                 }
+000212:                 with os.fdopen(
+000213:                     descriptor,
+000214:                     "w",
+000215:                     encoding="utf-8",
+000216:                     newline="\n",
+000217:                 ) as file:
+000218:                     json.dump(payload, file, ensure_ascii=False, sort_keys=True)
+000219:                     file.write("\n")
+000220:                     file.flush()
+000221:                     os.fsync(file.fileno())
+000222:             except Exception:
+000223:                 try:
+000224:                     self.path.unlink()
+000225:                 except OSError:
+000226:                     pass
+000227:                 raise
+000228: 
+000229:             self.acquired = True
+000230:             self.logger.emit("LOCK_ACQUIRED", lock_file=str(self.path))
+000231:             return
+000232: 
+000233:         raise UnsafeLockError(
+000234:             f"lock changed repeatedly; refusing to start: {self.path}"
+000235:         )
+000236: 
+000237:     def _remove_if_stale(self) -> bool:
+000238:         try:
+000239:             stat = self.path.stat()
+000240:             raw = self.path.read_text(encoding="utf-8")
+000241:         except FileNotFoundError:
+000242:             return True
+000243:         except OSError as error:
+000244:             raise UnsafeLockError(
+000245:                 f"cannot inspect existing lock safely: {error}"
+000246:             ) from error
+000247: 
+000248:         age_seconds = max(0.0, time.time() - stat.st_mtime)
+000249:         try:
+000250:             payload = json.loads(raw)
+000251:             pid = int(payload["pid"])
+000252:         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+000253:             if age_seconds < self.stale_after_seconds:
+000254:                 raise UnsafeLockError(
+000255:                     "recent lock is unreadable; refusing unsafe removal"
+000256:                 )
+000257:             pid = -1
+000258: 
+000259:         if _pid_is_alive(pid):
+000260:             self.logger.emit(
+000261:                 "ACTIVE_LOCK_DETECTED",
+000262:                 lock_file=str(self.path),
+000263:                 owner_pid=pid,
+000264:             )
+000265:             return False
+000266: 
+000267:         try:
+000268:             self.path.unlink()
+000269:         except FileNotFoundError:
+000270:             return True
+000271:         except OSError as error:
+000272:             raise UnsafeLockError(
+000273:                 f"stale lock cannot be removed safely: {error}"
+000274:             ) from error
+000275: 
+000276:         self.logger.emit(
+000277:             "STALE_LOCK_REMOVED",
+000278:             age_seconds=round(age_seconds, 3),
+000279:             lock_file=str(self.path),
+000280:             owner_pid=pid,
+000281:         )
+000282:         return True
+000283: 
+000284:     def release(self) -> None:
+000285:         if not self.acquired:
+000286:             return
+000287:         try:
+000288:             payload = json.loads(self.path.read_text(encoding="utf-8"))
+000289:         except (FileNotFoundError, OSError, json.JSONDecodeError):
+000290:             self.acquired = False
+000291:             return
+000292: 
+000293:         if payload.get("token") != self.token:
+000294:             self.logger.emit(
+000295:                 "LOCK_RELEASE_SKIPPED",
+000296:                 reason="ownership_changed",
+000297:                 lock_file=str(self.path),
+000298:             )
+000299:             self.acquired = False
+000300:             return
+000301: 
+000302:         try:
+000303:             self.path.unlink()
+000304:         except FileNotFoundError:
+000305:             pass
+000306:         self.acquired = False
+000307:         self.logger.emit("LOCK_RELEASED", lock_file=str(self.path))
+000308: 
+000309: 
+000310: class PhoenixWatchdog:
+000311:     def __init__(
+000312:         self,
+000313:         target_script: Path,
+000314:         root_dir: Path,
+000315:         log_dir: Path,
+000316:         lock_file: Path,
+000317:         config: MonitorConfig | None = None,
+000318:         heartbeat_path: Path | None = None,
+000319:         recovery_state_path: Path | None = None,
+000320:         enable_file_ready_heartbeat: bool = False,
+000321:         file_ready_transport: Any | None = None,
+000322:         file_ready_heartbeat_seconds: float = FILE_READY_HEARTBEAT_SECONDS,
+000323:         step44_audit_path: Path | None = None,
+000324:     ) -> None:
+000325:         self.target_script = Path(target_script).resolve()
+000326:         self.root_dir = Path(root_dir).resolve()
+000327:         self.config = config or MonitorConfig()
+000328:         self.logger = EventLogger(Path(log_dir))
+000329:         self.heartbeat_logger = HeartbeatEventLogger(Path(log_dir))
+000330:         self.heartbeat_path = Path(
+000331:             heartbeat_path
+000332:             or (self.root_dir / "runtime" / "guardian" / "heartbeat.json")
+000333:         )
+000334:         self.recovery_state_path = Path(
+000335:             recovery_state_path
+000336:             or (self.root_dir / "runtime" / "guardian" / "recovery_state.json")
+000337:         )
+000338:         self.enable_file_ready_heartbeat = bool(enable_file_ready_heartbeat)
+000339:         self.file_ready_heartbeat_seconds = float(file_ready_heartbeat_seconds)
+000340:         if self.file_ready_heartbeat_seconds <= 0:
+000341:             raise ValueError("file_ready_heartbeat_seconds must be positive")
+000342:         self._step44_audit_path = Path(
+000343:             step44_audit_path
+000344:             or (self.root_dir / "reports" / "v7_vba_bridge_step44_audit.jsonl")
+000345:         )
+000346:         self._file_ready_transport = file_ready_transport
+000347:         if self.enable_file_ready_heartbeat and self._file_ready_transport is None:
+000348:             self._file_ready_transport = ProductionRakutenRssTransport()
+000349:         self.lock = ProcessLock(
+000350:             Path(lock_file),
+000351:             self.logger,
+000352:             self.config.stale_lock_seconds,
+000353:         )
+000354:         self.stop_event = threading.Event()
+000355:         self._heartbeat_stop_event = threading.Event()
+000356:         self._heartbeat_thread: threading.Thread | None = None
+000357:         self.stop_reason = "requested"
+000358:         self._process: subprocess.Popen[Any] | None = None
+000359:         self._process_lock = threading.Lock()
+000360:         self._last_heartbeat_failure: HeartbeatValidation | None = None
+000361: 
+000362:     @property
+000363:     def child_pid(self) -> int | None:
+000364:         with self._process_lock:
+000365:             return None if self._process is None else self._process.pid
+000366: 
+000367:     def request_stop(self, reason: str = "requested") -> None:
+000368:         self.stop_reason = reason
+000369:         self.stop_event.set()
+000370:         self._heartbeat_stop_event.set()
+000371: 
+000372:     @staticmethod
+000373:     def _parse_step44_timestamp(value: str) -> datetime | None:
+000374:         text = str(value).strip()
+000375:         if not text:
+000376:             return None
+000377:         try:
+000378:             parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+000379:         except ValueError:
+000380:             return None
+000381:         if parsed.tzinfo is None:
+000382:             parsed = parsed.replace(tzinfo=JST)
+000383:         return parsed.astimezone(JST)
+000384: 
+000385:     def _step44_consumer_ready(self) -> tuple[bool, str]:
+000386:         path = self._step44_audit_path
+000387:         if not path.is_file():
+000388:             return False, f"Step44 audit missing: {path}"
+000389: 
+000390:         try:
+000391:             lines = path.read_text(encoding="utf-8").splitlines()
+000392:         except OSError as error:
+000393:             return False, f"Step44 audit unreadable: {error}"
+000394: 
+000395:         for raw_line in reversed(lines):
+000396:             line = raw_line.strip()
+000397:             if not line:
+000398:                 continue
+000399:             try:
+000400:                 record = json.loads(line)
+000401:             except json.JSONDecodeError:
+000402:                 continue
+000403:             if str(record.get("kind", "")).strip().lower() != "summary":
+000404:                 continue
+000405: 
+000406:             result = str(record.get("result", "")).strip().upper()
+000407:             if result != "READY":
+000408:                 return False, f"Step44 summary not READY: {result or 'missing'}"
+000409: 
+000410:             recorded_at_text = str(record.get("recorded_at", "")).strip()
+000411:             recorded_at = self._parse_step44_timestamp(recorded_at_text)
+000412:             if recorded_at is None:
+000413:                 return False, (
+000414:                     "Step44 summary has invalid recorded_at: "
+000415:                     f"{recorded_at_text!r}"
+000416:                 )
+000417: 
+000418:             now = datetime.now(JST)
+000419:             age_seconds = (now - recorded_at).total_seconds()
+000420:             if age_seconds < -5:
+000421:                 return False, (
+000422:                     "Step44 summary timestamp is in the future: "
+000423:                     f"{recorded_at_text!r}"
+000424:                 )
+000425:             if age_seconds > STEP44_READY_MAX_AGE_SECONDS:
+000426:                 return False, (
+000427:                     "Step44 summary is stale "
+000428:                     f"({int(age_seconds)}s > {int(STEP44_READY_MAX_AGE_SECONDS)}s)"
+000429:                 )
+000430:             return True, f"Step44 READY summary fresh ({int(age_seconds)}s)"
+000431: 
+000432:         return False, f"Step44 READY summary not found: {path}"
+000433: 
+000434:     def _publish_file_ready_heartbeat_once(self) -> bool:
+000435:         if not self.enable_file_ready_heartbeat:
+000436:             return False
+000437:         if self._file_ready_transport is None:
+000438:             self.logger.emit(
+000439:                 "FILE_READY_HEARTBEAT_SKIPPED",
+000440:                 reason="file_ready_transport_unavailable",
+000441:             )
+000442:             return False
+000443: 
+000444:         consumer_ready, consumer_message = self._step44_consumer_ready()
+000445:         if not consumer_ready:
+000446:             self.logger.emit(
+000447:                 "FILE_READY_HEARTBEAT_SKIPPED",
+000448:                 consumer_ready=False,
+000449:                 reason=consumer_message,
+000450:             )
+000451:             return False
+000452: 
+000453:         try:
+000454:             health = self._file_ready_transport.publish_file_ready_heartbeat()
+000455:         except Exception as error:
+000456:             self.logger.emit(
+000457:                 "FILE_READY_HEARTBEAT_BLOCKED",
+000458:                 consumer_message=consumer_message,
+000459:                 reason=str(error),
+000460:             )
+000461:             return False
+000462: 
+000463:         if health.connected:
+000464:             self.logger.emit(
+000465:                 "FILE_READY_HEARTBEAT_PUBLISHED",
+000466:                 consumer_message=consumer_message,
+000467:                 transport_message=health.message,
+000468:                 transport_source=health.transport_source,
+000469:             )
+000470:             return True
+000471: 
+000472:         self.logger.emit(
+000473:             "FILE_READY_HEARTBEAT_BLOCKED",
+000474:             consumer_message=consumer_message,
+000475:             reason=health.message,
+000476:             transport_source=health.transport_source,
+000477:         )
+000478:         return False
+000479: 
+000480:     def _start_file_ready_heartbeat_thread(self) -> None:
+000481:         if not self.enable_file_ready_heartbeat:
+000482:             return
+000483:         if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
+000484:             return
+000485:         self._heartbeat_stop_event.clear()
+000486:         self._heartbeat_thread = threading.Thread(
+000487:             target=self._run_file_ready_heartbeat_loop,
+000488:             name="phoenix-file-ready-heartbeat",
+000489:             daemon=True,
+000490:         )
+000491:         self._heartbeat_thread.start()
+000492:         self.logger.emit(
+000493:             "FILE_READY_HEARTBEAT_OWNER_STARTED",
+000494:             interval_seconds=self.file_ready_heartbeat_seconds,
+000495:         )
+000496: 
+000497:     def _stop_file_ready_heartbeat_thread(self) -> None:
+000498:         self._heartbeat_stop_event.set()
+000499:         thread = self._heartbeat_thread
+000500:         if thread is None:
+000501:             return
+000502:         if thread.is_alive():
+000503:             thread.join(timeout=min(1.0, self.file_ready_heartbeat_seconds))
+000504:         self._heartbeat_thread = None
+000505: 
+000506:     def _run_file_ready_heartbeat_loop(self) -> None:
+000507:         while not self._heartbeat_stop_event.is_set():
+000508:             self._publish_file_ready_heartbeat_once()
+000509:             if self._heartbeat_stop_event.wait(self.file_ready_heartbeat_seconds):
+000510:                 break
+000511: 
+000512:     def run(self) -> int:
+000513:         if not self.target_script.is_file():
+000514:             self.logger.emit(
+000515:                 "CONFIGURATION_ERROR",
+000516:                 reason="target_not_found",
+000517:                 target=str(self.target_script),
+000518:             )
+000519:             return EXIT_CONFIGURATION_ERROR
+000520: 
+000521:         self.logger.emit(
+000522:             "WATCHDOG_STARTING",
+000523:             max_restarts=self.config.max_restarts,
+000524:             target=str(self.target_script),
+000525:         )
+000526:         self.logger.emit(
+000527:             "PAPER_MODE_FIXED",
+000528:             live_trading=False,
+000529:             order_capability=False,
+000530:         )
+000531: 
+000532:         try:
+000533:             self.lock.acquire()
+000534:         except (AlreadyRunningError, UnsafeLockError) as error:
+000535:             self.logger.emit("WATCHDOG_START_BLOCKED", reason=str(error))
+000536:             return EXIT_ALREADY_RUNNING
+000537: 
+000538:         exit_code = EXIT_OK
+000539:         try:
+000540:             self._start_file_ready_heartbeat_thread()
+000541:             exit_code = self._monitor()
+000542:             return exit_code
+000543:         finally:
+000544:             self._stop_file_ready_heartbeat_thread()
+000545:             self._safe_stop_child()
+000546:             self.lock.release()
+000547:             self.logger.emit(
+000548:                 "WATCHDOG_STOPPED",
+000549:                 exit_code=exit_code,
+000550:                 reason=self.stop_reason if self.stop_event.is_set() else "completed",
+000551:                 restarts_are_bounded=True,
+000552:             )
+000553: 
+000554:     def _monitor(self) -> int:
+000555:         restart_count = 0
+000556:         while not self.stop_event.is_set():
+000557:             exit_code = self._launch_and_monitor(
+000558:                 restart_attempt=restart_count,
+000559:             )
+000560:             if self.stop_event.is_set():
+000561:                 self.logger.emit("SAFE_STOP", reason=self.stop_reason)
+000562:                 return EXIT_OK
+000563:             heartbeat_failure = self._last_heartbeat_failure
+000564:             if (
+000565:                 heartbeat_failure is not None
+000566:                 and heartbeat_failure.restart_suppressed
+000567:             ):
+000568:                 self.logger.emit(
+000569:                     "HEARTBEAT_SAFETY_STOP",
+000570:                     reason=heartbeat_failure.reason,
+000571:                     restart_suppressed=True,
+000572:                 )
+000573:                 return EXIT_CONFIGURATION_ERROR
+000574:             if exit_code == 0:
+000575:                 self.logger.emit("PROCESS_EXITED", exit_code=0)
+000576:                 return EXIT_OK
+000577:             if exit_code == EXIT_CONFIGURATION_ERROR:
+000578:                 self.logger.emit(
+000579:                     "REPOSITORY_GUARDIAN_BLOCKED",
+000580:                     exit_code=exit_code,
+000581:                     reason="startup_safety_gate_exit_2",
+000582:                     restart_suppressed=True,
+000583:                 )
+000584:                 self.heartbeat_logger.emit(
+000585:                     "STARTUP_GATE_BLOCKED",
+000586:                     status="BLOCKED",
+000587:                     reason="STARTUP_SAFETY_GATE_EXIT_2",
+000588:                     pid=None,
+000589:                     sequence=None,
+000590:                     heartbeat_age_seconds=None,
+000591:                     repository_root=str(self.root_dir),
+000592:                     action="SAFE_STOP",
+000593:                     restart_attempt=restart_count,
+000594:                 )
+000595:                 return EXIT_CONFIGURATION_ERROR
+000596: 
+000597:             if self.target_script.name.casefold() == "run_phoenix.py":
+000598:                 recovery_gate = inspect_recovery_state_for_watchdog(
+000599:                     self.recovery_state_path,
+000600:                     expected_repository_root=self.root_dir,
+000601:                     max_recovery_attempts=min(
+000602:                         DEFAULT_MAX_RECOVERY_ATTEMPTS,
+000603:                         max(1, self.config.max_restarts),
+000604:                     ),
+000605:                 )
+000606:                 self.logger.emit(
+000607:                     "DISASTER_RECOVERY_STATE_CHECKED",
+000608:                     recovery_status=recovery_gate.status,
+000609:                     reason=recovery_gate.reason,
+000610:                     recovery_attempt=recovery_gate.recovery_attempt,
+000611:                     restart_allowed=recovery_gate.restart_allowed,
+000612:                 )
+000613:                 if not recovery_gate.restart_allowed:
+000614:                     self.logger.emit(
+000615:                         "DISASTER_RECOVERY_RESTART_BLOCKED",
+000616:                         reason=recovery_gate.reason,
+000617:                         restart_suppressed=True,
+000618:                     )
+000619:                     return EXIT_CONFIGURATION_ERROR
+000620: 
+000621:             self.logger.emit(
+000622:                 "ABNORMAL_EXIT",
+000623:                 exit_code=exit_code,
+000624:                 restarts_used=restart_count,
+000625:             )
+000626:             if restart_count >= self.config.max_restarts:
+000627:                 self.logger.emit(
+000628:                     "RESTART_LIMIT_REACHED",
+000629:                     max_restarts=self.config.max_restarts,
+000630:                 )
+000631:                 if heartbeat_failure is not None:
+000632:                     self.heartbeat_logger.emit(
+000633:                         "HEARTBEAT_RESTART_LIMIT_REACHED",
+000634:                         status="FAILED",
+000635:                         reason=heartbeat_failure.reason,
+000636:                         pid=heartbeat_failure.pid,
+000637:                         sequence=heartbeat_failure.sequence,
+000638:                         heartbeat_age_seconds=(
+000639:                             heartbeat_failure.heartbeat_age_seconds
+000640:                         ),
+000641:                         mode=heartbeat_failure.mode,
+000642:                         orders_submitted=heartbeat_failure.orders_submitted,
+000643:                         repository_root=heartbeat_failure.repository_root,
+000644:                         action="SAFE_STOP",
+000645:                         restart_attempt=restart_count,
+000646:                     )
+000647:                 return EXIT_RESTART_LIMIT
+000648: 
+000649:             restart_number = restart_count + 1
+000650:             delay = self.config.backoff_seconds(restart_number)
+000651:             self.logger.emit(
+000652:                 "RESTART_SCHEDULED",
+000653:                 backoff_seconds=delay,
+000654:                 restart_number=restart_number,
+000655:             )
+000656:             if heartbeat_failure is not None:
+000657:                 self.heartbeat_logger.emit(
+000658:                     "HEARTBEAT_RESTART_SCHEDULED",
+000659:                     status="RESTARTING",
+000660:                     reason=heartbeat_failure.reason,
+000661:                     pid=heartbeat_failure.pid,
+000662:                     sequence=heartbeat_failure.sequence,
+000663:                     heartbeat_age_seconds=(
+000664:                         heartbeat_failure.heartbeat_age_seconds
+000665:                     ),
+000666:                     mode=heartbeat_failure.mode,
+000667:                     orders_submitted=heartbeat_failure.orders_submitted,
+000668:                     repository_root=heartbeat_failure.repository_root,
+000669:                     action="RESTART",
+000670:                     restart_attempt=restart_number,
+000671:                 )
+000672:             if self.stop_event.wait(delay):
+000673:                 self.logger.emit("SAFE_STOP", reason=self.stop_reason)
+000674:                 return EXIT_OK
+000675:             restart_count = restart_number
+000676: 
+000677:         self.logger.emit("SAFE_STOP", reason=self.stop_reason)
+000678:         return EXIT_OK
+000679: 
+000680:     def _launch_and_monitor(self, restart_attempt: int = 0) -> int:
+000681:         self._last_heartbeat_failure = None
+000682:         command = [
+000683:             sys.executable,
+000684:             "-X",
+000685:             "utf8",
+000686:             str(self.target_script),
+000687:         ]
+000688:         environment = os.environ.copy()
+000689:         environment.update(
+000690:             {
+000691:                 "PYTHONIOENCODING": "utf-8",
+000692:                 "PYTHONUTF8": "1",
+000693:                 "PHOENIX_MODE": MODE,
+000694:                 "PHOENIX_EXECUTION_MODE": MODE,
+000695:                 "PHOENIX_LIVE_TRADING": "0",
+000696:                 "PHOENIX_ALLOW_LIVE_TRADING": "0",
+000697:                 "PHOENIX_WATCHDOG_RESTART_ATTEMPT": str(restart_attempt),
+000698:             }
+000699:         )
+000700:         popen_options: dict[str, Any] = {
+000701:             "cwd": self.root_dir,
+000702:             "env": environment,
+000703:         }
+000704:         if os.name == "nt":
+000705:             popen_options["creationflags"] = getattr(
+000706:                 subprocess,
+000707:                 "CREATE_NEW_PROCESS_GROUP",
+000708:                 0,
+000709:             )
+000710:         else:
+000711:             popen_options["start_new_session"] = True
+000712: 
+000713:         try:
+000714:             process = subprocess.Popen(command, **popen_options)
+000715:         except OSError as error:
+000716:             self.logger.emit("PROCESS_START_FAILED", reason=str(error))
+000717:             return 127
+000718: 
+000719:         with self._process_lock:
+000720:             self._process = process
+000721:         self.logger.emit("PROCESS_LAUNCHED", pid=process.pid)
+000722: 
+000723:         startup_deadline = time.monotonic() + self.config.startup_grace_seconds
+000724:         while time.monotonic() < startup_deadline:
+000725:             exit_code = process.poll()
+000726:             if exit_code is not None:
+000727:                 self._clear_process(process)
+000728:                 return int(exit_code)
+000729:             remaining = max(0.0, startup_deadline - time.monotonic())
+000730:             if self.stop_event.wait(min(self.config.poll_seconds, remaining)):
+000731:                 self._safe_stop_child()
+000732:                 return 0
+000733: 
+000734:         exit_code = process.poll()
+000735:         if exit_code is not None:
+000736:             self._clear_process(process)
+000737:             return int(exit_code)
+000738: 
+000739:         self.logger.emit(
+000740:             "PROCESS_STARTED",
+000741:             pid=process.pid,
+000742:             startup_grace_seconds=self.config.startup_grace_seconds,
+000743:         )
+000744:         heartbeat_deadline = (
+000745:             time.monotonic() + self.config.heartbeat_timeout_seconds
+000746:         )
+000747:         heartbeat_seen = False
+000748:         previous_sequence: int | None = None
+000749:         previous_timestamp: datetime | None = None
+000750:         while not self.stop_event.wait(self.config.poll_seconds):
+000751:             exit_code = process.poll()
+000752:             if exit_code is not None:
+000753:                 self._clear_process(process)
+000754:                 return int(exit_code)
+000755: 
+000756:             heartbeat = inspect_heartbeat(
+000757:                 self.heartbeat_path,
+000758:                 expected_pid=process.pid,
+000759:                 expected_repository_root=self.root_dir,
+000760:                 timeout_seconds=self.config.heartbeat_timeout_seconds,
+000761:                 previous_sequence=previous_sequence,
+000762:                 previous_timestamp=previous_timestamp,
+000763:             )
+000764:             if heartbeat.healthy:
+000765:                 heartbeat_seen = True
+000766:                 if heartbeat.sequence != previous_sequence:
+000767:                     self.heartbeat_logger.emit(
+000768:                         "HEARTBEAT_HEALTHY",
+000769:                         status="HEALTHY",
+000770:                         reason=heartbeat.reason,
+000771:                         pid=heartbeat.pid,
+000772:                         sequence=heartbeat.sequence,
+000773:                         heartbeat_age_seconds=(
+000774:                             heartbeat.heartbeat_age_seconds
+000775:                         ),
+000776:                         mode=heartbeat.mode,
+000777:                         orders_submitted=heartbeat.orders_submitted,
+000778:                         repository_root=heartbeat.repository_root,
+000779:                         action="MONITOR",
+000780:                         restart_attempt=restart_attempt,
+000781:                     )
+000782:                 previous_sequence = heartbeat.sequence
+000783:                 previous_timestamp = heartbeat.timestamp
+000784:                 continue
+000785: 
+000786:             before_deadline = time.monotonic() < heartbeat_deadline
+000787:             belongs_to_child = heartbeat.pid == process.pid
+000788:             if not heartbeat_seen and not belongs_to_child and before_deadline:
+000789:                 continue
+000790: 
+000791:             self._last_heartbeat_failure = heartbeat
+000792:             safety_stop = heartbeat.restart_suppressed
+000793:             event = (
+000794:                 "HEARTBEAT_LOST"
+000795:                 if heartbeat.reason in {"HEARTBEAT_MISSING", "HEARTBEAT_STALE"}
+000796:                 else "HEARTBEAT_INVALID"
+000797:             )
+000798:             self.heartbeat_logger.emit(
+000799:                 event,
+000800:                 status="BLOCKED" if safety_stop else "ABNORMAL",
+000801:                 reason=heartbeat.reason,
+000802:                 pid=heartbeat.pid,
+000803:                 sequence=heartbeat.sequence,
+000804:                 heartbeat_age_seconds=heartbeat.heartbeat_age_seconds,
+000805:                 mode=heartbeat.mode,
+000806:                 orders_submitted=heartbeat.orders_submitted,
+000807:                 repository_root=heartbeat.repository_root,
+000808:                 action="SAFE_STOP" if safety_stop else "RESTART_PENDING",
+000809:                 restart_attempt=restart_attempt,
+000810:             )
+000811:             self._terminate_process(process, heartbeat.reason)
+000812:             return (
+000813:                 EXIT_CONFIGURATION_ERROR
+000814:                 if safety_stop
+000815:                 else EXIT_HEARTBEAT_FAILURE
+000816:             )
+000817: 
+000818:         self._safe_stop_child()
+000819:         return 0
+000820: 
+000821:     def _clear_process(self, process: subprocess.Popen[Any]) -> None:
+000822:         with self._process_lock:
+000823:             if self._process is process:
+000824:                 self._process = None
+000825: 
+000826:     def _safe_stop_child(self) -> None:
+000827:         with self._process_lock:
+000828:             process = self._process
+000829:         if process is None:
+000830:             return
+000831:         self._terminate_process(process, self.stop_reason)
+000832: 
+000833:     def _terminate_process(
+000834:         self,
+000835:         process: subprocess.Popen[Any],
+000836:         reason: str,
+000837:     ) -> None:
+000838:         if process.poll() is not None:
+000839:             self._clear_process(process)
+000840:             return
+000841: 
+000842:         self.logger.emit(
+000843:             "PROCESS_TERMINATING",
+000844:             pid=process.pid,
+000845:             reason=reason,
+000846:         )
+000847:         process.terminate()
+000848:         try:
+000849:             process.wait(timeout=self.config.termination_grace_seconds)
+000850:         except subprocess.TimeoutExpired:
+000851:             self.logger.emit("PROCESS_KILLING", pid=process.pid)
+000852:             process.kill()
+000853:             process.wait(timeout=self.config.termination_grace_seconds)
+000854:         finally:
+000855:             self._clear_process(process)
+000856:         self.logger.emit(
+000857:             "PROCESS_STOPPED",
+000858:             exit_code=process.returncode,
+000859:             pid=process.pid,
+000860:         )
+000861: 
+000862: 
+000863: def _non_negative_float(value: str) -> float:
+000864:     parsed = float(value)
+000865:     if parsed < 0:
+000866:         raise argparse.ArgumentTypeError("value must be non-negative")
+000867:     return parsed
+000868: 
+000869: 
+000870: def _positive_float(value: str) -> float:
+000871:     parsed = float(value)
+000872:     if parsed <= 0:
+000873:         raise argparse.ArgumentTypeError("value must be positive")
+000874:     return parsed
+000875: 
+000876: 
+000877: def _restart_count(value: str) -> int:
+000878:     parsed = int(value)
+000879:     if not 0 <= parsed <= MAX_RESTARTS_HARD_LIMIT:
+000880:         raise argparse.ArgumentTypeError(
+000881:             f"value must be between 0 and {MAX_RESTARTS_HARD_LIMIT}"
+000882:         )
+000883:     return parsed
+000884: 
+000885: 
+000886: def _install_signal_handlers(
+000887:     watchdog: PhoenixWatchdog,
+000888: ) -> dict[signal.Signals, Any]:
+000889:     previous: dict[signal.Signals, Any] = {}
+000890: 
+000891:     def handle(signum: int, _frame: FrameType | None) -> None:
+000892:         watchdog.request_stop(f"signal_{signum}")
+000893: 
+000894:     for name in ("SIGINT", "SIGTERM"):
+000895:         signum = getattr(signal, name, None)
+000896:         if signum is None:
+000897:             continue
+000898:         previous[signum] = signal.getsignal(signum)
+000899:         signal.signal(signum, handle)
+000900:     return previous
+000901: 
+000902: 
+000903: def _restore_signal_handlers(previous: dict[signal.Signals, Any]) -> None:
+000904:     for signum, handler in previous.items():
+000905:         signal.signal(signum, handler)
+000906: 
+000907: 
+000908: def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+000909:     parser = argparse.ArgumentParser(
+000910:         description="PHOENIX Step36 WatchDog (PAPER only)",
+000911:     )
+000912:     parser.add_argument(
+000913:         "--max-restarts",
+000914:         type=_restart_count,
+000915:         default=3,
+000916:         help=f"restart limit, 0-{MAX_RESTARTS_HARD_LIMIT} (default: 3)",
+000917:     )
+000918:     parser.add_argument(
+000919:         "--backoff-base-seconds",
+000920:         type=_non_negative_float,
+000921:         default=5.0,
+000922:     )
+000923:     parser.add_argument(
+000924:         "--backoff-max-seconds",
+000925:         type=_non_negative_float,
+000926:         default=60.0,
+000927:     )
+000928:     parser.add_argument(
+000929:         "--startup-grace-seconds",
+000930:         type=_non_negative_float,
+000931:         default=2.0,
+000932:     )
+000933:     parser.add_argument(
+000934:         "--poll-seconds",
+000935:         type=_positive_float,
+000936:         default=1.0,
+000937:     )
+000938:     parser.add_argument(
+000939:         "--termination-grace-seconds",
+000940:         type=_positive_float,
+000941:         default=10.0,
+000942:     )
+000943:     parser.add_argument(
+000944:         "--stale-lock-seconds",
+000945:         type=_positive_float,
+000946:         default=6 * 60 * 60,
+000947:     )
+000948:     parser.add_argument(
+000949:         "--heartbeat-timeout-seconds",
+000950:         type=_positive_float,
+000951:         default=HEARTBEAT_TIMEOUT_SECONDS,
+000952:     )
+000953:     return parser.parse_args(argv)
+000954: 
+000955: 
+000956: def main(argv: list[str] | None = None) -> int:
+000957:     args = parse_args(argv)
+000958:     try:
+000959:         config = MonitorConfig(
+000960:             max_restarts=args.max_restarts,
+000961:             backoff_base_seconds=args.backoff_base_seconds,
+000962:             backoff_max_seconds=args.backoff_max_seconds,
+000963:             startup_grace_seconds=args.startup_grace_seconds,
+000964:             poll_seconds=args.poll_seconds,
+000965:             termination_grace_seconds=args.termination_grace_seconds,
+000966:             stale_lock_seconds=args.stale_lock_seconds,
+000967:             heartbeat_timeout_seconds=args.heartbeat_timeout_seconds,
+000968:         )
+000969:     except ValueError as error:
+000970:         print(f"WatchDog configuration error: {error}", file=sys.stderr)
+000971:         return EXIT_CONFIGURATION_ERROR
+000972: 
+000973:     watchdog = PhoenixWatchdog(
+000974:         target_script=TARGET_SCRIPT,
+000975:         root_dir=ROOT_DIR,
+000976:         log_dir=LOG_DIR,
+000977:         lock_file=LOCK_FILE,
+000978:         config=config,
+000979:         enable_file_ready_heartbeat=True,
+000980:     )
+000981:     previous = _install_signal_handlers(watchdog)
+000982:     try:
+000983:         return watchdog.run()
+000984:     except KeyboardInterrupt:
+000985:         watchdog.request_stop("keyboard_interrupt")
+000986:         return EXIT_OK
+000987:     finally:
+000988:         _restore_signal_handlers(previous)
+000989: 
+000990: 
+000991: if __name__ == "__main__":
+000992:     raise SystemExit(main())
+
+===== FILE FULL: tests/test_phoenix_watchdog.py =====
+000001: from __future__ import annotations
+000002: 
+000003: import json
+000004: import os
+000005: from pathlib import Path
+000006: from datetime import datetime, timedelta
+000007: import tempfile
+000008: import threading
+000009: import time
+000010: import unittest
+000011: from zoneinfo import ZoneInfo
+000012: 
+000013: from phoenix_watchdog import (
+000014:     AlreadyRunningError,
+000015:     EventLogger,
+000016:     EXIT_CONFIGURATION_ERROR,
+000017:     EXIT_OK,
+000018:     EXIT_RESTART_LIMIT,
+000019:     MonitorConfig,
+000020:     PhoenixWatchdog,
+000021:     ProcessLock,
+000022: )
+000023: from phoenix_core import RakutenRssTransportHealth
+000024: 
+000025: 
+000026: class _FakeFileReadyTransport:
+000027:     def __init__(self, *, connected: bool = True, message: str = "FILE_READY_OK") -> None:
+000028:         self.connected = connected
+000029:         self.message = message
+000030:         self.calls = 0
+000031: 
+000032:     def publish_file_ready_heartbeat(self) -> RakutenRssTransportHealth:
+000033:         self.calls += 1
+000034:         return RakutenRssTransportHealth(
+000035:             connected=self.connected,
+000036:             message=self.message,
+000037:             transport_source="COM_LIVE" if self.connected else "DISCONNECTED",
+000038:         )
+000039: 
+000040: 
+000041: class PhoenixWatchdogStep36Test(unittest.TestCase):
+000042:     def setUp(self) -> None:
+000043:         self.temporary_directory = tempfile.TemporaryDirectory()
+000044:         self.root = Path(self.temporary_directory.name)
+000045:         self.log_dir = self.root / "logs"
+000046:         self.lock_file = self.log_dir / "phoenix_watchdog.lock"
+000047: 
+000048:     def tearDown(self) -> None:
+000049:         self.temporary_directory.cleanup()
+000050: 
+000051:     def write_script(self, name: str, source: str) -> Path:
+000052:         path = self.root / name
+000053:         path.write_text(source, encoding="utf-8")
+000054:         return path
+000055: 
+000056:     def write_step44_summary(
+000057:         self,
+000058:         recorded_at: str,
+000059:         *,
+000060:         result: str = "READY",
+000061:     ) -> Path:
+000062:         path = self.root / "reports" / "v7_vba_bridge_step44_audit.jsonl"
+000063:         path.parent.mkdir(parents=True, exist_ok=True)
+000064:         payload = {
+000065:             "kind": "summary",
+000066:             "recorded_at": recorded_at,
+000067:             "intent_id": "",
+000068:             "idempotency_key": "",
+000069:             "source_checksum": "",
+000070:             "result": result,
+000071:             "reason_codes": "",
+000072:             "source_file": "",
+000073:             "receipt_file": "",
+000074:             "outbox_file": "",
+000075:             "reader_id": "PHOENIX_STEP44_VBA_LOCAL_RECEIVER",
+000076:             "orders_submitted": "0",
+000077:             "note": "accepted=0;rejected=0;duplicate=0;expired=0;corrupt=0",
+000078:             "current_stage": "",
+000079:             "current_file": "",
+000080:             "error_number": "",
+000081:             "error_source": "",
+000082:             "error_description": "",
+000083:             "error_line": "",
+000084:         }
+000085:         path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+000086:         return path
+000087: 
+000088:     def make_watchdog(
+000089:         self,
+000090:         target: Path,
+000091:         *,
+000092:         max_restarts: int = 0,
+000093:         startup_grace_seconds: float = 0.01,
+000094:         enable_file_ready_heartbeat: bool = False,
+000095:         file_ready_transport: object | None = None,
+000096:         file_ready_heartbeat_seconds: float = 0.01,
+000097:     ) -> PhoenixWatchdog:
+000098:         config = MonitorConfig(
+000099:             max_restarts=max_restarts,
+000100:             backoff_base_seconds=0.01,
+000101:             backoff_max_seconds=0.02,
+000102:             startup_grace_seconds=startup_grace_seconds,
+000103:             poll_seconds=0.005,
+000104:             termination_grace_seconds=2.0,
+000105:             stale_lock_seconds=1.0,
+000106:         )
+000107:         return PhoenixWatchdog(
+000108:             target_script=target,
+000109:             root_dir=self.root,
+000110:             log_dir=self.log_dir,
+000111:             lock_file=self.lock_file,
+000112:             config=config,
+000113:             enable_file_ready_heartbeat=enable_file_ready_heartbeat,
+000114:             file_ready_transport=file_ready_transport,
+000115:             file_ready_heartbeat_seconds=file_ready_heartbeat_seconds,
+000116:         )
+000117: 
+000118:     def read_events(self) -> list[dict[str, object]]:
+000119:         files = list(self.log_dir.glob("phoenix_watchdog_*.jsonl"))
+000120:         self.assertEqual(1, len(files))
+000121:         return [
+000122:             json.loads(line)
+000123:             for line in files[0].read_text(encoding="utf-8").splitlines()
+000124:         ]
+000125: 
+000126:     def test_process_start_confirmation_and_paper_logs(self) -> None:
+000127:         target = self.write_script(
+000128:             "successful_child.py",
+000129:             """
+000130: import os
+000131: import sys
+000132: import time
+000133: 
+000134: paper = (
+000135:     os.environ.get("PHOENIX_MODE") == "PAPER"
+000136:     and os.environ.get("PHOENIX_EXECUTION_MODE") == "PAPER"
+000137:     and os.environ.get("PHOENIX_LIVE_TRADING") == "0"
+000138:     and os.environ.get("PHOENIX_ALLOW_LIVE_TRADING") == "0"
+000139: )
+000140: time.sleep(0.08)
+000141: sys.exit(0 if paper else 9)
+000142: """.strip()
+000143:             + "\n",
+000144:         )
+000145:         watchdog = self.make_watchdog(target)
+000146: 
+000147:         self.assertEqual(EXIT_OK, watchdog.run())
+000148: 
+000149:         events = self.read_events()
+000150:         names = [event["event"] for event in events]
+000151:         self.assertIn("PROCESS_LAUNCHED", names)
+000152:         self.assertIn("PROCESS_STARTED", names)
+000153:         self.assertIn("PROCESS_EXITED", names)
+000154:         self.assertTrue(all(event["mode"] == "PAPER" for event in events))
+000155:         self.assertTrue(all(event["orders_submitted"] == 0 for event in events))
+000156:         text_file = next(self.log_dir.glob("phoenix_watchdog_*.txt"))
+000157:         text = text_file.read_text(encoding="utf-8")
+000158:         self.assertIn("Mode: PAPER", text)
+000159:         self.assertIn("Orders submitted: 0", text)
+000160: 
+000161:     def test_abnormal_exit_uses_bounded_exponential_backoff(self) -> None:
+000162:         counter_file = self.root / "launch_count.txt"
+000163:         target = self.write_script(
+000164:             "failing_child.py",
+000165:             f"""
+000166: from pathlib import Path
+000167: import sys
+000168: 
+000169: counter = Path({str(counter_file)!r})
+000170: count = int(counter.read_text(encoding="utf-8")) if counter.exists() else 0
+000171: counter.write_text(str(count + 1), encoding="utf-8")
+000172: sys.exit(7)
+000173: """.strip()
+000174:             + "\n",
+000175:         )
+000176:         watchdog = self.make_watchdog(
+000177:             target,
+000178:             max_restarts=2,
+000179:             startup_grace_seconds=0.0,
+000180:         )
+000181: 
+000182:         self.assertEqual(EXIT_RESTART_LIMIT, watchdog.run())
+000183: 
+000184:         self.assertEqual("3", counter_file.read_text(encoding="utf-8"))
+000185:         events = self.read_events()
+000186:         abnormal = [event for event in events if event["event"] == "ABNORMAL_EXIT"]
+000187:         restarts = [
+000188:             event for event in events if event["event"] == "RESTART_SCHEDULED"
+000189:         ]
+000190:         self.assertEqual(3, len(abnormal))
+000191:         self.assertEqual([1, 2], [event["restart_number"] for event in restarts])
+000192:         self.assertEqual([0.01, 0.02], [event["backoff_seconds"] for event in restarts])
+000193:         self.assertEqual("RESTART_LIMIT_REACHED", events[-3]["event"])
+000194: 
+000195:     def test_repository_guardian_block_does_not_restart(self) -> None:
+000196:         counter_file = self.root / "launch_count.txt"
+000197:         target = self.write_script(
+000198:             "guardian_blocked_child.py",
+000199:             f"""
+000200: from pathlib import Path
+000201: import sys
+000202: 
+000203: counter = Path({str(counter_file)!r})
+000204: count = int(counter.read_text(encoding="utf-8")) if counter.exists() else 0
+000205: counter.write_text(str(count + 1), encoding="utf-8")
+000206: sys.exit(2)
+000207: """.strip()
+000208:             + "\n",
+000209:         )
+000210:         watchdog = self.make_watchdog(
+000211:             target,
+000212:             max_restarts=3,
+000213:             startup_grace_seconds=0.0,
+000214:         )
+000215: 
+000216:         self.assertEqual(EXIT_CONFIGURATION_ERROR, watchdog.run())
+000217:         self.assertEqual("1", counter_file.read_text(encoding="utf-8"))
+000218: 
+000219:         events = self.read_events()
+000220:         names = [event["event"] for event in events]
+000221:         self.assertIn("REPOSITORY_GUARDIAN_BLOCKED", names)
+000222:         self.assertNotIn("RESTART_SCHEDULED", names)
+000223:         blocked = next(
+000224:             event
+000225:             for event in events
+000226:             if event["event"] == "REPOSITORY_GUARDIAN_BLOCKED"
+000227:         )
+000228:         self.assertTrue(blocked["restart_suppressed"])
+000229: 
+000230:     def test_lock_blocks_duplicate_and_recovers_dead_pid(self) -> None:
+000231:         logger = EventLogger(self.log_dir)
+000232:         first = ProcessLock(self.lock_file, logger, stale_after_seconds=1.0)
+000233:         second = ProcessLock(self.lock_file, logger, stale_after_seconds=1.0)
+000234:         first.acquire()
+000235:         try:
+000236:             with self.assertRaises(AlreadyRunningError):
+000237:                 second.acquire()
+000238:         finally:
+000239:             first.release()
+000240: 
+000241:         self.lock_file.write_text(
+000242:             json.dumps({"pid": 999_999_999, "token": "stale"}) + "\n",
+000243:             encoding="utf-8",
+000244:         )
+000245:         recovered = ProcessLock(self.lock_file, logger, stale_after_seconds=1.0)
+000246:         recovered.acquire()
+000247:         recovered.release()
+000248: 
+000249:         names = [event["event"] for event in self.read_events()]
+000250:         self.assertIn("ACTIVE_LOCK_DETECTED", names)
+000251:         self.assertIn("STALE_LOCK_REMOVED", names)
+000252: 
+000253:     def test_stop_request_terminates_child_safely(self) -> None:
+000254:         target = self.write_script(
+000255:             "long_child.py",
+000256:             "import time\ntime.sleep(30)\n",
+000257:         )
+000258:         watchdog = self.make_watchdog(target)
+000259:         results: list[int] = []
+000260:         thread = threading.Thread(target=lambda: results.append(watchdog.run()))
+000261:         thread.start()
+000262:         deadline = time.monotonic() + 3.0
+000263:         while watchdog.child_pid is None and time.monotonic() < deadline:
+000264:             time.sleep(0.01)
+000265:         self.assertIsNotNone(watchdog.child_pid)
+000266: 
+000267:         watchdog.request_stop("unit_test")
+000268:         thread.join(timeout=5.0)
+000269: 
+000270:         self.assertFalse(thread.is_alive())
+000271:         self.assertEqual([EXIT_OK], results)
+000272:         self.assertIsNone(watchdog.child_pid)
+000273:         names = [event["event"] for event in self.read_events()]
+000274:         self.assertIn("PROCESS_TERMINATING", names)
+000275:         self.assertIn("PROCESS_STOPPED", names)
+000276:         self.assertIn("SAFE_STOP", names)
+000277: 
+000278:     def test_file_ready_heartbeat_publishes_only_for_fresh_step44_ready(self) -> None:
+000279:         target = self.write_script("heartbeat_owner.py", "pass\n")
+000280:         transport = _FakeFileReadyTransport()
+000281:         watchdog = self.make_watchdog(
+000282:             target,
+000283:             enable_file_ready_heartbeat=True,
+000284:             file_ready_transport=transport,
+000285:             file_ready_heartbeat_seconds=0.01,
+000286:         )
+000287:         now = datetime.now(ZoneInfo("Asia/Tokyo"))
+000288: 
+000289:         self.write_step44_summary(now.isoformat(timespec="seconds"))
+000290:         self.assertTrue(watchdog._publish_file_ready_heartbeat_once())
+000291:         self.assertEqual(1, transport.calls)
+000292: 
+000293:         future = now + timedelta(seconds=120)
+000294:         self.write_step44_summary(future.isoformat(timespec="seconds"))
+000295:         self.assertFalse(watchdog._publish_file_ready_heartbeat_once())
+000296:         self.assertEqual(1, transport.calls)
+000297: 
+000298:         stale = now - timedelta(seconds=120)
+000299:         self.write_step44_summary(stale.isoformat(timespec="seconds"))
+000300:         self.assertFalse(watchdog._publish_file_ready_heartbeat_once())
+000301:         self.assertEqual(1, transport.calls)
+000302: 
+000303:         transport.connected = False
+000304:         self.write_step44_summary(now.isoformat(timespec="seconds"))
+000305:         self.assertFalse(watchdog._publish_file_ready_heartbeat_once())
+000306:         self.assertEqual(2, transport.calls)
+000307: 
+000308:     def test_file_ready_heartbeat_stops_after_watchdog_stop(self) -> None:
+000309:         target = self.write_script(
+000310:             "heartbeat_loop_child.py",
+000311:             "import time\ntime.sleep(30)\n",
+000312:         )
+000313:         transport = _FakeFileReadyTransport()
+000314:         now = datetime.now(ZoneInfo("Asia/Tokyo"))
+000315:         self.write_step44_summary(now.isoformat(timespec="seconds"))
+000316:         watchdog = self.make_watchdog(
+000317:             target,
+000318:             enable_file_ready_heartbeat=True,
+000319:             file_ready_transport=transport,
+000320:             file_ready_heartbeat_seconds=0.01,
+000321:         )
+000322:         results: list[int] = []
+000323:         thread = threading.Thread(target=lambda: results.append(watchdog.run()))
+000324:         thread.start()
+000325: 
+000326:         deadline = time.monotonic() + 3.0
+000327:         while watchdog.child_pid is None and time.monotonic() < deadline:
+000328:             time.sleep(0.01)
+000329:         self.assertIsNotNone(watchdog.child_pid)
+000330: 
+000331:         deadline = time.monotonic() + 3.0
+000332:         while transport.calls == 0 and time.monotonic() < deadline:
+000333:             time.sleep(0.01)
+000334:         self.assertGreaterEqual(transport.calls, 1)
+000335: 
+000336:         watchdog.request_stop("unit_test")
+000337:         thread.join(timeout=5.0)
+000338: 
+000339:         self.assertFalse(thread.is_alive())
+000340:         self.assertEqual([EXIT_OK], results)
+000341:         count_after_stop = transport.calls
+000342:         time.sleep(0.05)
+000343:         self.assertEqual(count_after_stop, transport.calls)
+000344: 
+000345: 
+000346: if __name__ == "__main__":
+000347:     unittest.main()
+
+===== FILE FULL: tests/test_v7_step44.py =====
+000001: from __future__ import annotations
+000002: 
+000003: import tempfile
+000004: import unittest
+000005: from datetime import datetime
+000006: from pathlib import Path
+000007: 
+000008: from phoenix_core.data_freshness import JST
+000009: import phoenix_core.vba_bridge_contract as bridge
+000010: 
+000011: 
+000012: ROOT = Path(__file__).resolve().parent.parent
+000013: VBA_DIR = ROOT / "vba"
+000014: 
+000015: 
+000016: class Step44LocalVbaReceiverTest(unittest.TestCase):
+000017:     def test_vba_sources_are_present_and_restricted_to_local_bridge_contract(self) -> None:
+000018:         expected_files = [
+000019:             "PHOENIX_STEP44_Config.bas",
+000020:             "PHOENIX_STEP44_Csv.bas",
+000021:             "PHOENIX_STEP44_State.bas",
+000022:             "PHOENIX_STEP44_Receiver.bas",
+000023:             "STEP44_SETUP.md",
+000024:         ]
+000025:         for file_name in expected_files:
+000026:             self.assertTrue((VBA_DIR / file_name).is_file(), file_name)
+000027: 
+000028:         config_text = (VBA_DIR / "PHOENIX_STEP44_Config.bas").read_text(encoding="utf-8")
+000029:         csv_text = (VBA_DIR / "PHOENIX_STEP44_Csv.bas").read_text(encoding="utf-8")
+000030:         state_text = (VBA_DIR / "PHOENIX_STEP44_State.bas").read_text(encoding="utf-8")
+000031:         receiver_text = (VBA_DIR / "PHOENIX_STEP44_Receiver.bas").read_text(encoding="utf-8")
+000032:         setup_text = (VBA_DIR / "STEP44_SETUP.md").read_text(encoding="utf-8")
+000033: 
+000034:         for text in (config_text, csv_text, state_text, receiver_text):
+000035:             self.assertIn("Attribute VB_Name", text)
+000036:             self.assertIn("Option Explicit", text)
+000037: 
+000038:         self.assertIn('RunPhoenixStep44LocalReceiver', receiver_text)
+000039:         self.assertIn('runtime/v7_vba_bridge/outbox/pending', config_text)
+000040:         self.assertIn('runtime/v7_vba_bridge/outbox/complete', config_text)
+000041:         self.assertIn('runtime/v7_vba_bridge/outbox/rejected', config_text)
+000042:         self.assertIn('runtime/v7_vba_bridge/inbox', config_text)
+000043:         self.assertIn('state/v7_vba_bridge_step44_state.csv', config_text)
+000044:         self.assertIn('reports/v7_vba_bridge_step44_audit.jsonl', config_text)
+000045:         self.assertIn('PHOENIX_STEP44_VBA_LOCAL_RECEIVER', config_text)
+000046: 
+000047:         self.assertIn('Sha256HexUtf8', csv_text)
+000048:         self.assertIn('ParseCsvLine', csv_text)
+000049:         self.assertIn('WriteUtf8TextAtomic', csv_text)
+000050:         self.assertIn('AppendUtf8TextAtomic', state_text)
+000051:         self.assertIn('AcquireStep44Lock', state_text)
+000052:         self.assertIn('ReleaseStep44Lock', state_text)
+000053:         self.assertIn('MoveFileExW', receiver_text)
+000054:         self.assertIn('ADODB.Stream', receiver_text)
+000055:         self.assertIn('PROCESSING', receiver_text)
+000056:         self.assertIn('DUPLICATE', receiver_text)
+000057:         self.assertIn('EXPIRED', receiver_text)
+000058:         self.assertIn('CORRUPT', receiver_text)
+000059:         self.assertIn('REJECTED', receiver_text)
+000060: 
+000061:         forbidden = [
+000062:             "OrderSend",
+000063:             "SendOrder",
+000064:             "BuyMarket",
+000065:             "SellMarket",
+000066:             "WinHttp",
+000067:             "XMLHTTP",
+000068:         ]
+000069:         for word in forbidden:
+000070:             self.assertNotIn(word, config_text + csv_text + state_text + receiver_text)
+000071: 
+000072:         self.assertIn("RunPhoenixStep44LocalReceiver", setup_text)
+000073:         self.assertIn("state/v7_vba_bridge_step44_state.csv", setup_text)
+000074: 
+000075:     def test_step44_receipt_fixture_is_step43_compatible(self) -> None:
+000076:         receipt = {
+000077:             "schema_version": "1",
+000078:             "intent_id": "PHX42-20260805-1301T-BUY-STEP44TEST",
+000079:             "idempotency_key": "step44-test-idempotency-key",
+000080:             "received_at": datetime(2026, 8, 5, 9, 0, 0, tzinfo=JST).isoformat(timespec="seconds"),
+000081:             "result": "ACCEPTED",
+000082:             "reason_codes": "",
+000083:             "vba_instance_id": "PHOENIX_STEP44_VBA_LOCAL_RECEIVER",
+000084:             "source_checksum": "a" * 64,
+000085:             "orders_submitted": "0",
+000086:         }
+000087:         receipt["checksum"] = bridge._checksum_fields(receipt, bridge.RECEIPT_COLUMNS)
+000088: 
+000089:         bridge._validate_receipt_row(receipt)
+000090: 
+000091:         self.assertEqual("ACCEPTED", receipt["result"])
+000092:         self.assertEqual("0", receipt["orders_submitted"])
+000093:         self.assertEqual(64, len(receipt["checksum"]))
+000094: 
+000095: 
+000096: if __name__ == "__main__":
+000097:     unittest.main()
+
+===== FILE FULL: vba/PHOENIX_STEP44_Config.bas =====
+000001: Attribute VB_Name = "PHOENIX_STEP44_Config"
+000002: Option Explicit
+000003: Option Private Module
+000004: 
+000005: Public Const CONTRACT_ID As String = "PHOENIX_STEP44_LOCAL_VBA_RECEIVER"
+000006: Public Const STEP_NAME As String = "PHOENIX v7 Step44"
+000007: Public Const SCHEMA_VERSION As Long = 1
+000008: Public Const TRADING_MODE As String = "PAPER"
+000009: Public Const EXECUTION_MODE As String = "DRY_RUN"
+000010: Public Const TRADING_ACTIONS As String = "DISABLED"
+000011: Public Const ORDERS_SUBMITTED As Long = 0
+000012: Public Const VBA_INSTANCE_ID As String = "PHOENIX_STEP44_VBA_LOCAL_RECEIVER"
+000013: 
+000014: Public Const PENDING_DIR As String = "runtime/v7_vba_bridge/outbox/pending"
+000015: Public Const PROCESSING_DIR As String = "runtime/v7_vba_bridge/outbox/processing"
+000016: Public Const COMPLETE_DIR As String = "runtime/v7_vba_bridge/outbox/complete"
+000017: Public Const REJECTED_DIR As String = "runtime/v7_vba_bridge/outbox/rejected"
+000018: Public Const INBOX_DIR As String = "runtime/v7_vba_bridge/inbox"
+000019: Public Const STATE_FILE As String = "state/v7_vba_bridge_step44_state.csv"
+000020: Public Const LOCK_FILE As String = "state/v7_vba_bridge_step44.lock"
+000021: Public Const AUDIT_FILE As String = "reports/v7_vba_bridge_step44_audit.jsonl"
+000022: 
+000023: Public Const MAX_FUTURE_SKEW_MINUTES As Long = 5
+000024: 
+000025: Public Const OB_SCHEMA_VERSION As Long = 0
+000026: Public Const OB_INTENT_ID As Long = 1
+000027: Public Const OB_IDEMPOTENCY_KEY As Long = 2
+000028: Public Const OB_GENERATED_AT As Long = 3
+000029: Public Const OB_EXPIRES_AT As Long = 4
+000030: Public Const OB_TICKER As Long = 5
+000031: Public Const OB_MARKET As Long = 6
+000032: Public Const OB_SIDE As Long = 7
+000033: Public Const OB_ORDER_TYPE As Long = 8
+000034: Public Const OB_QUANTITY As Long = 9
+000035: Public Const OB_REFERENCE_PRICE As Long = 10
+000036: Public Const OB_LIMIT_PRICE As Long = 11
+000037: Public Const OB_STOP_LOSS_PRICE As Long = 12
+000038: Public Const OB_TAKE_PROFIT_PRICE As Long = 13
+000039: Public Const OB_ESTIMATED_NOTIONAL As Long = 14
+000040: Public Const OB_ESTIMATED_MAX_LOSS As Long = 15
+000041: Public Const OB_TRADING_MODE As Long = 16
+000042: Public Const OB_EXECUTION_MODE As Long = 17
+000043: Public Const OB_BRIDGE_STATUS As Long = 18
+000044: Public Const OB_CHECKSUM As Long = 19
+000045: 
+000046: Public Const RC_SCHEMA_VERSION As Long = 0
+000047: Public Const RC_INTENT_ID As Long = 1
+000048: Public Const RC_IDEMPOTENCY_KEY As Long = 2
+000049: Public Const RC_RECEIVED_AT As Long = 3
+000050: Public Const RC_RESULT As Long = 4
+000051: Public Const RC_REASON_CODES As Long = 5
+000052: Public Const RC_VBA_INSTANCE_ID As Long = 6
+000053: Public Const RC_SOURCE_CHECKSUM As Long = 7
+000054: Public Const RC_ORDERS_SUBMITTED As Long = 8
+000055: Public Const RC_CHECKSUM As Long = 9
+000056: 
+000057: Public Const ST_RECORDED_AT As Long = 0
+000058: Public Const ST_INTENT_ID As Long = 1
+000059: Public Const ST_IDEMPOTENCY_KEY As Long = 2
+000060: Public Const ST_SOURCE_CHECKSUM As Long = 3
+000061: Public Const ST_STATUS As Long = 4
+000062: Public Const ST_RESULT As Long = 5
+000063: Public Const ST_REASON_CODES As Long = 6
+000064: Public Const ST_OUTBOX_FILE As Long = 7
+000065: Public Const ST_RECEIPT_FILE As Long = 8
+000066: Public Const ST_VBA_INSTANCE_ID As Long = 9
+000067: Public Const ST_ORDERS_SUBMITTED As Long = 10
+000068: Public Const ST_NOTE As Long = 11
+000069: 
+000070: Public Function RepositorySentinels() As Variant
+000071:     RepositorySentinels = Array("run_phoenix.py", "phoenix_core", "AGENTS.md")
+000072: End Function
+000073: 
+000074: Public Function OutboxColumns() As Variant
+000075:     OutboxColumns = Array( _
+000076:         "schema_version", _
+000077:         "intent_id", _
+000078:         "idempotency_key", _
+000079:         "generated_at", _
+000080:         "expires_at", _
+000081:         "ticker", _
+000082:         "market", _
+000083:         "side", _
+000084:         "order_type", _
+000085:         "quantity", _
+000086:         "reference_price", _
+000087:         "limit_price", _
+000088:         "stop_loss_price", _
+000089:         "take_profit_price", _
+000090:         "estimated_notional", _
+000091:         "estimated_max_loss", _
+000092:         "trading_mode", _
+000093:         "execution_mode", _
+000094:         "bridge_status", _
+000095:         "checksum" _
+000096:     )
+000097: End Function
+000098: 
+000099: Public Function ReceiptColumns() As Variant
+000100:     ReceiptColumns = Array( _
+000101:         "schema_version", _
+000102:         "intent_id", _
+000103:         "idempotency_key", _
+000104:         "received_at", _
+000105:         "result", _
+000106:         "reason_codes", _
+000107:         "vba_instance_id", _
+000108:         "source_checksum", _
+000109:         "orders_submitted", _
+000110:         "checksum" _
+000111:     )
+000112: End Function
+000113: 
+000114: Public Function StateColumns() As Variant
+000115:     StateColumns = Array( _
+000116:         "recorded_at", _
+000117:         "intent_id", _
+000118:         "idempotency_key", _
+000119:         "source_checksum", _
+000120:         "status", _
+000121:         "result", _
+000122:         "reason_codes", _
+000123:         "outbox_file", _
+000124:         "receipt_file", _
+000125:         "vba_instance_id", _
+000126:         "orders_submitted", _
+000127:         "note" _
+000128:     )
+000129: End Function
+000130: 
+000131: Public Function OutboxChecksumIndexes() As Variant
+000132:     OutboxChecksumIndexes = Array( _
+000133:         OB_BRIDGE_STATUS, _
+000134:         OB_ESTIMATED_MAX_LOSS, _
+000135:         OB_ESTIMATED_NOTIONAL, _
+000136:         OB_EXECUTION_MODE, _
+000137:         OB_EXPIRES_AT, _
+000138:         OB_GENERATED_AT, _
+000139:         OB_IDEMPOTENCY_KEY, _
+000140:         OB_INTENT_ID, _
+000141:         OB_LIMIT_PRICE, _
+000142:         OB_MARKET, _
+000143:         OB_ORDER_TYPE, _
+000144:         OB_QUANTITY, _
+000145:         OB_REFERENCE_PRICE, _
+000146:         OB_SIDE, _
+000147:         OB_SCHEMA_VERSION, _
+000148:         OB_STOP_LOSS_PRICE, _
+000149:         OB_TAKE_PROFIT_PRICE, _
+000150:         OB_TICKER, _
+000151:         OB_TRADING_MODE _
+000152:     )
+000153: End Function
+000154: 
+000155: Public Function ReceiptChecksumIndexes() As Variant
+000156:     ReceiptChecksumIndexes = Array( _
+000157:         RC_IDEMPOTENCY_KEY, _
+000158:         RC_INTENT_ID, _
+000159:         RC_ORDERS_SUBMITTED, _
+000160:         RC_REASON_CODES, _
+000161:         RC_RECEIVED_AT, _
+000162:         RC_RESULT, _
+000163:         RC_SCHEMA_VERSION, _
+000164:         RC_SOURCE_CHECKSUM, _
+000165:         RC_VBA_INSTANCE_ID _
+000166:     )
+000167: End Function
+000168: 
+000169: Public Function StateEventChecksumIndexes() As Variant
+000170:     StateEventChecksumIndexes = Array( _
+000171:         ST_IDEMPOTENCY_KEY, _
+000172:         ST_INTENT_ID, _
+000173:         ST_NOTE, _
+000174:         ST_ORDERS_SUBMITTED, _
+000175:         ST_REASON_CODES, _
+000176:         ST_RECORDED_AT, _
+000177:         ST_RESULT, _
+000178:         ST_SOURCE_CHECKSUM, _
+000179:         ST_STATUS, _
+000180:         ST_VBA_INSTANCE_ID _
+000181:     )
+000182: End Function
+000183: 
+000184: Public Function FinalStatuses() As Variant
+000185:     FinalStatuses = Array("ACCEPTED", "REJECTED", "DUPLICATE", "EXPIRED", "CORRUPT")
+000186: End Function
+
+===== FILE FULL: vba/PHOENIX_STEP44_Csv.bas =====
+000001: Attribute VB_Name = "PHOENIX_STEP44_Csv"
+000002: Option Explicit
+000003: Option Private Module
+000004: 
+000005: #If VBA7 Then
+000006:     Private Declare PtrSafe Function MoveFileExW Lib "kernel32" ( _
+000007:         ByVal lpExistingFileName As LongPtr, _
+000008:         ByVal lpNewFileName As LongPtr, _
+000009:         ByVal dwFlags As Long) As Long
+000010: 
+000011:     Private Declare PtrSafe Sub GetSystemTime Lib "kernel32" ( _
+000012:         ByRef lpSystemTime As SYSTEMTIME)
+000013: #Else
+000014:     Private Declare Function MoveFileExW Lib "kernel32" ( _
+000015:         ByVal lpExistingFileName As Long, _
+000016:         ByVal lpNewFileName As Long, _
+000017:         ByVal dwFlags As Long) As Long
+000018: 
+000019:     Private Declare Sub GetSystemTime Lib "kernel32" ( _
+000020:         ByRef lpSystemTime As SYSTEMTIME)
+000021: #End If
+000022: 
+000023: Private Type SYSTEMTIME
+000024:     wYear As Integer
+000025:     wMonth As Integer
+000026:     wDayOfWeek As Integer
+000027:     wDay As Integer
+000028:     wHour As Integer
+000029:     wMinute As Integer
+000030:     wSecond As Integer
+000031:     wMilliseconds As Integer
+000032: End Type
+000033: 
+000034: Private Const MOVEFILE_REPLACE_EXISTING As Long = &H1
+000035: Private Const MOVEFILE_WRITE_THROUGH As Long = &H8
+000036: 
+000037: Public Function NormalizeText(ByVal value As Variant) As String
+000038:     If IsError(value) Or IsEmpty(value) Or IsNull(value) Then
+000039:         NormalizeText = ""
+000040:         Exit Function
+000041:     End If
+000042:     NormalizeText = Trim$(CStr(value))
+000043:     If LCase$(NormalizeText) = "nan" Then
+000044:         NormalizeText = ""
+000045:     End If
+000046: End Function
+000047: 
+000048: Public Function NormalizeUpperText(ByVal value As Variant) As String
+000049:     NormalizeUpperText = UCase$(NormalizeText(value))
+000050: End Function
+000051: 
+000052: Public Function ValidateRequiredText(ByVal value As Variant, ByVal fieldName As String) As String
+000053:     Dim text As String
+000054:     text = NormalizeText(value)
+000055:     If Len(text) = 0 Then
+000056:         Err.Raise vbObjectError + 4401, CONTRACT_ID, fieldName & " is missing"
+000057:     End If
+000058:     ValidateRequiredText = text
+000059: End Function
+000060: 
+000061: Public Function ValidatePositiveIntegerText(ByVal value As Variant, ByVal fieldName As String) As String
+000062:     Dim text As String
+000063:     Dim number As Double
+000064:     text = NormalizeText(value)
+000065:     If Len(text) = 0 Then Err.Raise vbObjectError + 4402, CONTRACT_ID, fieldName & " is missing"
+000066:     If LCase$(text) = "nan" Or LCase$(text) = "infinity" Or LCase$(text) = "+infinity" Or LCase$(text) = "-infinity" Then
+000067:         Err.Raise vbObjectError + 4403, CONTRACT_ID, fieldName & " is invalid"
+000068:     End If
+000069:     On Error GoTo BadNumber
+000070:     number = CDbl(Replace$(text, ",", ""))
+000071:     On Error GoTo 0
+000072:     If number <= 0 Or number <> Fix(number) Then
+000073:         Err.Raise vbObjectError + 4404, CONTRACT_ID, fieldName & " must be a positive integer"
+000074:     End If
+000075:     ValidatePositiveIntegerText = Format$(number, "0")
+000076:     Exit Function
+000077: BadNumber:
+000078:     Err.Raise vbObjectError + 4405, CONTRACT_ID, fieldName & " must be a positive integer"
+000079: End Function
+000080: 
+000081: Public Function ValidatePositiveMoneyText(ByVal value As Variant, ByVal fieldName As String) As String
+000082:     Dim text As String
+000083:     Dim number As Double
+000084:     text = NormalizeText(value)
+000085:     If Len(text) = 0 Then Err.Raise vbObjectError + 4406, CONTRACT_ID, fieldName & " is missing"
+000086:     text = Replace$(text, ",", "")
+000087:     If LCase$(text) = "nan" Or LCase$(text) = "infinity" Or LCase$(text) = "+infinity" Or LCase$(text) = "-infinity" Then
+000088:         Err.Raise vbObjectError + 4407, CONTRACT_ID, fieldName & " is invalid"
+000089:     End If
+000090:     On Error GoTo BadMoney
+000091:     number = CDbl(text)
+000092:     On Error GoTo 0
+000093:     If Not (number > 0#) Or number <> number Then
+000094:         Err.Raise vbObjectError + 4408, CONTRACT_ID, fieldName & " must be a positive number"
+000095:     End If
+000096:     ValidatePositiveMoneyText = Replace$(Format$(number, "0.00"), ",", ".")
+000097:     Exit Function
+000098: BadMoney:
+000099:     Err.Raise vbObjectError + 4409, CONTRACT_ID, fieldName & " must be a positive number"
+000100: End Function
+000101: 
+000102: Public Function ValidateNonNegativeIntegerText(ByVal value As Variant, ByVal fieldName As String) As String
+000103:     Dim text As String
+000104:     Dim number As Double
+000105:     text = NormalizeText(value)
+000106:     If Len(text) = 0 Then Err.Raise vbObjectError + 4410, CONTRACT_ID, fieldName & " is missing"
+000107:     On Error GoTo BadNumber
+000108:     number = CDbl(Replace$(text, ",", ""))
+000109:     On Error GoTo 0
+000110:     If number < 0 Or number <> Fix(number) Then
+000111:         Err.Raise vbObjectError + 4411, CONTRACT_ID, fieldName & " must be a non-negative integer"
+000112:     End If
+000113:     ValidateNonNegativeIntegerText = Format$(number, "0")
+000114:     Exit Function
+000115: BadNumber:
+000116:     Err.Raise vbObjectError + 4412, CONTRACT_ID, fieldName & " must be a non-negative integer"
+000117: End Function
+000118: 
+000119: Public Function CurrentUtc() As Date
+000120:     Dim systemTime As SYSTEMTIME
+000121:     GetSystemTime systemTime
+000122:     CurrentUtc = DateSerial(systemTime.wYear, systemTime.wMonth, systemTime.wDay) + _
+000123:         TimeSerial(systemTime.wHour, systemTime.wMinute, systemTime.wSecond)
+000124: End Function
+000125: 
+000126: Public Function CurrentJst() As Date
+000127:     CurrentJst = DateAdd("h", 9, CurrentUtc())
+000128: End Function
+000129: 
+000130: Public Function FormatJstTimestamp(ByVal value As Date) As String
+000131:     FormatJstTimestamp = Format$(value, "yyyy-mm-dd\THH:nn:ss") & "+09:00"
+000132: End Function
+000133: 
+000134: Public Function ParseJstTimestamp(ByVal value As Variant, ByVal fieldName As String) As Date
+000135:     Dim text As String
+000136:     text = ValidateRequiredText(value, fieldName)
+000137:     If Len(text) <> 25 Or Mid$(text, 20, 6) <> "+09:00" Then
+000138:         Err.Raise vbObjectError + 4413, CONTRACT_ID, fieldName & " must use JST +09:00"
+000139:     End If
+000140:     On Error GoTo BadTimestamp
+000141:     ParseJstTimestamp = DateSerial(CInt(Mid$(text, 1, 4)), CInt(Mid$(text, 6, 2)), CInt(Mid$(text, 9, 2))) + _
+000142:         TimeSerial(CInt(Mid$(text, 12, 2)), CInt(Mid$(text, 15, 2)), CInt(Mid$(text, 18, 2)))
+000143:     Exit Function
+000144: BadTimestamp:
+000145:     Err.Raise vbObjectError + 4414, CONTRACT_ID, fieldName & " is invalid"
+000146: End Function
+000147: 
+000148: Public Function ValidateJstTimestampText(ByVal value As Variant, ByVal fieldName As String) As String
+000149:     ValidateJstTimestampText = FormatJstTimestamp(ParseJstTimestamp(value, fieldName))
+000150: End Function
+000151: 
+000152: Public Function CsvEscape(ByVal value As String) As String
+000153:     CsvEscape = """" & Replace$(value, """", """""") & """"
+000154: End Function
+000155: 
+000156: Public Function CsvHeaderText(ByVal columns As Variant) As String
+000157:     CsvHeaderText = Join(columns, ",")
+000158: End Function
+000159: 
+000160: Public Function CsvRowText(ByVal values As Variant) As String
+000161:     Dim items() As String
+000162:     Dim index As Long
+000163:     ReDim items(LBound(values) To UBound(values))
+000164:     For index = LBound(values) To UBound(values)
+000165:         items(index) = CsvEscape(CStr(values(index)))
+000166:     Next index
+000167:     CsvRowText = Join(items, ",")
+000168: End Function
+000169: 
+000170: Public Function ParseCsvLine(ByVal line As String) As Variant
+000171:     Dim fields() As String
+000172:     Dim fieldValue As String
+000173:     Dim index As Long
+000174:     Dim character As String
+000175:     Dim inQuotes As Boolean
+000176: 
+000177:     ReDim fields(0 To 0)
+000178:     For index = 1 To Len(line)
+000179:         character = Mid$(line, index, 1)
+000180:         If character = """" Then
+000181:             If inQuotes And index < Len(line) And Mid$(line, index + 1, 1) = """" Then
+000182:                 fieldValue = fieldValue & """"
+000183:                 index = index + 1
+000184:             Else
+000185:                 inQuotes = Not inQuotes
+000186:             End If
+000187:         ElseIf character = "," And Not inQuotes Then
+000188:             fields(UBound(fields)) = fieldValue
+000189:             fieldValue = ""
+000190:             ReDim Preserve fields(0 To UBound(fields) + 1)
+000191:         Else
+000192:             fieldValue = fieldValue & character
+000193:         End If
+000194:     Next index
+000195: 
+000196:     fields(UBound(fields)) = fieldValue
+000197:     ParseCsvLine = fields
+000198: End Function
+000199: 
+000200: Private Function NormalizeLineEndings(ByVal content As String) As String
+000201:     content = Replace$(content, vbCrLf, vbLf)
+000202:     content = Replace$(content, vbCr, vbLf)
+000203:     NormalizeLineEndings = content
+000204: End Function
+000205: 
+000206: Public Function ReadUtf8TextFile(ByVal path As String) As String
+000207:     Dim stream As Object
+000208:     If Len(Dir$(path)) = 0 Then
+000209:         ReadUtf8TextFile = ""
+000210:         Exit Function
+000211:     End If
+000212:     Set stream = CreateObject("ADODB.Stream")
+000213:     stream.Type = 1
+000214:     stream.Open
+000215:     stream.LoadFromFile path
+000216:     stream.Position = 0
+000217:     stream.Type = 2
+000218:     stream.Charset = "utf-8"
+000219:     ReadUtf8TextFile = stream.ReadText(-1)
+000220:     stream.Close
+000221: End Function
+000222: 
+000223: Private Sub WriteUtf8TextFile(ByVal path As String, ByVal content As String)
+000224:     Dim stream As Object
+000225:     Set stream = CreateObject("ADODB.Stream")
+000226:     stream.Type = 2
+000227:     stream.Charset = "utf-8"
+000228:     stream.Open
+000229:     stream.WriteText content
+000230:     stream.SaveToFile path, 2
+000231:     stream.Close
+000232: End Sub
+000233: 
+000234: Public Sub EnsureFolderTree(ByVal folderPath As String)
+000235:     Dim fso As Object
+000236:     Dim parentPath As String
+000237: 
+000238:     If Len(folderPath) = 0 Then Exit Sub
+000239:     Set fso = CreateObject("Scripting.FileSystemObject")
+000240:     If fso.FolderExists(folderPath) Then Exit Sub
+000241:     parentPath = fso.GetParentFolderName(folderPath)
+000242:     If Len(parentPath) > 0 And Not fso.FolderExists(parentPath) Then
+000243:         EnsureFolderTree parentPath
+000244:     End If
+000245:     If Not fso.FolderExists(folderPath) Then MkDir folderPath
+000246: End Sub
+000247: 
+000248: Public Function ParentFolderPath(ByVal filePath As String) As String
+000249:     Dim fso As Object
+000250:     Set fso = CreateObject("Scripting.FileSystemObject")
+000251:     ParentFolderPath = fso.GetParentFolderName(filePath)
+000252: End Function
+000253: 
+000254: Public Function FileExists(ByVal path As String) As Boolean
+000255:     FileExists = Len(Dir$(path)) > 0
+000256: End Function
+000257: 
+000258: Private Function ColumnsMatch(ByVal leftColumns As Variant, ByVal rightColumns As Variant) As Boolean
+000259:     Dim index As Long
+000260:     If (UBound(leftColumns) - LBound(leftColumns)) <> (UBound(rightColumns) - LBound(rightColumns)) Then Exit Function
+000261:     For index = LBound(leftColumns) To UBound(leftColumns)
+000262:         If CStr(leftColumns(index)) <> CStr(rightColumns(index)) Then Exit Function
+000263:     Next index
+000264:     ColumnsMatch = True
+000265: End Function
+000266: 
+000267: Public Function ReadCsvRows(ByVal path As String) As Collection
+000268:     Dim rows As Collection
+000269:     Dim content As String
+000270:     Dim normalized As String
+000271:     Dim lines As Variant
+000272:     Dim lineValue As Variant
+000273: 
+000274:     Set rows = New Collection
+000275:     content = ReadUtf8TextFile(path)
+000276:     If Len(content) = 0 Then
+000277:         Set ReadCsvRows = rows
+000278:         Exit Function
+000279:     End If
+000280: 
+000281:     normalized = NormalizeLineEndings(content)
+000282:     lines = Split(normalized, vbLf)
+000283:     For Each lineValue In lines
+000284:         If Len(Trim$(CStr(lineValue))) > 0 Then
+000285:             rows.Add ParseCsvLine(CStr(lineValue))
+000286:         End If
+000287:     Next lineValue
+000288:     Set ReadCsvRows = rows
+000289: End Function
+000290: 
+000291: Public Function ReadCsvRowsWithHeader(ByVal path As String, ByVal expectedColumns As Variant) As Collection
+000292:     Dim rows As Collection
+000293:     Dim header As Variant
+000294:     Set rows = ReadCsvRows(path)
+000295:     If rows.Count = 0 Then
+000296:         Set ReadCsvRowsWithHeader = rows
+000297:         Exit Function
+000298:     End If
+000299:     header = rows.Item(1)
+000300:     If Not ColumnsMatch(header, expectedColumns) Then
+000301:         Err.Raise vbObjectError + 4415, CONTRACT_ID, "CSV columns do not match contract: " & path
+000302:     End If
+000303:     Set ReadCsvRowsWithHeader = rows
+000304: End Function
+000305: 
+000306: Public Function ReadSingleCsvRecord(ByVal path As String, ByVal expectedColumns As Variant) As Variant
+000307:     Dim rows As Collection
+000308:     Set rows = ReadCsvRows(path)
+000309:     If rows.Count <> 2 Then
+000310:         Err.Raise vbObjectError + 4416, CONTRACT_ID, "CSV must contain exactly one data row: " & path
+000311:     End If
+000312:     If Not ColumnsMatch(rows.Item(1), expectedColumns) Then
+000313:         Err.Raise vbObjectError + 4417, CONTRACT_ID, "CSV columns do not match contract: " & path
+000314:     End If
+000315:     ReadSingleCsvRecord = rows.Item(2)
+000316: End Function
+000317: 
+000318: Public Sub WriteCsvRecordAtomic(ByVal path As String, ByVal columns As Variant, ByVal values As Variant)
+000319:     EnsureFolderTree ParentFolderPath(path)
+000320:     WriteUtf8TextAtomic path, CsvHeaderText(columns) & vbCrLf & CsvRowText(values) & vbCrLf
+000321: End Sub
+000322: 
+000323: Public Sub AppendUtf8TextAtomic(ByVal path As String, ByVal content As String)
+000324:     Dim existingText As String
+000325:     Dim combinedText As String
+000326: 
+000327:     EnsureFolderTree ParentFolderPath(path)
+000328:     existingText = ReadUtf8TextFile(path)
+000329:     If Len(existingText) > 0 Then
+000330:         combinedText = existingText
+000331:         If Right$(combinedText, 1) <> vbLf Then
+000332:             combinedText = combinedText & vbCrLf
+000333:         End If
+000334:         combinedText = combinedText & content
+000335:     Else
+000336:         combinedText = content
+000337:     End If
+000338:     WriteUtf8TextAtomic path, combinedText
+000339: End Sub
+000340: 
+000341: Public Sub WriteUtf8TextAtomic(ByVal path As String, ByVal content As String)
+000342:     Dim temporaryPath As String
+000343:     Dim result As Long
+000344: 
+000345:     EnsureFolderTree ParentFolderPath(path)
+000346:     temporaryPath = path & ".tmp"
+000347:     On Error GoTo CleanFail
+000348:     WriteUtf8TextFile temporaryPath, content
+000349:     result = MoveFileExW(StrPtr(temporaryPath), StrPtr(path), MOVEFILE_REPLACE_EXISTING Or MOVEFILE_WRITE_THROUGH)
+000350:     If result = 0 Then
+000351:         Err.Raise vbObjectError + 4418, CONTRACT_ID, "Atomic replacement failed: " & path
+000352:     End If
+000353:     On Error Resume Next
+000354:     Kill temporaryPath
+000355:     On Error GoTo 0
+000356:     Exit Sub
+000357: CleanFail:
+000358:     On Error Resume Next
+000359:     Kill temporaryPath
+000360:     On Error GoTo 0
+000361:     Err.Raise Err.Number, Err.Source, Err.Description
+000362: End Sub
+000363: 
+000364: Public Function RowItem(ByVal rowValues As Variant, ByVal index As Long) As String
+000365:     RowItem = NormalizeText(rowValues(index))
+000366: End Function
+000367: 
+000368: Private Function JsonEscape(ByVal value As String) As String
+000369:     Dim result As String
+000370:     Dim index As Long
+000371:     Dim character As String
+000372: 
+000373:     For index = 1 To Len(value)
+000374:         character = Mid$(value, index, 1)
+000375:         Select Case character
+000376:             Case """"
+000377:                 result = result & """"
+000378:             Case "\"
+000379:                 result = result & "\\"
+000380:             Case vbBack
+000381:                 result = result & "\b"
+000382:             Case vbFormFeed
+000383:                 result = result & "\f"
+000384:             Case vbLf
+000385:                 result = result & "\n"
+000386:             Case vbCr
+000387:                 result = result & "\r"
+000388:             Case vbTab
+000389:                 result = result & "\t"
+000390:             Case Else
+000391:                 result = result & character
+000392:         End Select
+000393:     Next index
+000394:     JsonEscape = result
+000395: End Function
+000396: 
+000397: Private Function JsonString(ByVal value As String) As String
+000398:     JsonString = """" & JsonEscape(value) & """"
+000399: End Function
+000400: 
+000401: Public Function CanonicalJsonFromOutboxRow(ByVal rowValues As Variant) As String
+000402:     Dim parts() As String
+000403:     Dim keys As Variant
+000404:     Dim index As Long
+000405: 
+000406:     keys = OutboxChecksumIndexes()
+000407:     ReDim parts(LBound(keys) To UBound(keys))
+000408:     For index = LBound(keys) To UBound(keys)
+000409:         parts(index) = JsonString(RowItem(rowValues, CLng(keys(index))))
+000410:     Next index
+000411:     CanonicalJsonFromOutboxRow = "{" & Join(parts, ",") & "}"
+000412: End Function
+000413: 
+000414: Public Function CanonicalJsonFromReceiptRow(ByVal rowValues As Variant) As String
+000415:     Dim parts() As String
+000416:     Dim keys As Variant
+000417:     Dim index As Long
+000418: 
+000419:     keys = ReceiptChecksumIndexes()
+000420:     ReDim parts(LBound(keys) To UBound(keys))
+000421:     For index = LBound(keys) To UBound(keys)
+000422:         parts(index) = JsonString(RowItem(rowValues, CLng(keys(index))))
+000423:     Next index
+000424:     CanonicalJsonFromReceiptRow = "{" & Join(parts, ",") & "}"
+000425: End Function
+000426: 
+000427: Public Function Sha256HexUtf8(ByVal text As String) As String
+000428:     Dim temporaryPath As String
+000429:     Dim scriptPath As String
+000430:     Dim scriptText As String
+000431:     Dim shell As Object
+000432:     Dim execObject As Object
+000433:     Dim command As String
+000434:     Dim stdoutText As String
+000435:     Dim lines As Variant
+000436:     Dim lineValue As Variant
+000437:     Dim index As Long
+000438: 
+000439:     temporaryPath = Environ$("TEMP") & "\phoenix_step44_hash_" & Format$(CurrentUtc(), "yyyymmdd_hhnnss") & "_" & CStr(CLng(Timer * 1000)) & ".txt"
+000440:     scriptPath = temporaryPath & ".ps1"
+000441:     WriteUtf8TextAtomic temporaryPath, text
+000442: 
+000443:     scriptText = ""
+000444:     scriptText = scriptText & "param([string]$Path)" & vbCrLf
+000445:     scriptText = scriptText & "$Text = Get-Content -Raw -Encoding UTF8 -LiteralPath $Path" & vbCrLf
+000446:     scriptText = scriptText & "$Sha = [System.Security.Cryptography.SHA256]::Create()" & vbCrLf
+000447:     scriptText = scriptText & "try {" & vbCrLf
+000448:     scriptText = scriptText & "  $Bytes = [System.Text.Encoding]::UTF8.GetBytes($Text)" & vbCrLf
+000449:     scriptText = scriptText & "  $Hash = $Sha.ComputeHash($Bytes)" & vbCrLf
+000450:     scriptText = scriptText & "  ($Hash | ForEach-Object { $_.ToString('x2') }) -join ''" & vbCrLf
+000451:     scriptText = scriptText & "} finally {" & vbCrLf
+000452:     scriptText = scriptText & "  $Sha.Dispose()" & vbCrLf
+000453:     scriptText = scriptText & "}" & vbCrLf
+000454:     WriteUtf8TextAtomic scriptPath, scriptText
+000455: 
+000456:     command = "powershell.exe -NoProfile -NonInteractive -File """ & scriptPath & """ """ & temporaryPath & """"
+000457:     Set shell = CreateObject("WScript.Shell")
+000458:     Set execObject = shell.Exec(command)
+000459:     stdoutText = execObject.StdOut.ReadAll
+000460: 
+000461:     On Error Resume Next
+000462:     Kill temporaryPath
+000463:     Kill scriptPath
+000464:     On Error GoTo 0
+000465: 
+000466:     lines = Split(NormalizeLineEndings(stdoutText), vbLf)
+000467:     For index = UBound(lines) To LBound(lines) Step -1
+000468:         lineValue = Trim$(CStr(lines(index)))
+000469:         If Len(lineValue) = 64 Then
+000470:             If IsHexDigest(lineValue) Then
+000471:                 Sha256HexUtf8 = LCase$(lineValue)
+000472:                 Exit Function
+000473:             End If
+000474:         End If
+000475:     Next index
+000476:     Err.Raise vbObjectError + 4419, CONTRACT_ID, "SHA-256 calculation failed"
+000477: End Function
+000478: 
+000479: Private Function IsHexDigest(ByVal value As String) As Boolean
+000480:     Dim index As Long
+000481:     Dim character As String
+000482:     If Len(value) <> 64 Then Exit Function
+000483:     For index = 1 To Len(value)
+000484:         character = Mid$(value, index, 1)
+000485:         If InStr(1, "0123456789abcdefABCDEF", character, vbBinaryCompare) = 0 Then Exit Function
+000486:     Next index
+000487:     IsHexDigest = True
+000488: End Function
+
+===== FILE FULL: vba/PHOENIX_STEP44_Receiver.bas =====
+000001: Attribute VB_Name = "PHOENIX_STEP44_Receiver"
+000002: Option Explicit
+000003: 
+000004: ' ADODB.Stream is used in the companion CSV module for local UTF-8 file I/O.
+000005: 
+000006: #If VBA7 Then
+000007:     Private Declare PtrSafe Function MoveFileExW Lib "kernel32" ( _
+000008:         ByVal lpExistingFileName As LongPtr, _
+000009:         ByVal lpNewFileName As LongPtr, _
+000010:         ByVal dwFlags As Long) As Long
+000011: #Else
+000012:     Private Declare Function MoveFileExW Lib "kernel32" ( _
+000013:         ByVal lpExistingFileName As Long, _
+000014:         ByVal lpNewFileName As Long, _
+000015:         ByVal dwFlags As Long) As Long
+000016: #End If
+000017: 
+000018: Private Const MOVEFILE_REPLACE_EXISTING As Long = &H1
+000019: Private Const MOVEFILE_WRITE_THROUGH As Long = &H8
+000020: 
+000021: Public Sub RunPhoenixStep44LocalReceiver()
+000022:     Dim rootPath As String
+000023:     Dim currentStage As String
+000024:     Dim errorNumber As Long
+000025:     Dim errorSource As String
+000026:     Dim errorDescription As String
+000027:     Dim errorLine As Long
+000028: 
+000029:     On Error GoTo CleanFail
+000030:     currentStage = "RESOLVE_ROOT"
+000031:     rootPath = FindRepositoryRoot(ThisWorkbook.Path)
+000032:     currentStage = "ENSURE_DIRECTORIES"
+000033:     EnsureBridgeDirectories rootPath
+000034:     currentStage = "ACQUIRE_LOCK"
+000035:     AcquireStep44Lock rootPath
+000036:     currentStage = "PROCESS_PENDING"
+000037:     ProcessPendingOutboxFiles rootPath
+000038: CleanExit:
+000039:     ReleaseStep44Lock
+000040:     Exit Sub
+000041: CleanFail:
+000042:     errorNumber = Err.Number
+000043:     errorSource = Err.Source
+000044:     errorDescription = Err.Description
+000045:     errorLine = Erl
+000046:     On Error Resume Next
+000047:     If Len(rootPath) > 0 Then
+000048:         AppendAuditJsonLine rootPath, BuildAuditJsonLine( _
+000049:             "fatal", _
+000050:             FormatJstTimestamp(CurrentJst()), _
+000051:             "", _
+000052:             "", _
+000053:             "", _
+000054:             "CORRUPT", _
+000055:             "RUN_FAILED", _
+000056:             "", _
+000057:             "", _
+000058:             "", _
+000059:             VBA_INSTANCE_ID, _
+000060:             "0", _
+000061:             "top_level_failure", _
+000062:             currentStage, _
+000063:             "", _
+000064:             CStr(errorNumber), _
+000065:             errorSource, _
+000066:             errorDescription, _
+000067:             CStr(errorLine))
+000068:     End If
+000069:     On Error GoTo 0
+000070:     Resume CleanExit
+000071: End Sub
+000072: 
+000073: Private Function FindRepositoryRoot(ByVal startPath As String) As String
+000074:     Dim currentPath As String
+000075:     Dim parentPath As String
+000076:     Dim fso As Object
+000077: 
+000078:     If Len(startPath) = 0 Then
+000079:         Err.Raise vbObjectError + 4430, CONTRACT_ID, "This workbook must be saved before running Step44"
+000080:     End If
+000081: 
+000082:     Set fso = CreateObject("Scripting.FileSystemObject")
+000083:     currentPath = startPath
+000084:     Do
+000085:         If RepositoryLooksValid(currentPath) Then
+000086:             FindRepositoryRoot = currentPath
+000087:             Exit Function
+000088:         End If
+000089:         parentPath = fso.GetParentFolderName(currentPath)
+000090:         If Len(parentPath) = 0 Or parentPath = currentPath Then Exit Do
+000091:         currentPath = parentPath
+000092:     Loop
+000093: 
+000094:     Err.Raise vbObjectError + 4431, CONTRACT_ID, "Unable to resolve the PHOENIX repository root"
+000095: End Function
+000096: 
+000097: Private Function RepositoryLooksValid(ByVal rootPath As String) As Boolean
+000098:     RepositoryLooksValid = _
+000099:         FileExists(RepositoryPath(rootPath, "run_phoenix.py")) And _
+000100:         FileExists(RepositoryPath(rootPath, "AGENTS.md")) And _
+000101:         FileExists(RepositoryPath(rootPath, "phoenix_core\__init__.py"))
+000102: End Function
+000103: 
+000104: Private Function PendingCsvFiles(ByVal folderPath As String) As Collection
+000105:     Dim fso As Object
+000106:     Dim folder As Object
+000107:     Dim fileItem As Object
+000108:     Dim values() As String
+000109:     Dim result As New Collection
+000110:     Dim count As Long
+000111:     Dim index As Long
+000112: 
+000113:     Set fso = CreateObject("Scripting.FileSystemObject")
+000114:     If Not fso.FolderExists(folderPath) Then
+000115:         Set PendingCsvFiles = result
+000116:         Exit Function
+000117:     End If
+000118: 
+000119:     Set folder = fso.GetFolder(folderPath)
+000120:     For Each fileItem In folder.Files
+000121:         If LCase$(fso.GetExtensionName(fileItem.Name)) = "csv" Then
+000122:             ReDim Preserve values(0 To count)
+000123:             values(count) = CStr(fileItem.Path)
+000124:             count = count + 1
+000125:         End If
+000126:     Next fileItem
+000127: 
+000128:     If count = 0 Then
+000129:         Set PendingCsvFiles = result
+000130:         Exit Function
+000131:     End If
+000132: 
+000133:     SortStringArray values
+000134:     For index = LBound(values) To UBound(values)
+000135:         result.Add values(index)
+000136:     Next index
+000137:     Set PendingCsvFiles = result
+000138: End Function
+000139: 
+000140: Private Sub SortStringArray(ByRef values() As String)
+000141:     Dim i As Long
+000142:     Dim j As Long
+000143:     Dim temp As String
+000144: 
+000145:     For i = LBound(values) To UBound(values) - 1
+000146:         For j = i + 1 To UBound(values)
+000147:             If StrComp(values(i), values(j), vbBinaryCompare) > 0 Then
+000148:                 temp = values(i)
+000149:                 values(i) = values(j)
+000150:                 values(j) = temp
+000151:             End If
+000152:         Next j
+000153:     Next i
+000154: End Sub
+000155: 
+000156: Private Function FileStem(ByVal filePath As String) As String
+000157:     Dim fso As Object
+000158:     Set fso = CreateObject("Scripting.FileSystemObject")
+000159:     FileStem = fso.GetBaseName(filePath)
+000160: End Function
+000161: 
+000162: Private Function MoveFileAtomic(ByVal sourcePath As String, ByVal destinationPath As String) As String
+000163:     Dim result As Long
+000164: 
+000165:     EnsureFolderTree ParentFolderPath(destinationPath)
+000166:     If FileExists(destinationPath) Then
+000167:         On Error Resume Next
+000168:         Kill destinationPath
+000169:         On Error GoTo 0
+000170:     End If
+000171:     result = MoveFileExW(StrPtr(sourcePath), StrPtr(destinationPath), MOVEFILE_REPLACE_EXISTING Or MOVEFILE_WRITE_THROUGH)
+000172:     If result = 0 Then
+000173:         Err.Raise vbObjectError + 4432, CONTRACT_ID, "Atomic move failed: " & sourcePath & " -> " & destinationPath
+000174:     End If
+000175:     MoveFileAtomic = destinationPath
+000176: End Function
+000177: 
+000178: Private Sub AddReason(ByRef reasonCodes As String, ByVal code As String)
+000179:     If Len(code) = 0 Then Exit Sub
+000180:     If Len(reasonCodes) = 0 Then
+000181:         reasonCodes = code
+000182:         Exit Sub
+000183:     End If
+000184:     If InStr(1, ";" & reasonCodes & ";", ";" & code & ";", vbTextCompare) = 0 Then
+000185:         reasonCodes = reasonCodes & ";" & code
+000186:     End If
+000187: End Sub
+000188: 
+000189: Private Function IsFinalStatus(ByVal status As String) As Boolean
+000190:     Select Case UCase$(NormalizeText(status))
+000191:         Case "ACCEPTED", "REJECTED", "DUPLICATE", "EXPIRED", "CORRUPT"
+000192:             IsFinalStatus = True
+000193:     End Select
+000194: End Function
+000195: 
+000196: Private Function FindLatestStateRowIndex(ByVal rows As Collection, ByVal columnIndex As Long, ByVal targetValue As String) As Long
+000197:     Dim index As Long
+000198:     Dim rowValues As Variant
+000199: 
+000200:     For index = rows.Count To 1 Step -1
+000201:         rowValues = rows.Item(index)
+000202:         If NormalizeText(rowValues(columnIndex)) = targetValue Then
+000203:             FindLatestStateRowIndex = index
+000204:             Exit Function
+000205:         End If
+000206:     Next index
+000207: End Function
+000208: 
+000209: Private Function BuildStateRow( _
+000210:     ByVal recordedAt As String, _
+000211:     ByVal intentId As String, _
+000212:     ByVal idempotencyKey As String, _
+000213:     ByVal sourceChecksum As String, _
+000214:     ByVal status As String, _
+000215:     ByVal resultValue As String, _
+000216:     ByVal reasonCodes As String, _
+000217:     ByVal outboxFile As String, _
+000218:     ByVal receiptFile As String, _
+000219:     ByVal note As String) As Variant
+000220: 
+000221:     Dim row(0 To 11) As String
+000222:     row(ST_RECORDED_AT) = recordedAt
+000223:     row(ST_INTENT_ID) = intentId
+000224:     row(ST_IDEMPOTENCY_KEY) = idempotencyKey
+000225:     row(ST_SOURCE_CHECKSUM) = sourceChecksum
+000226:     row(ST_STATUS) = status
+000227:     row(ST_RESULT) = resultValue
+000228:     row(ST_REASON_CODES) = reasonCodes
+000229:     row(ST_OUTBOX_FILE) = outboxFile
+000230:     row(ST_RECEIPT_FILE) = receiptFile
+000231:     row(ST_VBA_INSTANCE_ID) = VBA_INSTANCE_ID
+000232:     row(ST_ORDERS_SUBMITTED) = CStr(ORDERS_SUBMITTED)
+000233:     row(ST_NOTE) = note
+000234:     BuildStateRow = row
+000235: End Function
+000236: 
+000237: Private Function JsonEscapeText(ByVal value As String) As String
+000238:     Dim result As String
+000239:     Dim index As Long
+000240:     Dim character As String
+000241: 
+000242:     For index = 1 To Len(value)
+000243:         character = Mid$(value, index, 1)
+000244:         Select Case character
+000245:             Case """"
+000246:                 result = result & """"
+000247:             Case "\"
+000248:                 result = result & "\\"
+000249:             Case vbBack
+000250:                 result = result & "\b"
+000251:             Case vbFormFeed
+000252:                 result = result & "\f"
+000253:             Case vbLf
+000254:                 result = result & "\n"
+000255:             Case vbCr
+000256:                 result = result & "\r"
+000257:             Case vbTab
+000258:                 result = result & "\t"
+000259:             Case Else
+000260:                 result = result & character
+000261:         End Select
+000262:     Next index
+000263:     JsonEscapeText = result
+000264: End Function
+000265: 
+000266: Private Function JsonStringText(ByVal value As String) As String
+000267:     JsonStringText = """" & JsonEscapeText(value) & """"
+000268: End Function
+000269: 
+000270: Private Function BuildAuditJsonLine( _
+000271:     ByVal kind As String, _
+000272:     ByVal recordedAt As String, _
+000273:     ByVal intentId As String, _
+000274:     ByVal idempotencyKey As String, _
+000275:     ByVal sourceChecksum As String, _
+000276:     ByVal resultValue As String, _
+000277:     ByVal reasonCodes As String, _
+000278:     ByVal sourceFile As String, _
+000279:     ByVal receiptFile As String, _
+000280:     ByVal outboxFile As String, _
+000281:     ByVal readerId As String, _
+000282:     ByVal ordersSubmitted As String, _
+000283:     ByVal note As String, _
+000284:     Optional ByVal currentStage As String = "", _
+000285:     Optional ByVal currentFile As String = "", _
+000286:     Optional ByVal errorNumber As String = "", _
+000287:     Optional ByVal errorSource As String = "", _
+000288:     Optional ByVal errorDescription As String = "", _
+000289:     Optional ByVal errorLine As String = "") As String
+000290: 
+000291:     BuildAuditJsonLine = "{" & _
+000292:         """kind"":" & JsonStringText(kind) & "," & _
+000293:         """recorded_at"":" & JsonStringText(recordedAt) & "," & _
+000294:         """intent_id"":" & JsonStringText(intentId) & "," & _
+000295:         """idempotency_key"":" & JsonStringText(idempotencyKey) & "," & _
+000296:         """source_checksum"":" & JsonStringText(sourceChecksum) & "," & _
+000297:         """result"":" & JsonStringText(resultValue) & "," & _
+000298:         """reason_codes"":" & JsonStringText(reasonCodes) & "," & _
+000299:         """source_file"":" & JsonStringText(sourceFile) & "," & _
+000300:         """receipt_file"":" & JsonStringText(receiptFile) & "," & _
+000301:         """outbox_file"":" & JsonStringText(outboxFile) & "," & _
+000302:         """reader_id"":" & JsonStringText(readerId) & "," & _
+000303:         """orders_submitted"":" & JsonStringText(ordersSubmitted) & "," & _
+000304:         """note"":" & JsonStringText(note) & "," & _
+000305:         """current_stage"":" & JsonStringText(currentStage) & "," & _
+000306:         """current_file"":" & JsonStringText(currentFile) & "," & _
+000307:         """error_number"":" & JsonStringText(errorNumber) & "," & _
+000308:         """error_source"":" & JsonStringText(errorSource) & "," & _
+000309:         """error_description"":" & JsonStringText(errorDescription) & "," & _
+000310:         """error_line"":" & JsonStringText(errorLine) & "}"
+000311: End Function
+000312: 
+000313: Private Function JsonPropertyText(ByVal key As String, ByVal value As String) As String
+000314:     JsonPropertyText = JsonStringText(key) & ":" & JsonStringText(value)
+000315: End Function
+000316: 
+000317: Private Function FindLatestFinalStateRowIndex(ByVal rows As Collection, ByVal columnIndex As Long, ByVal targetValue As String) As Long
+000318:     Dim index As Long
+000319:     Dim rowValues As Variant
+000320: 
+000321:     For index = rows.Count To 1 Step -1
+000322:         rowValues = rows.Item(index)
+000323:         If NormalizeText(rowValues(columnIndex)) = targetValue Then
+000324:             If IsFinalStatus(rowValues(ST_STATUS)) Then
+000325:                 FindLatestFinalStateRowIndex = index
+000326:                 Exit Function
+000327:             End If
+000328:         End If
+000329:     Next index
+000330: End Function
+000331: 
+000332: Private Function CanonicalJsonFromOutboxRow(ByVal rowValues As Variant) As String
+000333:     Dim parts(0 To 18) As String
+000334: 
+000335:     parts(0) = JsonPropertyText("bridge_status", NormalizeText(rowValues(OB_BRIDGE_STATUS)))
+000336:     parts(1) = JsonPropertyText("estimated_max_loss", NormalizeText(rowValues(OB_ESTIMATED_MAX_LOSS)))
+000337:     parts(2) = JsonPropertyText("estimated_notional", NormalizeText(rowValues(OB_ESTIMATED_NOTIONAL)))
+000338:     parts(3) = JsonPropertyText("execution_mode", NormalizeText(rowValues(OB_EXECUTION_MODE)))
+000339:     parts(4) = JsonPropertyText("expires_at", NormalizeText(rowValues(OB_EXPIRES_AT)))
+000340:     parts(5) = JsonPropertyText("generated_at", NormalizeText(rowValues(OB_GENERATED_AT)))
+000341:     parts(6) = JsonPropertyText("idempotency_key", NormalizeText(rowValues(OB_IDEMPOTENCY_KEY)))
+000342:     parts(7) = JsonPropertyText("intent_id", NormalizeText(rowValues(OB_INTENT_ID)))
+000343:     parts(8) = JsonPropertyText("limit_price", NormalizeText(rowValues(OB_LIMIT_PRICE)))
+000344:     parts(9) = JsonPropertyText("market", NormalizeText(rowValues(OB_MARKET)))
+000345:     parts(10) = JsonPropertyText("order_type", NormalizeText(rowValues(OB_ORDER_TYPE)))
+000346:     parts(11) = JsonPropertyText("quantity", NormalizeText(rowValues(OB_QUANTITY)))
+000347:     parts(12) = JsonPropertyText("reference_price", NormalizeText(rowValues(OB_REFERENCE_PRICE)))
+000348:     parts(13) = JsonPropertyText("schema_version", NormalizeText(rowValues(OB_SCHEMA_VERSION)))
+000349:     parts(14) = JsonPropertyText("side", NormalizeText(rowValues(OB_SIDE)))
+000350:     parts(15) = JsonPropertyText("stop_loss_price", NormalizeText(rowValues(OB_STOP_LOSS_PRICE)))
+000351:     parts(16) = JsonPropertyText("take_profit_price", NormalizeText(rowValues(OB_TAKE_PROFIT_PRICE)))
+000352:     parts(17) = JsonPropertyText("ticker", NormalizeText(rowValues(OB_TICKER)))
+000353:     parts(18) = JsonPropertyText("trading_mode", NormalizeText(rowValues(OB_TRADING_MODE)))
+000354:     CanonicalJsonFromOutboxRow = "{" & Join(parts, ",") & "}"
+000355: End Function
+000356: 
+000357: Private Function CanonicalJsonFromReceiptRow(ByVal rowValues As Variant) As String
+000358:     Dim parts(0 To 8) As String
+000359: 
+000360:     parts(0) = JsonPropertyText("idempotency_key", NormalizeText(rowValues(RC_IDEMPOTENCY_KEY)))
+000361:     parts(1) = JsonPropertyText("intent_id", NormalizeText(rowValues(RC_INTENT_ID)))
+000362:     parts(2) = JsonPropertyText("orders_submitted", NormalizeText(rowValues(RC_ORDERS_SUBMITTED)))
+000363:     parts(3) = JsonPropertyText("reason_codes", NormalizeText(rowValues(RC_REASON_CODES)))
+000364:     parts(4) = JsonPropertyText("received_at", NormalizeText(rowValues(RC_RECEIVED_AT)))
+000365:     parts(5) = JsonPropertyText("result", NormalizeText(rowValues(RC_RESULT)))
+000366:     parts(6) = JsonPropertyText("schema_version", NormalizeText(rowValues(RC_SCHEMA_VERSION)))
+000367:     parts(7) = JsonPropertyText("source_checksum", NormalizeText(rowValues(RC_SOURCE_CHECKSUM)))
+000368:     parts(8) = JsonPropertyText("vba_instance_id", NormalizeText(rowValues(RC_VBA_INSTANCE_ID)))
+000369:     CanonicalJsonFromReceiptRow = "{" & Join(parts, ",") & "}"
+000370: End Function
+000371: 
+000372: Private Function IsHexDigestText(ByVal value As String) As Boolean
+000373:     Dim index As Long
+000374:     Dim character As String
+000375: 
+000376:     If Len(value) <> 64 Then Exit Function
+000377:     For index = 1 To Len(value)
+000378:         character = Mid$(value, index, 1)
+000379:         If InStr(1, "0123456789abcdefABCDEF", character, vbBinaryCompare) = 0 Then Exit Function
+000380:     Next index
+000381:     IsHexDigestText = True
+000382: End Function
+000383: 
+000384: Private Function Sha256HexUtf8(ByVal text As String) As String
+000385:     Dim shell As Object
+000386:     Dim environmentValues As Object
+000387:     Dim execObject As Object
+000388:     Dim command As String
+000389:     Dim stdoutText As String
+000390:     Dim lines As Variant
+000391:     Dim lineValue As Variant
+000392:     Dim index As Long
+000393: 
+000394:     Set shell = CreateObject("WScript.Shell")
+000395:     Set environmentValues = shell.Environment("Process")
+000396:     environmentValues("PHOENIX_STEP44_HASH_INPUT") = text
+000397: 
+000398:     ' Inline PowerShell avoids temporary script execution-policy failures and keeps hashing self-contained.
+000399:     command = "powershell.exe -NoProfile -NonInteractive -Command ""$sha=[System.Security.Cryptography.SHA256]::Create(); try { $bytes=[System.Text.Encoding]::UTF8.GetBytes($env:PHOENIX_STEP44_HASH_INPUT); ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }) -join '' } finally { $sha.Dispose() }"""
+000400:     Set execObject = shell.Exec(command)
+000401:     stdoutText = execObject.StdOut.ReadAll
+000402: 
+000403:     On Error Resume Next
+000404:     environmentValues("PHOENIX_STEP44_HASH_INPUT") = ""
+000405:     On Error GoTo 0
+000406: 
+000407:     stdoutText = Replace$(Replace$(stdoutText, vbCrLf, vbLf), vbCr, vbLf)
+000408:     lines = Split(stdoutText, vbLf)
+000409:     For index = UBound(lines) To LBound(lines) Step -1
+000410:         lineValue = Trim$(CStr(lines(index)))
+000411:         If Len(lineValue) = 64 Then
+000412:             If IsHexDigestText(lineValue) Then
+000413:                 Sha256HexUtf8 = LCase$(lineValue)
+000414:                 Exit Function
+000415:             End If
+000416:         End If
+000417:     Next index
+000418: 
+000419:     Err.Raise vbObjectError + 4419, CONTRACT_ID, "SHA-256 calculation failed"
+000420: End Function
+000421: 
+000422: Private Function NormalizeOutboxRow(ByVal rowValues As Variant) As Variant
+000423:     Dim row(0 To 19) As String
+000424: 
+000425:     row(OB_SCHEMA_VERSION) = ValidateRequiredText(rowValues(OB_SCHEMA_VERSION), "schema_version")
+000426:     row(OB_INTENT_ID) = ValidateRequiredText(rowValues(OB_INTENT_ID), "intent_id")
+000427:     row(OB_IDEMPOTENCY_KEY) = ValidateRequiredText(rowValues(OB_IDEMPOTENCY_KEY), "idempotency_key")
+000428:     row(OB_GENERATED_AT) = ValidateJstTimestampText(rowValues(OB_GENERATED_AT), "generated_at")
+000429:     row(OB_EXPIRES_AT) = ValidateJstTimestampText(rowValues(OB_EXPIRES_AT), "expires_at")
+000430:     row(OB_TICKER) = ValidateRequiredText(rowValues(OB_TICKER), "ticker")
+000431:     row(OB_MARKET) = ValidateRequiredText(rowValues(OB_MARKET), "market")
+000432:     row(OB_SIDE) = NormalizeUpperText(ValidateRequiredText(rowValues(OB_SIDE), "side"))
+000433:     row(OB_ORDER_TYPE) = NormalizeUpperText(ValidateRequiredText(rowValues(OB_ORDER_TYPE), "order_type"))
+000434:     row(OB_QUANTITY) = ValidatePositiveIntegerText(rowValues(OB_QUANTITY), "quantity")
+000435:     row(OB_REFERENCE_PRICE) = ValidatePositiveMoneyText(rowValues(OB_REFERENCE_PRICE), "reference_price")
+000436:     row(OB_LIMIT_PRICE) = ValidatePositiveMoneyText(rowValues(OB_LIMIT_PRICE), "limit_price")
+000437:     row(OB_STOP_LOSS_PRICE) = ValidatePositiveMoneyText(rowValues(OB_STOP_LOSS_PRICE), "stop_loss_price")
+000438:     row(OB_TAKE_PROFIT_PRICE) = ValidatePositiveMoneyText(rowValues(OB_TAKE_PROFIT_PRICE), "take_profit_price")
+000439:     row(OB_ESTIMATED_NOTIONAL) = ValidatePositiveMoneyText(rowValues(OB_ESTIMATED_NOTIONAL), "estimated_notional")
+000440:     row(OB_ESTIMATED_MAX_LOSS) = ValidatePositiveMoneyText(rowValues(OB_ESTIMATED_MAX_LOSS), "estimated_max_loss")
+000441:     row(OB_TRADING_MODE) = NormalizeUpperText(ValidateRequiredText(rowValues(OB_TRADING_MODE), "trading_mode"))
+000442:     row(OB_EXECUTION_MODE) = NormalizeUpperText(ValidateRequiredText(rowValues(OB_EXECUTION_MODE), "execution_mode"))
+000443:     row(OB_BRIDGE_STATUS) = NormalizeUpperText(ValidateRequiredText(rowValues(OB_BRIDGE_STATUS), "bridge_status"))
+000444:     row(OB_CHECKSUM) = LCase$(ValidateRequiredText(rowValues(OB_CHECKSUM), "checksum"))
+000445:     NormalizeOutboxRow = row
+000446: End Function
+000447: 
+000448: Private Sub EvaluateContractResult( _
+000449:     ByVal rowValues As Variant, _
+000450:     ByVal sourceFile As String, _
+000451:     ByVal currentTime As Date, _
+000452:     ByRef resultValue As String, _
+000453:     ByRef reasonCodes As String)
+000454: 
+000455:     Dim generatedAt As Date
+000456:     Dim expiresAt As Date
+000457:     Dim computedChecksum As String
+000458:     Dim sourceFileStem As String
+000459: 
+000460:     resultValue = "ACCEPTED"
+000461:     reasonCodes = ""
+000462: 
+000463:     sourceFileStem = FileStem(sourceFile)
+000464:     If NormalizeText(rowValues(OB_INTENT_ID)) <> sourceFileStem Then
+000465:         resultValue = "CORRUPT"
+000466:         AddReason reasonCodes, "INTENT_FILENAME_MISMATCH"
+000467:     End If
+000468: 
+000469:     If NormalizeText(rowValues(OB_SCHEMA_VERSION)) <> CStr(SCHEMA_VERSION) Then
+000470:         resultValue = "REJECTED"
+000471:         AddReason reasonCodes, "SCHEMA_VERSION_INVALID"
+000472:     End If
+000473:     If NormalizeText(rowValues(OB_TRADING_MODE)) <> TRADING_MODE Then
+000474:         resultValue = "REJECTED"
+000475:         AddReason reasonCodes, "TRADING_MODE_INVALID"
+000476:     End If
+000477:     If NormalizeText(rowValues(OB_EXECUTION_MODE)) <> EXECUTION_MODE Then
+000478:         resultValue = "REJECTED"
+000479:         AddReason reasonCodes, "EXECUTION_MODE_INVALID"
+000480:     End If
+000481:     If NormalizeText(rowValues(OB_BRIDGE_STATUS)) <> "PENDING" Then
+000482:         resultValue = "REJECTED"
+000483:         AddReason reasonCodes, "BRIDGE_STATUS_INVALID"
+000484:     End If
+000485: 
+000486:     On Error GoTo TimestampFailure
+000487:     generatedAt = ParseJstTimestamp(rowValues(OB_GENERATED_AT), "generated_at")
+000488:     expiresAt = ParseJstTimestamp(rowValues(OB_EXPIRES_AT), "expires_at")
+000489:     On Error GoTo 0
+000490: 
+000491:     If expiresAt <= generatedAt Then
+000492:         resultValue = "CORRUPT"
+000493:         AddReason reasonCodes, "EXPIRES_AT_INVALID"
+000494:     End If
+000495:     If generatedAt > DateAdd("n", MAX_FUTURE_SKEW_MINUTES, currentTime) Then
+000496:         resultValue = "CORRUPT"
+000497:         AddReason reasonCodes, "GENERATED_AT_FUTURE"
+000498:     End If
+000499:     If currentTime > expiresAt Then
+000500:         If resultValue <> "CORRUPT" Then resultValue = "EXPIRED"
+000501:         AddReason reasonCodes, "EXPIRED"
+000502:     End If
+000503: 
+000504:     computedChecksum = LCase$(Sha256HexUtf8(CanonicalJsonFromOutboxRow(rowValues)))
+000505:     If NormalizeText(rowValues(OB_CHECKSUM)) <> computedChecksum Then
+000506:         resultValue = "CORRUPT"
+000507:         AddReason reasonCodes, "CHECKSUM_MISMATCH"
+000508:     End If
+000509:     Exit Sub
+000510: TimestampFailure:
+000511:     resultValue = "CORRUPT"
+000512:     AddReason reasonCodes, "TIMESTAMP_INVALID"
+000513:     On Error GoTo 0
+000514: End Sub
+000515: 
+000516: Private Function BuildReceiptRow( _
+000517:     ByVal intentId As String, _
+000518:     ByVal idempotencyKey As String, _
+000519:     ByVal receivedAt As String, _
+000520:     ByVal resultValue As String, _
+000521:     ByVal reasonCodes As String, _
+000522:     ByVal sourceChecksum As String) As Variant
+000523: 
+000524:     Dim row(0 To 9) As String
+000525:     row(RC_SCHEMA_VERSION) = CStr(SCHEMA_VERSION)
+000526:     row(RC_INTENT_ID) = intentId
+000527:     row(RC_IDEMPOTENCY_KEY) = idempotencyKey
+000528:     row(RC_RECEIVED_AT) = receivedAt
+000529:     row(RC_RESULT) = UCase$(resultValue)
+000530:     row(RC_REASON_CODES) = reasonCodes
+000531:     row(RC_VBA_INSTANCE_ID) = VBA_INSTANCE_ID
+000532:     row(RC_SOURCE_CHECKSUM) = LCase$(sourceChecksum)
+000533:     row(RC_ORDERS_SUBMITTED) = CStr(ORDERS_SUBMITTED)
+000534:     row(RC_CHECKSUM) = LCase$(Sha256HexUtf8(CanonicalJsonFromReceiptRow(row)))
+000535:     BuildReceiptRow = row
+000536: End Function
+000537: 
+000538: Private Sub ProcessSingleOutboxFile( _
+000539:     ByVal rootPath As String, _
+000540:     ByVal pendingFilePath As String, _
+000541:     ByRef acceptedCount As Long, _
+000542:     ByRef rejectedCount As Long, _
+000543:     ByRef duplicateCount As Long, _
+000544:     ByRef expiredCount As Long, _
+000545:     ByRef corruptCount As Long)
+000546: 
+000547:     Dim processingPath As String
+000548:     Dim finalOutboxPath As String
+000549:     Dim outboxRow As Variant
+000550:     Dim normalizedRow As Variant
+000551:     Dim stateRows As Collection
+000552:     Dim currentTime As Date
+000553:     Dim intentId As String
+000554:     Dim idempotencyKey As String
+000555:     Dim sourceChecksum As String
+000556:     Dim resultValue As String
+000557:     Dim reasonCodes As String
+000558:     Dim latestIntentIndex As Long
+000559:     Dim latestIdemIndex As Long
+000560:     Dim latestRow As Variant
+000561:     Dim receiptRow As Variant
+000562:     Dim receiptPath As String
+000563:     Dim stateRow As Variant
+000564:     Dim auditLine As String
+000565:     Dim currentStage As String
+000566:     Dim currentFile As String
+000567:     Dim finalStateNote As String
+000568:     Dim fatalNote As String
+000569:     Dim cleanupNote As String
+000570:     Dim cleanupSourcePath As String
+000571:     Dim cleanupDestinationPath As String
+000572:     Dim fatalRecordedAt As String
+000573:     Dim fatalIntentId As String
+000574:     Dim fatalIdempotencyKey As String
+000575:     Dim fatalSourceChecksum As String
+000576:     Dim errorNumber As Long
+000577:     Dim errorSource As String
+000578:     Dim errorDescription As String
+000579:     Dim errorLine As Long
+000580:     Dim hasPriorFinalState As Boolean
+000581:     Dim hasPriorFinalStateChecked As Boolean
+000582:     Dim receiptWritten As Boolean
+000583: 
+000584:     On Error GoTo FatalFail
+000585:     currentStage = "MOVE_TO_PROCESSING"
+000586:     currentFile = pendingFilePath
+000587:     currentTime = CurrentJst()
+000588:     processingPath = RepositoryPath(rootPath, PROCESSING_DIR) & "\" & FileStem(pendingFilePath) & ".csv"
+000589:     finalOutboxPath = processingPath
+000590:     MoveFileAtomic pendingFilePath, processingPath
+000591:     currentFile = processingPath
+000592: 
+000593:     currentStage = "READ_CSV"
+000594:     outboxRow = ReadSingleCsvRecord(processingPath, OutboxColumns())
+000595: 
+000596:     currentStage = "NORMALIZE"
+000597:     normalizedRow = NormalizeOutboxRow(outboxRow)
+000598: 
+000599:     intentId = NormalizeText(normalizedRow(OB_INTENT_ID))
+000600:     idempotencyKey = NormalizeText(normalizedRow(OB_IDEMPOTENCY_KEY))
+000601:     sourceChecksum = NormalizeText(normalizedRow(OB_CHECKSUM))
+000602: 
+000603:     currentStage = "LOAD_STATE"
+000604:     Set stateRows = LoadStateRows(rootPath)
+000605: 
+000606:     currentStage = "WRITE_PROCESSING_STATE"
+000607:     AppendStateRow rootPath, BuildStateRow( _
+000608:         FormatJstTimestamp(currentTime), _
+000609:         intentId, _
+000610:         idempotencyKey, _
+000611:         sourceChecksum, _
+000612:         "PROCESSING", _
+000613:         "PROCESSING", _
+000614:         "ENTERED_PROCESSING", _
+000615:         processingPath, _
+000616:         "", _
+000617:         "working")
+000618: 
+000619:     currentStage = "VALIDATE_CONTRACT"
+000620:     resultValue = ""
+000621:     reasonCodes = ""
+000622:     latestIntentIndex = FindLatestFinalStateRowIndex(stateRows, ST_INTENT_ID, intentId)
+000623:     latestIdemIndex = FindLatestFinalStateRowIndex(stateRows, ST_IDEMPOTENCY_KEY, idempotencyKey)
+000624:     hasPriorFinalState = (latestIntentIndex > 0) Or (latestIdemIndex > 0)
+000625:     hasPriorFinalStateChecked = True
+000626: 
+000627:     If latestIntentIndex > 0 Then
+000628:         latestRow = stateRows.Item(latestIntentIndex)
+000629:         If Len(NormalizeText(latestRow(ST_SOURCE_CHECKSUM))) > 0 And NormalizeText(latestRow(ST_SOURCE_CHECKSUM)) <> sourceChecksum Then
+000630:             resultValue = "CORRUPT"
+000631:             AddReason reasonCodes, "STATE_INTENT_CHECKSUM_CONFLICT"
+000632:         ElseIf NormalizeText(latestRow(ST_IDEMPOTENCY_KEY)) <> idempotencyKey Then
+000633:             resultValue = "CORRUPT"
+000634:             AddReason reasonCodes, "STATE_INTENT_IDEMPOTENCY_CONFLICT"
+000635:         Else
+000636:             resultValue = "DUPLICATE"
+000637:             AddReason reasonCodes, "ALREADY_PROCESSED"
+000638:         End If
+000639:     End If
+000640: 
+000641:     If resultValue = "" And latestIdemIndex > 0 Then
+000642:         latestRow = stateRows.Item(latestIdemIndex)
+000643:         If NormalizeText(latestRow(ST_INTENT_ID)) <> intentId Then
+000644:             resultValue = "CORRUPT"
+000645:             AddReason reasonCodes, "STATE_IDEMPOTENCY_INTENT_CONFLICT"
+000646:         End If
+000647:     End If
+000648: 
+000649:     If resultValue = "" Then
+000650:         EvaluateContractResult normalizedRow, processingPath, currentTime, resultValue, reasonCodes
+000651:     End If
+000652: 
+000653:     If resultValue = "ACCEPTED" Then
+000654:         acceptedCount = acceptedCount + 1
+000655:     ElseIf resultValue = "REJECTED" Then
+000656:         rejectedCount = rejectedCount + 1
+000657:     ElseIf resultValue = "DUPLICATE" Then
+000658:         duplicateCount = duplicateCount + 1
+000659:     ElseIf resultValue = "EXPIRED" Then
+000660:         expiredCount = expiredCount + 1
+000661:     Else
+000662:         corruptCount = corruptCount + 1
+000663:     End If
+000664: 
+000665:     currentStage = "BUILD_RECEIPT"
+000666:     receiptRow = BuildReceiptRow(intentId, idempotencyKey, FormatJstTimestamp(currentTime), resultValue, reasonCodes, sourceChecksum)
+000667: 
+000668:     currentStage = "WRITE_RECEIPT"
+000669:     receiptPath = RepositoryPath(rootPath, INBOX_DIR) & "\" & intentId & ".csv"
+000670:     WriteCsvRecordAtomic receiptPath, ReceiptColumns(), receiptRow
+000671:     receiptWritten = True
+000672: 
+000673:     If resultValue = "ACCEPTED" Then
+000674:         finalOutboxPath = RepositoryPath(rootPath, COMPLETE_DIR) & "\" & FileStem(processingPath) & ".csv"
+000675:     Else
+000676:         finalOutboxPath = RepositoryPath(rootPath, REJECTED_DIR) & "\" & FileStem(processingPath) & ".csv"
+000677:     End If
+000678: 
+000679:     currentStage = "MOVE_TO_FINAL"
+000680:     MoveFileAtomic processingPath, finalOutboxPath
+000681:     currentFile = finalOutboxPath
+000682: 
+000683:     finalStateNote = ""
+000684:     If hasPriorFinalState Then
+000685:         finalStateNote = "prior_final_exists=TRUE"
+000686:     End If
+000687: 
+000688:     currentStage = "WRITE_FINAL_STATE"
+000689:     stateRow = BuildStateRow( _
+000690:         FormatJstTimestamp(CurrentJst()), _
+000691:         intentId, _
+000692:         idempotencyKey, _
+000693:         sourceChecksum, _
+000694:         UCase$(resultValue), _
+000695:         UCase$(resultValue), _
+000696:         reasonCodes, _
+000697:         finalOutboxPath, _
+000698:         receiptPath, _
+000699:         "finalized")
+000700:     AppendStateRow rootPath, stateRow
+000701: 
+000702:     currentStage = "WRITE_AUDIT"
+000703:     auditLine = BuildAuditJsonLine( _
+000704:         "receipt", _
+000705:         FormatJstTimestamp(currentTime), _
+000706:         intentId, _
+000707:         idempotencyKey, _
+000708:         sourceChecksum, _
+000709:         UCase$(resultValue), _
+000710:         reasonCodes, _
+000711:         pendingFilePath, _
+000712:         receiptPath, _
+000713:         finalOutboxPath, _
+000714:         VBA_INSTANCE_ID, _
+000715:         CStr(ORDERS_SUBMITTED), _
+000716:         finalStateNote, _
+000717:         currentStage, _
+000718:         currentFile, _
+000719:         "", _
+000720:         "", _
+000721:         "", _
+000722:         "")
+000723:     AppendAuditJsonLine rootPath, auditLine
+000724:     Exit Sub
+000725: 
+000726: FatalFail:
+000727:     errorNumber = Err.Number
+000728:     errorSource = Err.Source
+000729:     errorDescription = Err.Description
+000730:     errorLine = Erl
+000731:     fatalRecordedAt = FormatJstTimestamp(CurrentJst())
+000732:     fatalIntentId = intentId
+000733:     If Len(fatalIntentId) = 0 Then
+000734:         fatalIntentId = FileStem(pendingFilePath)
+000735:     End If
+000736:     fatalIdempotencyKey = idempotencyKey
+000737:     fatalSourceChecksum = sourceChecksum
+000738: 
+000739:     Err.Clear
+000740:     cleanupNote = ""
+000741:     On Error Resume Next
+000742:     If receiptWritten And UCase$(NormalizeText(resultValue)) = "ACCEPTED" Then
+000743:         If Len(receiptPath) > 0 And FileExists(receiptPath) Then
+000744:             Kill receiptPath
+000745:             If Err.Number <> 0 Then
+000746:                 cleanupNote = cleanupNote & "receipt_cleanup_failed=" & CStr(Err.Number) & ";"
+000747:                 Err.Clear
+000748:             Else
+000749:                 cleanupNote = cleanupNote & "receipt_cleanup=DELETED;"
+000750:                 Err.Clear
+000751:             End If
+000752:         End If
+000753:     End If
+000754: 
+000755:     cleanupSourcePath = currentFile
+000756:     If Len(cleanupSourcePath) = 0 Or Not FileExists(cleanupSourcePath) Then
+000757:         If Len(finalOutboxPath) > 0 And FileExists(finalOutboxPath) Then
+000758:             cleanupSourcePath = finalOutboxPath
+000759:         ElseIf Len(processingPath) > 0 And FileExists(processingPath) Then
+000760:             cleanupSourcePath = processingPath
+000761:         ElseIf Len(pendingFilePath) > 0 And FileExists(pendingFilePath) Then
+000762:             cleanupSourcePath = pendingFilePath
+000763:         End If
+000764:     End If
+000765: 
+000766:     If Len(cleanupSourcePath) > 0 Then
+000767:         cleanupDestinationPath = RepositoryPath(rootPath, REJECTED_DIR) & "\" & FileStem(cleanupSourcePath) & ".csv"
+000768:         If StrComp(NormalizeText(cleanupSourcePath), NormalizeText(cleanupDestinationPath), vbTextCompare) <> 0 Then
+000769:             MoveFileAtomic cleanupSourcePath, cleanupDestinationPath
+000770:             If Err.Number <> 0 Then
+000771:                 cleanupNote = cleanupNote & "cleanup_move_failed=" & CStr(Err.Number) & ";"
+000772:                 Err.Clear
+000773:             Else
+000774:                 cleanupNote = cleanupNote & "cleanup_move=REJECTED;"
+000775:                 Err.Clear
+000776:             End If
+000777:         Else
+000778:             cleanupNote = cleanupNote & "cleanup_move=SKIPPED_ALREADY_REJECTED;"
+000779:         End If
+000780:     Else
+000781:         cleanupNote = cleanupNote & "cleanup_move=SKIPPED_NO_SOURCE;"
+000782:     End If
+000783:     On Error GoTo 0
+000784: 
+000785:     Do While Len(cleanupNote) > 0 And Right$(cleanupNote, 1) = ";"
+000786:         cleanupNote = Left$(cleanupNote, Len(cleanupNote) - 1)
+000787:     Loop
+000788: 
+000789:     fatalNote = "stage=" & currentStage
+000790:     If Len(cleanupNote) > 0 Then
+000791:         fatalNote = fatalNote & ";" & cleanupNote
+000792:     End If
+000793:     If hasPriorFinalStateChecked And hasPriorFinalState Then
+000794:         fatalNote = fatalNote & ";prior_final_exists=TRUE"
+000795:     End If
+000796: 
+000797:     On Error Resume Next
+000798:     stateRow = BuildStateRow( _
+000799:         fatalRecordedAt, _
+000800:         fatalIntentId, _
+000801:         fatalIdempotencyKey, _
+000802:         fatalSourceChecksum, _
+000803:         "CORRUPT", _
+000804:         "RUN_FAILED", _
+000805:         "RUN_FAILED", _
+000806:         currentFile, _
+000807:         receiptPath, _
+000808:         fatalNote)
+000809:     AppendStateRow rootPath, stateRow
+000810:     If Err.Number <> 0 Then
+000811:         If Len(fatalNote) > 0 Then fatalNote = fatalNote & ";"
+000812:         fatalNote = fatalNote & "state_write_failed=" & CStr(Err.Number)
+000813:         Err.Clear
+000814:     End If
+000815:     On Error GoTo 0
+000816: 
+000817:     On Error Resume Next
+000818:     auditLine = BuildAuditJsonLine( _
+000819:         "fatal", _
+000820:         fatalRecordedAt, _
+000821:         fatalIntentId, _
+000822:         fatalIdempotencyKey, _
+000823:         fatalSourceChecksum, _
+000824:         "RUN_FAILED", _
+000825:         "RUN_FAILED", _
+000826:         pendingFilePath, _
+000827:         receiptPath, _
+000828:         currentFile, _
+000829:         VBA_INSTANCE_ID, _
+000830:         CStr(ORDERS_SUBMITTED), _
+000831:         fatalNote, _
+000832:         currentStage, _
+000833:         currentFile, _
+000834:         CStr(errorNumber), _
+000835:         errorSource, _
+000836:         errorDescription, _
+000837:         CStr(errorLine))
+000838:     AppendAuditJsonLine rootPath, auditLine
+000839:     On Error GoTo 0
+000840: End Sub
+000841: 
+000842: Private Sub ProcessPendingOutboxFiles(ByVal rootPath As String)
+000843:     Dim files As Collection
+000844:     Dim filePath As Variant
+000845:     Dim acceptedCount As Long
+000846:     Dim rejectedCount As Long
+000847:     Dim duplicateCount As Long
+000848:     Dim expiredCount As Long
+000849:     Dim corruptCount As Long
+000850: 
+000851:     Set files = PendingCsvFiles(RepositoryPath(rootPath, PENDING_DIR))
+000852:     For Each filePath In files
+000853:         ProcessSingleOutboxFile rootPath, CStr(filePath), acceptedCount, rejectedCount, duplicateCount, expiredCount, corruptCount
+000854:     Next filePath
+000855: 
+000856:     AppendAuditJsonLine rootPath, BuildAuditJsonLine( _
+000857:         "summary", _
+000858:         FormatJstTimestamp(CurrentJst()), _
+000859:         "", _
+000860:         "", _
+000861:         "", _
+000862:         "READY", _
+000863:         "", _
+000864:         "", _
+000865:         "", _
+000866:         "", _
+000867:         VBA_INSTANCE_ID, _
+000868:         CStr(ORDERS_SUBMITTED), _
+000869:         "accepted=" & CStr(acceptedCount) & ";rejected=" & CStr(rejectedCount) & ";duplicate=" & CStr(duplicateCount) & ";expired=" & CStr(expiredCount) & ";corrupt=" & CStr(corruptCount))
+000870: End Sub
+
+===== FILE FULL: vba/PHOENIX_STEP44_State.bas =====
+000001: Attribute VB_Name = "PHOENIX_STEP44_State"
+000002: Option Explicit
+000003: Option Private Module
+000004: 
+000005: Private gLockHandle As Integer
+000006: Private gLockPath As String
+000007: 
+000008: Public Function RepositoryPath(ByVal rootPath As String, ByVal relativePath As String) As String
+000009:     If Right$(rootPath, 1) = "\" Then
+000010:         RepositoryPath = rootPath & relativePath
+000011:     Else
+000012:         RepositoryPath = rootPath & "\" & relativePath
+000013:     End If
+000014: End Function
+000015: 
+000016: Public Function StateFilePath(ByVal rootPath As String) As String
+000017:     StateFilePath = RepositoryPath(rootPath, STATE_FILE)
+000018: End Function
+000019: 
+000020: Public Function AuditFilePath(ByVal rootPath As String) As String
+000021:     AuditFilePath = RepositoryPath(rootPath, AUDIT_FILE)
+000022: End Function
+000023: 
+000024: Public Function LockFilePath(ByVal rootPath As String) As String
+000025:     LockFilePath = RepositoryPath(rootPath, LOCK_FILE)
+000026: End Function
+000027: 
+000028: Public Sub EnsureBridgeDirectories(ByVal rootPath As String)
+000029:     EnsureFolderTree RepositoryPath(rootPath, PENDING_DIR)
+000030:     EnsureFolderTree RepositoryPath(rootPath, PROCESSING_DIR)
+000031:     EnsureFolderTree RepositoryPath(rootPath, COMPLETE_DIR)
+000032:     EnsureFolderTree RepositoryPath(rootPath, REJECTED_DIR)
+000033:     EnsureFolderTree RepositoryPath(rootPath, INBOX_DIR)
+000034:     EnsureFolderTree ParentFolderPath(StateFilePath(rootPath))
+000035:     EnsureFolderTree ParentFolderPath(AuditFilePath(rootPath))
+000036:     EnsureFolderTree ParentFolderPath(LockFilePath(rootPath))
+000037: End Sub
+000038: 
+000039: Public Sub AcquireStep44Lock(ByVal rootPath As String)
+000040:     Dim metadata As String
+000041:     Dim lockPath As String
+000042: 
+000043:     lockPath = LockFilePath(rootPath)
+000044:     EnsureFolderTree ParentFolderPath(lockPath)
+000045:     gLockHandle = FreeFile
+000046:     On Error GoTo LockFail
+000047:     Open lockPath For Binary Access Write Lock Read Write As #gLockHandle
+000048:     metadata = "contract_id=" & CONTRACT_ID & vbCrLf & _
+000049:         "vba_instance_id=" & VBA_INSTANCE_ID & vbCrLf & _
+000050:         "started_at=" & FormatJstTimestamp(CurrentJst()) & vbCrLf
+000051:     Put #gLockHandle, , metadata
+000052:     gLockPath = lockPath
+000053:     Exit Sub
+000054: LockFail:
+000055:     gLockHandle = 0
+000056:     gLockPath = ""
+000057:     Err.Raise vbObjectError + 4422, CONTRACT_ID, "Step44 lock is already held or unavailable"
+000058: End Sub
+000059: 
+000060: Public Sub ReleaseStep44Lock()
+000061:     On Error Resume Next
+000062:     If gLockHandle <> 0 Then
+000063:         Close #gLockHandle
+000064:         gLockHandle = 0
+000065:     End If
+000066:     If Len(gLockPath) > 0 And FileExists(gLockPath) Then
+000067:         Kill gLockPath
+000068:     End If
+000069:     gLockPath = ""
+000070:     On Error GoTo 0
+000071: End Sub
+000072: 
+000073: Public Function LoadStateRows(ByVal rootPath As String) As Collection
+000074:     Dim path As String
+000075:     Dim rows As Collection
+000076:     Dim resultRows As New Collection
+000077:     Dim index As Long
+000078: 
+000079:     path = StateFilePath(rootPath)
+000080:     Set rows = ReadCsvRowsWithHeader(path, StateColumns())
+000081:     If rows.Count = 0 Then
+000082:         Set LoadStateRows = resultRows
+000083:         Exit Function
+000084:     End If
+000085:     For index = 2 To rows.Count
+000086:         resultRows.Add rows.Item(index)
+000087:     Next index
+000088:     Set LoadStateRows = resultRows
+000089: End Function
+000090: 
+000091: Public Sub AppendStateRow(ByVal rootPath As String, ByVal values As Variant)
+000092:     Dim path As String
+000093:     Dim content As String
+000094: 
+000095:     path = StateFilePath(rootPath)
+000096:     If FileExists(path) Then
+000097:         content = ReadUtf8TextFile(path)
+000098:         If Len(content) > 0 And Right$(content, 1) <> vbLf Then
+000099:             content = content & vbCrLf
+000100:         End If
+000101:         content = content & CsvRowText(values) & vbCrLf
+000102:     Else
+000103:         content = CsvHeaderText(StateColumns()) & vbCrLf & CsvRowText(values) & vbCrLf
+000104:     End If
+000105:     WriteUtf8TextAtomic path, content
+000106: End Sub
+000107: 
+000108: Public Sub AppendAuditJsonLine(ByVal rootPath As String, ByVal jsonLine As String)
+000109:     AppendUtf8TextAtomic AuditFilePath(rootPath), jsonLine & vbCrLf
+000110: End Sub

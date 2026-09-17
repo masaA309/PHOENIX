@@ -183,6 +183,7 @@ class PaperBroker(BrokerAdapter):
                     quantity=position.quantity,
                     average_price=position.average_price,
                     market_price=position.market_price,
+                    economics_tracked_quantity=position.economics_tracked_quantity,
                 )
                 for ticker, position in sorted(self._positions.items())
                 if position.quantity > 0
@@ -312,6 +313,15 @@ class PaperBroker(BrokerAdapter):
                     f"保有 {held}株"
                 ),
             )
+        if current.economics_tracked_quantity < order.quantity:
+            return self._rejected_result(
+                order,
+                ticker,
+                (
+                    f"PHOENIX保有株数不足: 売却 {order.quantity}株 / "
+                    f"PHOENIX保有 {current.economics_tracked_quantity}株"
+                ),
+            )
 
         gross = round(order.quantity * order.limit_price, 2)
         commission = round(gross * self._commission_rate, 2)
@@ -323,44 +333,28 @@ class PaperBroker(BrokerAdapter):
         realized_before_commission = round(gross - acquisition_cost, 2)
         realized_pnl = round(realized_before_commission - commission, 2)
 
-        legacy_quantity = max(
-            0,
-            current.quantity - current.economics_tracked_quantity,
+        eligible_quantity = order.quantity
+        tracked_average = (
+            current.economics_tracked_cost_basis_yen
+            / current.economics_tracked_quantity
         )
-        eligible_quantity = min(
-            current.economics_tracked_quantity,
-            max(0, order.quantity - legacy_quantity),
+        eligible_cost_basis = round(
+            tracked_average * eligible_quantity,
+            2,
         )
-        if eligible_quantity > 0:
-            tracked_average = (
-                current.economics_tracked_cost_basis_yen
-                / current.economics_tracked_quantity
-            )
-            eligible_cost_basis = round(
-                tracked_average * eligible_quantity,
-                2,
-            )
-            eligible_realized_before_commission = round(
-                eligible_quantity * order.limit_price
-                - eligible_cost_basis,
-                2,
-            )
-            eligible_commission = round(
-                commission * eligible_quantity / order.quantity,
-                2,
-            )
-            current.economics_tracked_quantity -= eligible_quantity
-            if current.economics_tracked_quantity == 0:
-                current.economics_tracked_cost_basis_yen = 0.0
-            else:
-                current.economics_tracked_cost_basis_yen = round(
-                    current.economics_tracked_cost_basis_yen
-                    - eligible_cost_basis,
-                    2,
-                )
+        eligible_realized_before_commission = round(
+            eligible_quantity * order.limit_price - eligible_cost_basis,
+            2,
+        )
+        eligible_commission = commission
+        current.economics_tracked_quantity -= eligible_quantity
+        if current.economics_tracked_quantity == 0:
+            current.economics_tracked_cost_basis_yen = 0.0
         else:
-            eligible_realized_before_commission = 0.0
-            eligible_commission = 0.0
+            current.economics_tracked_cost_basis_yen = round(
+                current.economics_tracked_cost_basis_yen - eligible_cost_basis,
+                2,
+            )
 
         current.quantity -= order.quantity
         current.market_price = round(order.limit_price, 2)

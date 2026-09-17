@@ -1,0 +1,13 @@
+PREWRITE_IDENTITY_AUDIT
+DETERMINISTIC_ID_DEFINITION_LINE=94
+DETERMINISTIC_ID_DEFINITION_HEADER=def deterministic_entry_client_order_id(
+DETERMINISTIC_ID_DEFINITION_SHA256=3a543a0b0c5eece0218f8129a92e10782090f02a34ff481784705260c29767ac
+ID_CALLSITE:406:deterministic_entry_client_order_id(ticker, pending.signal_date, decision.execution_date)
+ID_CALLSITE:164:deterministic_entry_client_order_id(             ticker, pending.signal_date, current_ts         )
+ID_CALLSITE:230:deterministic_entry_client_order_id(             decision.ticker, decision.signal_date, decision.execution_date         )
+LIVE_SUBMIT_ENTRY_LINE=229
+LIVE_SUBMIT_ENTRY_SHA256=53eb3c2bc1dc2140d5a8f14d1b03e2e84b550e885ab07587e09d667a1a0be67b
+TEST_SOURCE_SHA256:test_phase6_live_buy_quote_is_authoritative_and_caps_limit:9439bd00e81d867c2045298d205078171f334b66bb69a621d36748a0512ee58f
+TEST_SOURCE_SHA256:test_phase6_production_fill_semantics_are_safe_and_restart_idempotent:084ae074e5eb1d930132e70afddfe569d1a16d7f2e2b4790eb1d2a45b951b37a
+PREWRITE_IDENTITY_AUDIT_RESULT=PASS
+RETURN_CODE=0

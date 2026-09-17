@@ -1,0 +1,2 @@
+ASTRA_ARCH_APPLY=FAIL_ROLLED_BACK
+ERROR=PermissionError:[Errno 13] Permission denied: 'C:\\Users\\ashtc\\OneDrive\\デスクトップ\\ちちのフォルダ\\PHOENIX\\.agents\\skills\\phoenix-governed-work\\SKILL.md'

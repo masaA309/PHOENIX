@@ -96,6 +96,7 @@ class Position:
     quantity: int
     average_price: float
     market_price: float
+    economics_tracked_quantity: int = 0
 
     @property
     def market_value(self) -> float:
@@ -107,6 +108,10 @@ class Position:
             self.quantity * (self.market_price - self.average_price),
             2,
         )
+
+    @property
+    def phoenix_owned_quantity(self) -> int:
+        return self.economics_tracked_quantity
 
 
 @dataclass(frozen=True, slots=True)

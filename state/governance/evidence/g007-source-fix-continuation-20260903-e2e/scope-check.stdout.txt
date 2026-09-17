@@ -1,0 +1,24 @@
+ M config/v7_direct_pipeline_config.json
+ M install_v7_scheduler.ps1
+ M phoenix_core/broker.py
+ M phoenix_core/order_bridge_gate.py
+ M phoenix_core/production_rakuten_rss_transport.py
+ M phoenix_core/rakuten_rss_broker.py
+ M phoenix_disaster_recovery.py
+ M phoenix_watchdog.py
+ M tests/test_phoenix_disaster_recovery.py
+ M tests/test_v7_step49.py
+ M uninstall_v7_scheduler.ps1
+?? .tmp_vbaProject.bin
+?? PHOENIX_CANONICAL_CHAT_HANDOFF_FULL_2026-09-01.md
+?? PHOENIX_CLAUDE_BOOT_REVIEW.txt
+?? PHOENIX_CLAUDE_BOOT_REVIEW_SUPPLEMENT.txt
+?? PHOENIX_GOVERNANCE_BOOTSTRAP_CODEX_PACKET_V1_3_2026-09-01.md
+?? PHOENIX_STEP44_WRITER_REVIEW.txt
+?? backup/AGENTS.md.governance_bootstrap_20260901.bak
+?? backup/v7_rss_bootstrap/
+?? config/formal_validation_runs.json
+?? phoenix_install_log_2.txt
+?? phoenix_install_log_3.txt
+?? phoenix_install_log_4.txt
+?? state/governance/

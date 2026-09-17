@@ -1,0 +1,23 @@
+PREWRITE_DEFINITION_AUDIT
+MUST_EXIST:phoenix_core/historical_validation_20y.py:314:class D1EntryDecision:
+MUST_EXIST:phoenix_core/strategy_execution_runtime.py:43:def account_snapshot(self) -> AccountSnapshot: ...
+MUST_EXIST:phoenix_core/rakuten_rss_broker.py:298:def get_account_snapshot(self) -> AccountSnapshot:
+MUST_EXIST:phoenix_core/rakuten_rss_broker.py:319:def submit_order(self, order: OrderRequest) -> OrderResult:
+MUST_EXIST:phoenix_core/rakuten_rss_broker.py:498:def refresh_pending_orders(
+MUST_EXIST:phoenix_core/rakuten_rss_broker.py:1204:def _save_state(self) -> None:
+MUST_EXIST:phoenix_core/rakuten_rss_adapter.py:71:def poll_order(self, broker_order_id: str) -> tuple[RakutenRssOrderUpdate, ...]:
+MUST_EXIST:phoenix_core/production_rakuten_rss_adapter.py:218:def poll_order(self, broker_order_id: str) -> tuple[RakutenRssOrderUpdate, ...]:
+MUST_EXIST:phoenix_core/production_rakuten_rss_transport.py:2361:def poll_order(self, broker_order_id: str) -> tuple[RakutenRssOrderUpdate, ...]:
+MUST_EXIST:phoenix_core/production_rakuten_rss_transport.py:1192:def read_order_updates(
+NEW_TARGET_CURRENTLY_PRESENT:phoenix_core/rakuten_rss_adapter.py:77:def executable_buy_price(self, ticker: str) -> float | None:
+NEW_TARGET_CURRENTLY_PRESENT:phoenix_core/rakuten_rss_adapter.py:207:def executable_buy_price(self, ticker: str) -> float | None:
+NEW_TARGET_CURRENTLY_PRESENT:phoenix_core/rakuten_rss_broker.py:241:def executable_buy_price(self, ticker: str) -> float | None:
+NEW_TARGET_CURRENTLY_PRESENT:phoenix_core/production_rakuten_rss_adapter.py:235:def executable_buy_price(self, ticker: str) -> float | None:
+NEW_TARGET_CURRENTLY_PRESENT:phoenix_core/production_rakuten_rss_transport.py:2512:def executable_buy_price(self, ticker: str) -> float | None:
+NEW_TARGET_CURRENTLY_PRESENT:phoenix_core/production_rakuten_rss_transport.py:1231:def read_executable_buy_price(
+NEW_TARGET_CURRENTLY_PRESENT:phoenix_core/strategy_execution_runtime.py:223:def account_snapshot(self) -> AccountSnapshot:
+NEW_TARGET_CURRENTLY_PRESENT:phoenix_core/strategy_execution_runtime.py:226:def executable_buy_price(self, ticker: str, execution_date: pd.Timestamp) -> float | None:
+NEW_TARGET_CURRENTLY_PRESENT:phoenix_core/strategy_execution_runtime.py:229:def submit_entry(self, decision: D1EntryDecision, client_order_id: str) -> OrderResult:
+NEW_TARGET_CURRENTLY_PRESENT:phoenix_core/strategy_execution_runtime.py:262:def create_rakuten_live_execution_adapter(
+PREWRITE_DEFINITION_RESULT=PASS
+RETURN_CODE=0

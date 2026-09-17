@@ -1,0 +1,119 @@
+STRICT3_PRODUCTION_FILL_VERIFICATION_RECEIPT
+SELECTED_ATTEMPT=2
+SYNTAX_RAW_BEGIN
+POSTWRITE_SYNTAX_AUDIT
+SYNTAX_COMMAND=python -X utf8 builtin compile(source,path,'exec') + ast.parse(source)
+SYNTAX_OK:phoenix_core/rakuten_rss_adapter.py
+SYNTAX_OK:phoenix_core/rakuten_rss_broker.py
+SYNTAX_OK:phoenix_core/production_rakuten_rss_adapter.py
+SYNTAX_OK:phoenix_core/production_rakuten_rss_transport.py
+SYNTAX_OK:tests/test_historical_validation_20y.py
+POSTWRITE_SYNTAX_RESULT=PASS
+RETURN_CODE=0
+SYNTAX_RAW_END
+STATIC_RAW_BEGIN
+BASE_STATIC_RAW_BEGIN
+PRODUCTION_FILL_STATIC_VALIDATION
+SYNTAX_OK:phoenix_core/rakuten_rss_adapter.py
+SYNTAX_OK:phoenix_core/rakuten_rss_broker.py
+SYNTAX_OK:phoenix_core/production_rakuten_rss_adapter.py
+SYNTAX_OK:phoenix_core/production_rakuten_rss_transport.py
+SYNTAX_OK:tests/test_historical_validation_20y.py
+TEST_METHOD_COUNT=70
+PHASE6_TEST_NAMES=test_phase6_live_adapter_preserves_identity_and_single_mutation_owner,test_phase6_live_buy_quote_is_authoritative_and_caps_limit,test_phase6_production_fill_semantics_are_safe_and_restart_idempotent
+TEST_BEHAVIOR:RESTART_SAME_STATE_FILE=YES
+TEST_BEHAVIOR:USES_PRODUCTION_TRANSPORT=YES
+TEST_BEHAVIOR:PARTIAL_CUMULATIVE=YES
+TEST_BEHAVIOR:SECOND_CUMULATIVE=YES
+TEST_BEHAVIOR:AMBIGUITY_FAIL_CLOSED=YES
+TEST_BEHAVIOR:MISMATCH_FAIL_CLOSED=YES
+TEST_BEHAVIOR:LEGACY_UNPROVEN_FAIL_CLOSED=YES
+UPDATE_FIELD_TOKEN:cumulative=YES
+UPDATE_FIELD_TOKEN:source_order=YES
+UPDATE_FIELD_TOKEN:source_reception=YES
+PRODUCTION_SOURCE:RssOrderList=YES
+PRODUCTION_SOURCE:RssExecutionList=YES
+PRODUCTION_SOURCE:RssOrderIDList=YES
+SYNTHETIC_FILL_EVENT_ID_LINES=NONE
+TRANSPORT_CONCEPT:ORDER_IDENTITY=YES
+TRANSPORT_CONCEPT:AMBIGUITY=YES
+TRANSPORT_CONCEPT:EXECUTION_SUM=YES
+TRANSPORT_CONCEPT:CUMULATIVE_MODE=YES
+BROKER_METHOD:_apply_update=YES
+BROKER_METHOD:_apply_cumulative_fill=YES
+BROKER_METHOD:_state_payload=YES
+BROKER_METHOD:_load_state=YES
+EVENT_CONTRACT_TOKEN:fill_event_id=YES
+EVENT_CONTRACT_TOKEN:FILL_EVENT_ID_NOT_PROVEN=YES
+EVENT_CONTRACT_TOKEN:applied_fill_events=YES
+CUMULATIVE_CONTRACT_TOKEN:CUMULATIVE_ORDER_EXECUTIONS=YES
+CUMULATIVE_CONTRACT_TOKEN:source_order=YES
+CUMULATIVE_CONTRACT_TOKEN:source_reception=YES
+CUMULATIVE_DELTA_MATH=YES
+STATE_VERSION=1
+UNCHANGED_TEST_CURRENT_SHA256:test_phase6_live_buy_quote_is_authoritative_and_caps_limit:538924c5dcc67aea2f44cbe6e608532d6511dadd0b378269d93b300422abbeff
+UNCHANGED_TEST_CURRENT_SHA256:test_phase6_live_adapter_preserves_identity_and_single_mutation_owner:13bced884951f6e46d96f7855c9f2239914b59561706b4781bd80493df63ac97
+STATIC_VALIDATION_RESULT=PASS
+RETURN_CODE=0
+BASE_STATIC_RAW_END
+BASE_STATIC_STDERR_BEGIN
+BASE_STATIC_STDERR_END
+BASE_STATIC_RETURN_CODE=0
+UPDATE_FIELD:fill_accounting_mode=YES
+UPDATE_FIELD:source_order_number=YES
+UPDATE_FIELD:source_reception_number=YES
+UPDATE_FIELD:cumulative_filled_quantity=YES
+UPDATE_FIELD:cumulative_average_fill_price=YES
+FIXED_NEW_CALLEES_DEFINED=_aggregate_authoritative_executions,_apply_cumulative_fill,_build_cumulative_order_update,_read_rss_execution_list,_read_rss_order_id_list,_read_rss_order_list,_select_unique_authoritative_order
+NEW_CALLEE_CALLSITE:phoenix_core/production_rakuten_rss_transport.py:2477:_read_rss_order_id_list
+NEW_CALLEE_CALLSITE:phoenix_core/production_rakuten_rss_transport.py:2482:_read_rss_order_list
+NEW_CALLEE_CALLSITE:phoenix_core/production_rakuten_rss_transport.py:2483:_select_unique_authoritative_order
+NEW_CALLEE_CALLSITE:phoenix_core/production_rakuten_rss_transport.py:2489:_read_rss_execution_list
+NEW_CALLEE_CALLSITE:phoenix_core/production_rakuten_rss_transport.py:2490:_aggregate_authoritative_executions
+NEW_CALLEE_CALLSITE:phoenix_core/production_rakuten_rss_transport.py:2498:_build_cumulative_order_update
+NEW_CALLEE_CALLSITE:phoenix_core/rakuten_rss_broker.py:837:_apply_cumulative_fill
+BROKER_STATE_TOKEN:fill_accounting_mode=YES
+BROKER_STATE_TOKEN:source_order_number=YES
+BROKER_STATE_TOKEN:source_reception_number=YES
+BROKER_STATE_TOKEN:cumulative_filled_quantity=YES
+BROKER_STATE_TOKEN:cumulative_average_fill_price=YES
+BROKER_STATE_TOKEN:fill_event_id=YES
+BROKER_STATE_TOKEN:applied_fill_events=YES
+BROKER_STATE_TOKEN:FILL_EVENT_ID_NOT_PROVEN=YES
+TEST_METHOD_COUNT=70
+TEST_BEHAVIOR:RESTART_ACTUALLY_INVOKED=YES
+TEST_BEHAVIOR:PRODUCTION_TRANSPORT_INVOKED=YES
+TEST_BEHAVIOR:PRODUCTION_ADAPTER_INVOKED=YES
+TEST_BEHAVIOR:BROKER_REFRESH_INVOKED=YES
+TEST_BEHAVIOR:RESTART_SNAPSHOT_INVOKED=YES
+TEST_BEHAVIOR:AMBIGUITY_BEHAVIOR_PRESENT=YES
+TEST_BEHAVIOR:QUANTITY_MISMATCH_BEHAVIOR_PRESENT=YES
+TEST_BEHAVIOR:UNPROVEN_BEHAVIOR_PRESENT=YES
+STRICT3_EXTRA_STATIC_RESULT=PASS
+RETURN_CODE=0
+STATIC_RAW_END
+TARGETED_RAW_BEGIN
+TEST_LABEL=PHASE6_TARGETED
+TEST_COMMAND=C:\Users\ashtc\OneDrive\デスクトップ\ちちのフォルダ\PHOENIX\.venv\Scripts\python.exe -X utf8 -B -m pytest -p no:cacheprovider tests/test_historical_validation_20y.py -q -k phase6_
+RAW_STDOUT_BEGIN
+...                                                                      [100%]
+3 passed, 67 deselected in 0.74s
+RAW_STDOUT_END
+RAW_STDERR_BEGIN
+RAW_STDERR_END
+RETURN_CODE=0
+TARGETED_RAW_END
+UNCHANGED_TEST:test_phase6_live_buy_quote_is_authoritative_and_caps_limit:PRE=538924c5dcc67aea2f44cbe6e608532d6511dadd0b378269d93b300422abbeff:POST=538924c5dcc67aea2f44cbe6e608532d6511dadd0b378269d93b300422abbeff:SAME=YES
+UNCHANGED_TEST:test_phase6_live_adapter_preserves_identity_and_single_mutation_owner:PRE=13bced884951f6e46d96f7855c9f2239914b59561706b4781bd80493df63ac97:POST=13bced884951f6e46d96f7855c9f2239914b59561706b4781bd80493df63ac97:SAME=YES
+UNIQUENESS_SAFETY_EVIDENCE_BEGIN
+PRODUCTION_SOURCE_IDENTITY_KEY:phoenix_core/rakuten_rss_broker.py:1017:source = (str(update.source_order_number).strip(), str(update.source_reception_number).strip())
+PRODUCTION_ACCOUNTING_MODE:phoenix_core/rakuten_rss_broker.py:836:if update.fill_accounting_mode == "CUMULATIVE_ORDER_EXECUTIONS":
+CUMULATIVE_REPLAY_QTY:phoenix_core/rakuten_rss_broker.py:1011:q0 = int(record.get("cumulative_filled_quantity", record.get("filled_quantity", 0)))
+CUMULATIVE_REPLAY_PRICE:phoenix_core/rakuten_rss_broker.py:1012:p0 = float(record.get("cumulative_average_fill_price", record.get("filled_price", 0.0)))
+EVENT_REPLAY_KEY:phoenix_core/rakuten_rss_broker.py:840:fill_event_id = str(update.fill_event_id).strip()
+EVENT_REPLAY_LEDGER:phoenix_core/rakuten_rss_broker.py:772:"applied_fill_events": {},
+AMBIGUITY_FAIL_CLOSED:phoenix_core/rakuten_rss_broker.py:1020:raise RuntimeError("PRODUCTION_FILL_SOURCE_AMBIGUOUS")
+QUANTITY_MISMATCH_FAIL_CLOSED:phoenix_core/rakuten_rss_broker.py:1016:raise RuntimeError("PRODUCTION_FILL_QUANTITY_MISMATCH")
+UNIQUENESS_SAFETY_EVIDENCE_END
+RECEIPT_RESULT=PASS
+RETURN_CODE=0

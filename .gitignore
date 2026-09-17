@@ -60,3 +60,8 @@ data/market_risk_latest*.json
 PHOENIX_STEP44_LocalReceiver.xlsm
 state/v7_vba_bridge_step44_state.csv
 work/
+
+# Frontend generated dependencies/build outputs
+**/node_modules/
+**/dist/
+**/*.tsbuildinfo
