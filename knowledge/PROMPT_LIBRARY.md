@@ -1,51 +1,5 @@
-# PHOENIX Prompt Library
+﻿# PHOENIX Prompt Library — Retired
 
-Last updated: 2026-08-17
-Status: approved
+Status: RETIRED
 
-`AGENTS.md` を唯一の標準書として使う承認済み短縮テンプレート。現在のユーザー指示を最優先し、必要なテンプレートだけを選ぶ。角括弧の項目だけを差し替え、保存済みルールを長文で複製しない。
-
-## T-001 新規タスク開始
-```text
-最初にAGENTS.mdを読み、今回必要なknowledgeだけを確認してください。前回目的と今回目的を区別し、今回は「[目的]」だけを扱ってください。目的が変わる場合は、新しいCodexチャットで開始してください。
-```
-
-## T-002 通常実装
-```text
-目的は「[目的]」、変更対象は「[変更対象]」、保護対象は「[保護対象]」です。合意済み仕様を維持し、無関係な調査、全体テスト、リファクタリングを行わず、変更と検証を最小範囲で完了してください。設計変更が必要なら実装前に承認を求めてください。
-```
-
-## T-003 通知
-```text
-当日レポートとデータ基準日時を確認してから通知を「[回数]回」実行してください。古い結果を現在結果として送らず、Guardian、Position Reconciliation、Fail Safeを迂回せず、PAPERとOrders submitted: 0を維持してください。
-```
-
-## T-004 Python
-```text
-Pythonは正本の .venv\Scripts\python.exe を最優先してください。代替Python、PATH変更、パッケージ導入が必要なら、実行前に理由、絶対パス、依存関係差を報告し、承認を得てください。
-```
-
-## T-005 再試行
-```text
-初回実行前に新しい情報が得られるか確認してください。再実行前は、さらに前回から失敗条件が変わったか確認してください。必要な答えがYESの場合だけ実行し、同じ失敗条件では再実行せず、2回失敗したら停止して再開条件を報告してください。
-```
-
-## T-006 完了報告
-```text
-同じ返答に、①完了確認、②保存コマンド、③次のCodex指示書を順に含めてください。完了確認には変更ファイル、検証結果、保護対象、Git操作、外部接続を簡潔に記載し、未実施は未実施と明記してください。
-```
-
-## T-007 保存
-```text
-保存対象は「[対象ファイル]」だけです。現在のユーザーが許可したGit操作だけを行い、runtime、ログ、生成レポート、workbook、broker取込データ、保護対象を含めないでください。Git操作が禁止されている場合は実行せず、「保存コマンドなし」と報告してください。
-```
-
-## T-008 クレジット節約
-```text
-1タスク1目的を守り、必要なknowledgeと最小範囲の確認だけを使ってください。新情報のない操作、同条件の再試行、無関係な調査、不要な全体テスト、保存済み前提の再記載を行わず、クレジット、時間、ユーザー操作を最小化してください。
-```
-
-## T-009 RSS Workbook固定
-```text
-目的は「[目的]」です。ProductionRakutenRssTransportのWorkbookは runtime/v7_rss_production/PHOENIX_RSS_PRODUCTION.xlsm に固定し、.invalid_backup・backup・old・tmp を候補にせず、正規Workbookが存在しない場合は明示FAILにしてください。既にExcelで同じWorkbookが開かれている場合のみそのlive Workbookを再利用し、それ以外は正規 .xlsm のみをOpenしてください。
-```
+No active Codex prompt templates are maintained in this file.
