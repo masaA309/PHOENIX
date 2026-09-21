@@ -1415,8 +1415,13 @@ class RakutenRssBroker(BrokerAdapter):
                     ledger.reconcile_required = True
                     continue
                 mismatch = record.quantity != position.quantity or round(record.entry_price, 2) != round(position.average_price, 2)
-                buy = self._orders.get(record.buy_order_id or "")
-                if record.buy_order_id and (buy is None or buy.get("broker_order_id") != record.buy_order_id or buy.get("ticker") != ticker):
+                buy_matches = [
+                    candidate
+                    for candidate in self._orders.values()
+                    if candidate.get("broker_order_id") == record.buy_order_id
+                ]
+                buy = buy_matches[0] if len(buy_matches) == 1 else None
+                if record.buy_order_id and (buy is None or buy.get("ticker") != ticker):
                     mismatch = True
                 if mismatch:
                     if record.protective_order_state != "CRITICAL":
