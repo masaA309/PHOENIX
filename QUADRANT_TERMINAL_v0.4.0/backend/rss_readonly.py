@@ -26,6 +26,13 @@ READ_ONLY_FUNCTIONS = {
     "RssCapacityList",
 }
 
+# Optional margin read-only sheets (candidate 08, FROZEN). Missing sheet => NOT_PROVEN, never guessed.
+MARGIN_READ_SHEETS = {
+    "MarginPower": "RssMarginPower",
+    "MarginPositions": "RssMarginPositionList",
+    "MarginInfo": "RssMarginInfo",
+}
+
 FORBIDDEN_ORDER_TOKENS = (
     "RssStockOrder",
     "RssMarginOpenOrder",
@@ -304,6 +311,7 @@ class ExcelRssReadOnlyAdapter:
             account = self._parse_account(capacity_rows, positions)
             orders = self._parse_orders(orders_rows)
             executions = self._parse_executions(executions_rows)
+            margin = self._read_margin(workbook)
 
             now_iso = datetime.now(timezone.utc).isoformat()
             return {
@@ -323,6 +331,7 @@ class ExcelRssReadOnlyAdapter:
                 "positions": positions,
                 "orders": orders,
                 "executions": executions,
+                "margin": margin,
                 "events": [
                     {
                         "time": datetime.now().strftime("%H:%M:%S"),
@@ -491,7 +500,14 @@ class ExcelRssReadOnlyAdapter:
 
     def _verify_formula_boundary(self, workbook: Any) -> None:
         found_readonly: set[str] = set()
-        for sheet_name in ("Positions", "Capacity", "Orders", "Executions"):
+        sheets = ["Positions", "Capacity", "Orders", "Executions"]
+        for name in MARGIN_READ_SHEETS:
+            try:
+                workbook.Worksheets(name)
+                sheets.append(name)
+            except Exception:
+                pass
+        for sheet_name in sheets:
             try:
                 sheet = workbook.Worksheets(sheet_name)
                 formulas = _normalize_grid(sheet.UsedRange.Formula)
@@ -511,6 +527,24 @@ class ExcelRssReadOnlyAdapter:
         missing = READ_ONLY_FUNCTIONS.difference(found_readonly)
         if missing:
             raise RssReadOnlyUnavailable(f"Required read-only RSS formulas missing: {', '.join(sorted(missing))}")
+
+    def _read_margin(self, workbook: Any) -> dict[str, Any]:
+        """Raw margin read. No column semantics are assumed; absent/unopened => NOT_PROVEN."""
+        result: dict[str, Any] = {}
+        for sheet_name, func in MARGIN_READ_SHEETS.items():
+            try:
+                rows = self._sheet_rows(workbook, sheet_name)
+            except RssReadOnlyUnavailable:
+                result[sheet_name] = {"function": func, "status": "NOT_PROVEN", "reason": "sheet absent"}
+                continue
+            cells = [_as_text(c) for r in rows for c in r if _as_text(c)]
+            unopened = bool(cells) and all(c in ("－", "-", "ー") for c in cells)
+            result[sheet_name] = {
+                "function": func,
+                "status": "UNOPENED_OR_EMPTY" if (not cells or unopened) else "READ",
+                "rows": [[_as_text(c) for c in r] for r in rows] if cells and not unopened else [],
+            }
+        return result
 
     @staticmethod
     def _sheet_rows(workbook: Any, name: str) -> list[list[Any]]:
