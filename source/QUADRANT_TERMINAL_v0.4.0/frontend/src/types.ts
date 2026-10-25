@@ -15,6 +15,10 @@ export interface AccountState {
   day_pnl: number;
   day_pnl_pct: number;
   unrealized_pnl: number;
+  /** 信用新規建余力（自動振替含む）。信用口座未開設/未取得は null */
+  margin_power?: number | null;
+  /** 保証金率（新規建） */
+  margin_ratio?: number | null;
 }
 
 export interface WatchItem {
@@ -119,6 +123,43 @@ export interface Position {
   account_type?: string;
   pending_qty?: number;
   day_change?: number;
+  /** VERMILION 制度信用LONG（runner state 由来） */
+  engine?: "VERMILION" | string;
+  source?: "LIVE" | "SHADOW" | string;
+  initial_stop?: number;
+  pending_stop?: number;
+  initial_r?: number;
+  locked_r?: number | null;
+  held_sessions?: number;
+  max_hold_sessions?: number;
+  time_exit_due?: boolean;
+  open_date?: string;
+  price_status?: "NOT_PROVEN" | string;
+}
+
+export type GateState = "CLOSED" | "OPEN" | "NOT_PROVEN" | string;
+
+export interface VermilionPlan {
+  ticker: string;
+  quantity: number;
+  limit_price: number;
+  signal_date?: string;
+  submitted?: boolean;
+}
+
+export interface VermilionState {
+  available: boolean;
+  mode: "LIVE" | "SHADOW" | "NOT_CONNECTED" | "ERROR" | string;
+  gates?: { route: GateState; broker_live: GateState; armed: GateState };
+  positions: Position[];
+  planned: VermilionPlan[];
+  events: EventRow[];
+  equity_paper?: number;
+  last_eod?: string;
+  updated_at?: string;
+  stale?: boolean;
+  latest_report?: string;
+  error?: string;
 }
 
 export interface OrderRow {
@@ -194,4 +235,5 @@ export interface PhoenixSnapshot {
   executions: ExecutionRow[];
   events: EventRow[];
   meta?: SnapshotMeta;
+  vermilion?: VermilionState;
 }

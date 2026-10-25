@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { MarketChart } from "./components/MarketChart";
-import type { ChartPayload, ChartTimeframe, PhoenixSnapshot, Position, RankingItem, WatchItem } from "./types";
+import type { ChartPayload, ChartTimeframe, PhoenixSnapshot, Position, RankingItem, VermilionState, WatchItem } from "./types";
 
 const PAGE_HOST = window.location.hostname;
 const IS_TAURI = PAGE_HOST === "tauri.localhost";
@@ -196,6 +196,11 @@ function App() {
       ?? state.watchlist[0] ?? state.ranking?.[0] ?? state.intraday_candidates?.[0]
       ?? (state.positions[0] ? { ticker: state.positions[0].ticker, name: state.positions[0].name ?? state.positions[0].ticker, price: state.positions[0].last, change_pct: 0, score: null, signal: "NOT_PROVEN" } : undefined);
   }, [selectedTicker, state.intraday_candidates, state.positions, state.watchlist, state.ranking]);
+  const selectedProtection = useMemo(
+    () => state.positions.find((item) => item.ticker === selectedItem?.ticker && item.engine === "VERMILION")
+      ?? state.vermilion?.positions.find((item) => item.ticker === selectedItem?.ticker),
+    [selectedItem?.ticker, state.positions, state.vermilion],
+  );
   const selectedPosition = useMemo(
     () => state.positions.find((item) => item.ticker === selectedItem?.ticker),
     [selectedItem?.ticker, state.positions],
@@ -344,7 +349,9 @@ function App() {
               </section>
               <section className="overview-strip">
                 <MetricCard label="推定資産" value={moneyView(state.account.equity)} sub="ESTIMATED EQUITY" />
-                <MetricCard label="現物買付可能額" value={moneyView(state.account.buying_power)} sub="BUYING POWER" />
+                {state.account.margin_power != null
+                  ? <MetricCard label="信用新規建余力" value={moneyView(state.account.margin_power)} sub={`現物買付可能額 ${moneyView(state.account.buying_power)}`} />
+                  : <MetricCard label="現物買付可能額" value={moneyView(state.account.buying_power)} sub="BUYING POWER · 信用余力 NOT_PROVEN" />}
                 <MetricCard label="保有株本日差" value={moneyView(state.account.day_pnl)} sub={balancesHidden ? "••••" : signed(state.account.day_pnl_pct, "%")} valueClass={tone(state.account.day_pnl)} />
                 <MetricCard label="含み損益" value={moneyView(state.account.unrealized_pnl)} sub="UNREALIZED" valueClass={tone(state.account.unrealized_pnl)} />
               </section>
@@ -369,13 +376,20 @@ function App() {
                     return <HoldingCard key={`${position.ticker}-${position.account_type ?? "all"}`} position={position} item={item} masked={balancesHidden} onOpen={() => openSummary(position.ticker)} />;
                   }) : <div className="empty-list">{rssUnavailable ? "RSS接続後に保有銘柄を表示します。" : "条件に一致する保有銘柄はありません。"}</div>}
                 </div>
+                {state.vermilion?.mode === "SHADOW" && state.vermilion.positions.length ? <>
+                  <div className="section-heading vermilion-subheading"><div><small>VERMILION · SHADOW</small><h2>影運用ポジション（紙上・注文なし）</h2></div><div className="heading-actions"><span>{state.vermilion.positions.length}銘柄</span></div></div>
+                  <div className="holdings-list">
+                    {state.vermilion.positions.map((position) => <HoldingCard key={`shadow-${position.ticker}`} position={position} masked={balancesHidden} onOpen={() => openSummary(position.ticker)} />)}
+                  </div>
+                </> : null}
               </div>
 
               <div className="panel section-card side-insight">
                 <div className="section-heading"><div><small>AT A GLANCE</small><h2>今日の状況</h2></div></div>
                 {analysisAvailable && ranked.length ? <div className="glance-score"><span>VERMILION TOP SCORE</span><strong>{ranked[0]?.score ?? "--"}</strong><small>{ranked[0]?.ticker.replace(".T", "")} · {ranked[0]?.name}</small></div> : <div className="analysis-offline-card"><b>PHOENIX ANALYSIS</b><strong>NOT CONNECTED</strong><p>口座情報はREALでも、ランキング/スコアは偽装せず非表示にします。</p></div>}
                 <button type="button" className="primary-link" onClick={() => setTab("ranking")} disabled={!analysisAvailable}>本日の狙い目を見る <span>→</span></button>
-                <div className="read-only-note"><b>SHORT RUNTIME ? {state.meta?.short_runtime ?? "NOT_CONNECTED"}</b><p>このUIには発注・訂正・取消の権限を持たせていません。</p></div>
+                <VermilionCard vermilion={state.vermilion} masked={balancesHidden} />
+                <div className="read-only-note"><b>READ ONLY · SHORT {state.meta?.short_runtime ?? "NOT_CONNECTED"}</b><p>このUIには発注・訂正・取消の権限を持たせていません。</p></div>
               </div>
             </section>
           ) : null}
@@ -448,6 +462,15 @@ function App() {
                 <div><span>評価損益</span><strong className={selectedPosition ? tone(selectedPosition.pnl) : ""}>{selectedPosition ? moneyView(selectedPosition.pnl) : "—"}</strong></div>
                 <div><span>シグナル</span><strong>{selectedAnalysis?.trade_decision || selectedAnalysis?.signal || selectedItem.signal}</strong></div>
               </div>
+              {selectedProtection ? <div className="detail-strip panel protection-strip">
+                <div><span>区分</span><strong>{selectedProtection.side} · {selectedProtection.execution}{selectedProtection.source === "SHADOW" ? " · 紙上" : ""}</strong></div>
+                <div><span>現在STOP</span><strong>{selectedProtection.current_stop != null ? `¥${num(selectedProtection.current_stop, 1)}` : "NOT_PROVEN"}</strong></div>
+                <div><span>次回STOP（翌営業日から有効）</span><strong>{selectedProtection.pending_stop != null ? `¥${num(selectedProtection.pending_stop, 1)}` : "—"}</strong></div>
+                <div><span>状態</span><strong className={selectedProtection.status === "EXIT_PENDING" ? "negative" : ""}>{selectedProtection.status ?? "NOT_PROVEN"}</strong></div>
+                <div><span>現在R / 確保R</span><strong>{selectedProtection.current_r != null ? signed(selectedProtection.current_r) : "—"}R / {selectedProtection.locked_r != null ? signed(selectedProtection.locked_r) : "—"}R</strong></div>
+                <div><span>保有</span><strong>{selectedProtection.held_sessions ?? 0} / {selectedProtection.max_hold_sessions ?? 40}日</strong></div>
+                <div><span>V-LOCK</span><strong>{selectedProtection.v_lock_display ?? "NOT_PROVEN"}</strong></div>
+              </div> : null}
             </section>
           ) : null}
 
@@ -594,6 +617,32 @@ function App() {
   );
 }
 
+function VermilionCard({ vermilion, masked }: { vermilion?: VermilionState; masked: boolean }) {
+  if (!vermilion || !vermilion.available) {
+    return <div className="vermilion-card offline"><b>VERMILION · 制度信用LONG</b><strong>{vermilion?.mode ?? "NOT_CONNECTED"}</strong><p>運用状態ファイルが見つかりません。推測値は表示しません。</p></div>;
+  }
+  const gates = vermilion.gates ?? { route: "NOT_PROVEN", broker_live: "NOT_PROVEN", armed: "NOT_PROVEN" };
+  const allClosed = [gates.route, gates.broker_live, gates.armed].every((g) => g === "CLOSED");
+  return (
+    <div className={`vermilion-card ${vermilion.mode === "LIVE" ? "live" : "shadow"}`}>
+      <div className="vermilion-head"><b>VERMILION · 制度信用LONG</b><em>{vermilion.mode === "SHADOW" ? "影運用（注文なし）" : vermilion.mode}</em></div>
+      <div className="vermilion-gates" aria-label="発注ゲート">
+        <span className={gates.route === "CLOSED" ? "closed" : "open"}>ROUTE {gates.route}</span>
+        <span className={gates.broker_live === "CLOSED" ? "closed" : "open"}>LIVE {gates.broker_live}</span>
+        <span className={gates.armed === "CLOSED" ? "closed" : "open"}>ARMED {gates.armed}</span>
+      </div>
+      <p className="vermilion-note">{allClosed ? "全ゲート閉: 実注文は送信されません。" : "ゲートが開いています。解禁手順どおりか確認してください。"}</p>
+      <div className="vermilion-stats">
+        <div><span>保有</span><strong>{vermilion.positions.length}</strong></div>
+        <div><span>翌営業日候補</span><strong>{vermilion.planned.length}</strong></div>
+        <div><span>{vermilion.mode === "SHADOW" ? "紙上資産" : "最終EOD"}</span><strong>{vermilion.mode === "SHADOW" ? (masked || vermilion.equity_paper == null ? "••••" : money(vermilion.equity_paper)) : (vermilion.last_eod || "—")}</strong></div>
+      </div>
+      {vermilion.planned.length ? <ul className="vermilion-plan">{vermilion.planned.slice(0, 6).map((p) => <li key={p.ticker}><span>{p.ticker.replace(".T", "")}</span><small>{p.quantity}株 · 上限 {num(p.limit_price, 1)}</small><em>{p.submitted ? "寄付指値" : "予定"}</em></li>)}</ul> : null}
+      <small className={`vermilion-updated ${vermilion.stale ? "stale" : ""}`}>{vermilion.stale ? "STALE · " : ""}更新 {vermilion.updated_at ? vermilion.updated_at.replace("T", " ") : "—"}{vermilion.last_eod ? ` · EOD ${vermilion.last_eod}` : ""}</small>
+    </div>
+  );
+}
+
 function HoldingCard({ position, item, masked, onOpen }: { position: Position; item?: WatchItem; masked: boolean; onOpen: () => void }) {
   return (
     <button type="button" className="holding-card" onClick={onOpen}>
@@ -601,7 +650,11 @@ function HoldingCard({ position, item, masked, onOpen }: { position: Position; i
       <div className="holding-quote"><strong>{num(position.last, 1)}</strong><small>{item ? signed(item.change_pct, "%") : "NOT_PROVEN"}</small></div>
       <div className="holding-position"><span>{position.qty}株</span><small>平均 {masked ? "••••" : `¥${num(position.avg_price, 1)}`}</small></div>
       <div className="holding-pnl"><strong className={tone(position.pnl)}>{masked ? "••••••" : money(position.pnl)}</strong><small className={tone(position.pnl_pct)}>{masked ? "••••" : signed(position.pnl_pct, "%")}</small></div>
-      <div className="holding-score"><small>{position.execution ?? "NOT_PROVEN"}</small><strong>{position.side || "NOT_PROVEN"}</strong></div>
+      <div className="holding-score">
+        <small>{position.execution ?? "NOT_PROVEN"}{position.source === "SHADOW" ? " · PAPER" : ""}</small>
+        <strong>{position.side || "NOT_PROVEN"}</strong>
+        {position.engine === "VERMILION" ? <small className={`stop-chip ${position.status === "TRAILING" ? "trailing" : position.status === "EXIT_PENDING" ? "exit" : ""}`}>{position.status} · STOP {position.current_stop != null ? num(position.current_stop, 1) : "—"}</small> : null}
+      </div>
       <span className="open-arrow">›</span>
     </button>
   );

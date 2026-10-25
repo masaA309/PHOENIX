@@ -1,7 +1,7 @@
 {
   "date": "2026-10-25",
   "branch": "q-ui-claude-handoff-20261025",
-  "source_head": "37e2ea9d22d91564198df6a284e792e635c4a5fc",
+  "source_head": "19949ab4364dcd410b89b41017edbcb281d3cfe8",
   "source_branch": "margin-long-live-prep-20261025",
   "user_authorization": "Export-only exception and publication to handoff branch explicitly approved in this conversation.",
   "tests": "Not rerun; artifact collection and hash verification only.",
@@ -24,18 +24,18 @@
     "live RSS workbook; replaced with empty original template",
     "unrelated trading/QRC runtime and secrets"
   ],
-  "history_coverage": "5 turns exposed by read_thread; not entire original conversation",
+  "history_coverage": "Initial 5 turns plus browser-recovered Oct 1/3/5 design details; not the entire conversation. See RECOVERED_UI_SPEC.md.",
   "files": [
     {
       "path": "CLAUDE_START_HERE.md",
-      "bytes": 3133,
-      "sha256": "24b16371b95bc2d2d0e350adc76bbe15aa7584edd675bd7aa0be251be7f2a2bf",
+      "bytes": 3607,
+      "sha256": "c40f2b8055f09129430a2179c8c86e4db569844efcd48a62e47e2bb50189197d",
       "origin": "retrieved conversation / transfer documentation"
     },
     {
       "path": "CURRENT_AND_PLANNED.md",
-      "bytes": 3079,
-      "sha256": "c799bd7ec7466ec708c308b222166a8e6157765010892c83cc92a16e465e04b8",
+      "bytes": 3113,
+      "sha256": "9c6f5351ed534985d1c0309c3e521a40bc1bf6470988e05eb2819f77dc763e44",
       "origin": "retrieved conversation / transfer documentation"
     },
     {
@@ -73,6 +73,54 @@
       "bytes": 33797,
       "sha256": "213f1de7dd4a492ed28e7fe61c27d5e757fc8f3952b28b9e1842a7a566819432",
       "origin": "Downloads/q_assets_exact.zip"
+    },
+    {
+      "path": "design_reference/corrected_index_rendered.html",
+      "bytes": 32106,
+      "sha256": "c86be09997c8e41f7e257a9694f86147eb9406d8d6e95081422fcf3d1405c905",
+      "origin": "retrieved conversation / transfer documentation"
+    },
+    {
+      "path": "design_reference/corrected_ui_home.jpg",
+      "bytes": 45333,
+      "sha256": "857d093da55b3c28ee3a016376e6223a330d03b7d337cccccaacf051dedaf166",
+      "origin": "retrieved conversation / transfer documentation"
+    },
+    {
+      "path": "design_reference/corrected_ui_v_lock_chart.jpg",
+      "bytes": 40672,
+      "sha256": "c50d22ea886320ca7603b08faecec349662e927da9a8176ba96a218d67087bab",
+      "origin": "retrieved conversation / transfer documentation"
+    },
+    {
+      "path": "design_reference/corrected_ui_v_lock_chart.svg",
+      "bytes": 387,
+      "sha256": "7cd6c563c7dcfbae648b29e67af992d47c3176060a91c668b4e751af8f3b8233",
+      "origin": "retrieved conversation / transfer documentation"
+    },
+    {
+      "path": "design_reference/existing_q_positions_capture.jpg",
+      "bytes": 36630,
+      "sha256": "27df2f579cf17817801c35025c025fb1e327e18b14454b5566b5cbf8a744b586",
+      "origin": "retrieved conversation / transfer documentation"
+    },
+    {
+      "path": "design_reference/QUADRANT_Q_MOBILE_DEMO.html",
+      "bytes": 13604,
+      "sha256": "cd507961d151a51a5560c9888dba56d382008824756d20be4f059b15d5efdc81",
+      "origin": "C:/dev/DEMO-Q historical design artifact; not final approved UI"
+    },
+    {
+      "path": "design_reference/quadrant_showcase.html",
+      "bytes": 19806,
+      "sha256": "767bdf64ae4ce6fa4961d99f45e6e649d66c9127d31a30ba970c0542f4d94cee",
+      "origin": "C:/dev/DEMO-Q historical design artifact; not final approved UI"
+    },
+    {
+      "path": "design_reference/quadrant_showcase.py",
+      "bytes": 19849,
+      "sha256": "b789b6e9b1a87b9b1f31a8aaae4b9768eb96e91314a9be16bbe7e003b3438efb",
+      "origin": "C:/dev/DEMO-Q historical design artifact; not final approved UI"
     },
     {
       "path": "HISTORICAL_UI_CONVERSATION.md",
@@ -316,8 +364,20 @@
     },
     {
       "path": "README.md",
-      "bytes": 3133,
-      "sha256": "24b16371b95bc2d2d0e350adc76bbe15aa7584edd675bd7aa0be251be7f2a2bf",
+      "bytes": 3607,
+      "sha256": "c40f2b8055f09129430a2179c8c86e4db569844efcd48a62e47e2bb50189197d",
+      "origin": "retrieved conversation / transfer documentation"
+    },
+    {
+      "path": "recovered_history/browser_1.txt",
+      "bytes": 7416,
+      "sha256": "ab446ed4e9253452d2ff524c27bd224a5ab3886deca766b352da481db4601602",
+      "origin": "retrieved conversation / transfer documentation"
+    },
+    {
+      "path": "RECOVERED_UI_SPEC.md",
+      "bytes": 4587,
+      "sha256": "ecc9d7b03ea9c3a3931fba83e7ca231a47517b4d581973ca9b1e80af2d1ea340",
       "origin": "retrieved conversation / transfer documentation"
     },
     {
@@ -844,8 +904,8 @@
     },
     {
       "path": "source/QUADRANT_TERMINAL_v0.4.0/backend/app.py",
-      "bytes": 11499,
-      "sha256": "daaa68ef50e3f7d289e556e82c1de9a33452b18a40f2fd672f095f3b5f811394",
+      "bytes": 12928,
+      "sha256": "33f9c2084649addac949fbec55d0fdab601fcd2b55584e06713fe0128197b965",
       "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/backend/app.py"
     },
     {
@@ -862,8 +922,8 @@
     },
     {
       "path": "source/QUADRANT_TERMINAL_v0.4.0/backend/rss_readonly.py",
-      "bytes": 25978,
-      "sha256": "a6b2e9847d0153719f748aceca06f147c9c9b683237f31eed92842d5cdc9877c",
+      "bytes": 26836,
+      "sha256": "ae7448519eb979fb49de37a95434c3d8ecdde0f0a61762f9c99e2c6d02049e54",
       "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/backend/rss_readonly.py"
     },
     {
@@ -871,6 +931,12 @@
       "bytes": 1527,
       "sha256": "895e53fdd4bd287ef515e4d3b6180f4789213c241e07b1a54aa5278438422362",
       "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/backend/tests/test_rss_readonly.py"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/backend/vermilion_readonly.py",
+      "bytes": 6999,
+      "sha256": "fc88707bfd47f1d0db2a6d68b581a4b5455db1217f264ba43c1b0ef18a8354fd",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/backend/vermilion_readonly.py"
     },
     {
       "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/index.html",
@@ -952,8 +1018,8 @@
     },
     {
       "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src/App.tsx",
-      "bytes": 46186,
-      "sha256": "cfea1b28b9dff3f1bcdfbe29917cb26d3a48116d57cd3265e86c0d1be6f433df",
+      "bytes": 51787,
+      "sha256": "9d9f9eec3266b1b11db3f4fe2c2cf2bb489d7aadcaf2cd47f898d15f46c26f19",
       "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src/App.tsx"
     },
     {
@@ -976,14 +1042,14 @@
     },
     {
       "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src/styles.css",
-      "bytes": 50148,
-      "sha256": "db7b079f71adce950083335a1abfdb2ac2dae1af1bf5aa15ea60274856c93ad0",
+      "bytes": 52335,
+      "sha256": "f4f3e429de81c9beb7b23e8a19dec6109a221a8a34288457d36d9bd9664953e1",
       "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src/styles.css"
     },
     {
       "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src/types.ts",
-      "bytes": 4514,
-      "sha256": "cd847f754f5d78b81680a8400d1ee223af52d31f36d50a0d476139cde796b772",
+      "bytes": 5736,
+      "sha256": "05aaf95a248d173ed30a4cb94555ac4188021f7c91b769398e0371a2759a10b3",
       "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src/types.ts"
     },
     {
@@ -1249,6 +1315,12 @@
       "bytes": 3571,
       "sha256": "353c91f299ee6a0196d336266adf4137e5005ae35da8108ec5efc678891c84f2",
       "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/README.md"
+    },
+    {
+      "path": "VISUAL_DESIGN_INDEX.md",
+      "bytes": 1975,
+      "sha256": "a2bada3237d3722787aee7a870ae3533541b589858899dee5e4f000c7eaa65ac",
+      "origin": "retrieved conversation / transfer documentation"
     }
   ]
 }

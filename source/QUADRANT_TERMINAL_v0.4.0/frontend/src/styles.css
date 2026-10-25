@@ -824,3 +824,32 @@ button { touch-action: manipulation; }
   .scenario-node b { font-size: 9px; }
   .scenario-arrow { font-size: 17px; }
 }
+
+/* VERMILION (制度信用LONG) — read-only status, uses existing tokens */
+.vermilion-card { border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin: 12px 0; display: grid; gap: 10px; background: var(--panel-2); }
+.vermilion-card.offline strong { color: var(--muted); }
+.vermilion-card.live { border-color: var(--accent); }
+.vermilion-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 8px; }
+.vermilion-head b { white-space: nowrap; }
+.vermilion-head b { letter-spacing: .06em; font-size: 12px; color: var(--accent); }
+.vermilion-head em { font-style: normal; font-size: 12px; color: var(--muted); }
+.vermilion-gates { display: flex; flex-wrap: wrap; gap: 6px; }
+.vermilion-gates span { font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); }
+.vermilion-gates span.closed { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 45%, transparent); }
+.vermilion-gates span.open { color: var(--negative); border-color: var(--negative); font-weight: 700; }
+.vermilion-note { margin: 0; font-size: 12px; color: var(--muted); }
+.vermilion-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.vermilion-stats div { display: grid; gap: 2px; }
+.vermilion-stats span { font-size: 11px; color: var(--muted); }
+.vermilion-plan { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.vermilion-plan li { display: grid; grid-template-columns: 60px 1fr auto; gap: 8px; font-size: 12px; align-items: center; }
+.vermilion-plan small { color: var(--muted); }
+.vermilion-plan em { font-style: normal; color: var(--accent-2); font-size: 11px; }
+.vermilion-updated { font-size: 11px; color: var(--muted-2); }
+.vermilion-updated.stale { color: var(--warning); }
+.vermilion-subheading { margin-top: 18px; }
+.stop-chip { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.stop-chip.trailing { color: var(--positive); }
+.stop-chip.exit { color: var(--negative); }
+.protection-strip { margin-top: 10px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.protection-strip > div { border-bottom: 1px solid var(--line-soft); }

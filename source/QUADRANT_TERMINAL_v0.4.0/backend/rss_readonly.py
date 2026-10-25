@@ -116,6 +116,18 @@ def _locate_table(rows: list[list[Any]], required_headers: Iterable[str]) -> tup
     raise RssReadOnlyUnavailable(f"RSS table header not found: {', '.join(required_headers)}")
 
 
+def _margin_value(values: dict[str, Any], names: tuple[str, ...]) -> float | None:
+    """First present, numeric value among `names`; '－' (margin account not opened) -> None."""
+    for name in names:
+        text = _as_text(values.get(name))
+        if text and text not in ("－", "-", "ー"):
+            try:
+                return float(text.replace(",", ""))
+            except ValueError:
+                return None
+    return None
+
+
 def _row_dict(headers: list[str], row: list[Any]) -> dict[str, Any]:
     return {header: row[i] if i < len(row) else None for i, header in enumerate(headers) if header}
 
@@ -625,6 +637,9 @@ class ExcelRssReadOnlyAdapter:
             "day_pnl": day_pnl,
             "day_pnl_pct": day_pct,
             "unrealized_pnl": unrealized,
+            # 信用余力は「自動振替含む」列で判定する（信用口座単体は0になり得る: 2026-10-25 実機確認）
+            "margin_power": _margin_value(values, ("自動振替含む_信用新規建余力", "信用口座_信用新規建余力")),
+            "margin_ratio": _margin_value(values, ("自動振替含む_保証金率(新規建)", "信用口座_保証金率(新規建)")),
         }
 
     @staticmethod

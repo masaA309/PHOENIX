@@ -40,6 +40,13 @@ QはREAD ONLY表示です。UI表示のために注文・risk・broker authority
 
 正本: https://github.com/masaA309/PHOENIX
 
+
+## 追加回収資料
+
+[画像・UI一覧](VISUAL_DESIGN_INDEX.md) / [回収した詳細仕様](RECOVERED_UI_SPEC.md)
+
+四神獣＋金色麒麟はdesign_assets/stage6.jpg。修正版UI添付の表示HTMLとV-LOCKチャートSVGをdesign_referenceへ追加。表示HTMLはブラウザーDOMの保存であり元添付とのbyte一致は未証明。独立Vロゴの原画像は未回収。旧DEMO案と修正版を一覧で区別。
+
 ````
 
 ## CURRENT_AND_PLANNED.md
@@ -69,7 +76,7 @@ QはREAD ONLY表示です。UI表示のために注文・risk・broker authority
 - POSITIONS / DETAIL / CHARTに、正式stateに基づくProtection情報を表示する。
 - 現在stop、current R、TRAILING、EXIT_PENDING、pending stop、発効session、保有session、exit reason、freshness、authorityを扱う計画。
 - V-LOCKは費用込み利益保護を示すQ表示。ACTIVE / INACTIVE / NOT_PROVENを区別し、売買ロジックへ書き戻さない。
-- Market BriefとMorning Screeningは別の表示要素として扱う計画。取得記録にMarket Briefの詳細仕様全文は存在しない。
+- Market BriefとMorning Screeningは別の表示要素として扱う計画。追加回収した画面構成・Market Brief・V表示の詳細は `RECOVERED_UI_SPEC.md` を参照。
 - 正式な本線read surfaceからQ adapter → API → UIへ接続し、staging/test stateを本番と推測しない。
 
 ## 実装と計画の差を読む注意点
@@ -79,6 +86,701 @@ QはREAD ONLY表示です。UI表示のために注文・risk・broker authority
 過去会話のPositionView計画にはpending_stop等もあります。最新ソースとの差は将来の実装確認事項であり、本移管で追加実装していません。
 
 今後Claudeへ依頼する実装範囲はユーザーが指定してください。この資料自体は新たな実装・発注・LIVE releaseを許可しません。
+
+````
+
+## design_reference/corrected_index_rendered.html
+
+````text
+<!doctype html>
+<html lang="ja-JP" class="transparentSkybridgeBackground desktopSkybridge light" data-theme="light" style="color-scheme: light; --safe-area-inset-top: 0px; --safe-area-inset-bottom: 0px; --safe-area-inset-left: 0px; --safe-area-inset-right: 0px;"><head><style>@layer sandbox-defaults{html,body,#root{margin:0;padding:0}}</style><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#071019"><title>QUADRANT DEMO-Q</title><style>
+:root{--bg:#071019;--card:#111c28;--line:#2b3b4e;--gold:#e8ba50;--txt:#f4f2ec;--mut:#8d9aaa;--green:#67cf92;--red:#ff7275;--blue:#49a7ff}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-weight:700}button{font:inherit;color:inherit}
+.app{max-width:620px;margin:auto;min-height:100vh;padding:env(safe-area-inset-top) 18px calc(105px + env(safe-area-inset-bottom))}
+header{height:105px;display:flex;align-items:center;border-bottom:1px solid #233141;margin:0 -18px;padding:0 18px;gap:12px}.logo{width:53px;height:53px;border:2px solid var(--gold);border-radius:10px;display:grid;place-items:center;font-size:29px;color:var(--gold);background:radial-gradient(circle,#5a2634,#111926 65%);box-shadow:inset 0 0 0 3px #172334}.brand{font-size:22px;letter-spacing:.06em}.sub{font-size:11px;color:var(--gold);letter-spacing:.2em;margin-top:3px}.sync{margin-left:auto;text-align:right;font-size:11px}.live{color:var(--green);margin-right:10px}.ro{color:var(--gold)}.time{display:block;color:#8290a0;font-size:9px;margin-top:4px}
+.page{display:none;padding-top:24px}.page.on{display:block}h1{font-size:30px;margin:0 0 2px}.eyebrow{color:var(--gold);font-size:12px;letter-spacing:.11em;margin-bottom:17px}.cards4{display:grid;grid-template-columns:1fr 1fr;gap:12px}.metric{background:var(--card);border:1px solid var(--line);border-radius:19px;padding:18px 16px;min-height:112px}.metric span{color:var(--mut);font-size:11px}.metric b{display:block;font-size:25px;margin-top:10px}.green{color:var(--green)!important}.red{color:var(--red)!important}.gold{color:var(--gold)!important}
+.box{margin-top:17px;background:var(--card);border:1px solid var(--line);border-radius:19px;padding:16px}.boxtitle{color:var(--gold);font-size:16px;margin-bottom:10px}.rec,.holding{width:100%;border:0;border-top:1px solid #233141;background:none;text-align:left;padding:14px 0;display:grid;align-items:center;gap:8px}.rec:first-of-type,.holding:first-of-type{border-top:0}.rec{grid-template-columns:24px 1fr auto}.rank{color:var(--gold);font-size:19px}.rec small,.holding small{display:block;color:var(--mut);font-size:9px;margin-top:4px}.side{display:inline-block;border:1px solid;border-radius:6px;padding:3px 7px;font-size:9px;margin-right:6px}.LONG{color:var(--blue)}.SHORT{color:var(--red)}.score{text-align:right;font-size:17px}.holding{grid-template-columns:68px 1fr auto}.code{font-size:14px}.name{font-size:14px}.exec{color:var(--gold)!important}.right{text-align:right}.right b{display:block;font-size:14px}.pnl{font-size:14px!important}.status{font-size:9px;border:1px solid #536274;border-radius:5px;padding:3px 6px;display:inline-block;margin-top:5px}.v{color:var(--gold);border-color:#9e7929}.actions{display:flex;gap:7px;justify-content:flex-end;margin-top:7px}.actions span{border:1px solid #8c6a26;border-radius:7px;padding:6px 8px;font-size:9px}
+.chartbox{height:420px;border:1px solid #8c6a26;border-radius:18px;margin-top:16px;position:relative;overflow:hidden;background:linear-gradient(#0b151f,#071019)}.chartbox svg{width:100%;height:100%}.legend{position:absolute;top:14px;right:14px;border:1px solid var(--line);border-radius:10px;padding:9px;background:#0d1722dd;font-size:9px;color:#9eabb9}.notice{border:1px solid var(--line);border-radius:14px;padding:13px;color:var(--mut);font-size:11px;margin-top:14px}
+.progress{border:1px solid #9d792b;border-radius:18px;text-align:center;color:var(--gold);font-size:21px;padding:22px;margin:18px 0}.guardian{opacity:.38;display:grid;grid-template-columns:55px 1fr auto;gap:12px;align-items:center;border:1px solid var(--line);border-radius:18px;padding:15px;margin-bottom:12px}.guardian.active{opacity:1}.gicon{width:50px;height:50px;border:2px solid #7d642d;border-radius:8px;display:grid;place-items:center;font-size:28px}.guardian b{font-size:17px}.guardian small{display:block;color:var(--mut);margin-top:5px}.lock{text-align:right;color:var(--gold);font-size:12px}
+nav{position:fixed;bottom:0;left:0;right:0;max-width:620px;margin:auto;background:#071019f5;border-top:1px solid #273646;padding:8px 5px calc(8px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(5,1fr);z-index:20}nav button{background:none;border:1px solid transparent;border-radius:14px;height:62px;color:#a2acb8;font-size:10px}nav button.on{border-color:#9c7628;color:#fff}nav b{display:block;font-size:17px;margin-bottom:4px}
+.sheet{display:none;position:fixed;inset:0;background:#071019fa;z-index:40;overflow:auto;padding:calc(18px + env(safe-area-inset-top)) 18px 30px}.sheet.on{display:block}.sheetin{max-width:620px;margin:auto}.sheethead{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:15px}.close{border:1px solid #8c6a26;background:none;border-radius:50%;width:43px;height:43px}.big{font-size:29px;margin:22px 0 4px}.sect{border-top:1px solid var(--line);margin-top:20px;padding-top:16px}.sect h3{color:var(--gold);font-size:11px;letter-spacing:.12em}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px}.grid span{color:var(--mut)}
+</style><style>html, body, #root {
+      margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0;
+      
+    }
+html,body,#root{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}html,body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen,Ubuntu,Cantarell,Helvetica Neue,Arial,sans-serif!important}button,input,textarea,select{font-family:inherit}html{background-color:transparent}html.chatgptOled.dark,html.mobileSkybridge.dark{background-color:#000}@supports (font: -apple-system-body){html.mobileSkybridge{font:-apple-system-body}}html.desktopSkybridge.dark{background-color:#1e1e1e}html.transparentSkybridgeBackground,html.transparentSkybridgeBackground.dark{background-color:transparent}html.androidSkybridge,html.androidSkybridge body,html.androidSkybridge *{-webkit-tap-highlight-color:rgba(255,255,255,0)}html.androidSkybridge *::selection,html.androidSkybridge *::-moz-selection{background:#fff0;color:inherit}</style></head><body><div class="app"><header><div class="logo">Q</div><div><div class="brand">QUADRANT</div><div class="sub">FOUR GUARDIANS</div></div><div class="sync"><span class="live">DEMO</span><span class="ro">READ ONLY</span><span class="time">SAMPLE DATA</span></div></header>
+<section id="home" class="page on"><div class="notice">DEMO / SAMPLE DATA　実運用・注文機能なし</div><div class="cards4"><div class="metric"><span>推定資産</span><b>¥1,217,185</b></div><div class="metric"><span>本日の損益</span><b class="red">−¥1,060<br><small>(−0.63%)</small></b></div><div class="metric"><span>評価損益</span><b class="green">+¥6,251</b></div><div class="metric"><span>買付可能額</span><b>¥1,050,008</b></div></div><div class="box"><div class="boxtitle">本日のおすすめ上位</div><button class="rec" data-code="7203.T"><b class="rank">1</b><span><b>7203.T　トヨタ自動車</b><small><span class="side LONG">LONG</span> SIGNAL BREAKOUT</small></span><span class="score">92<small>SCORE</small></span></button><button class="rec" data-code="6758.T"><b class="rank">2</b><span><b>6758.T　ソニーグループ</b><small><span class="side SHORT">SHORT</span> SIGNAL MOMENTUM</small></span><span class="score">89<small>SCORE</small></span></button><button class="rec" data-code="8035.T"><b class="rank">3</b><span><b>8035.T　東京エレクトロン</b><small><span class="side SHORT">SHORT</span> SIGNAL TREND</small></span><span class="score">86<small>SCORE</small></span></button></div><div class="box"><div class="boxtitle">保有銘柄</div><button class="holding" data-i="0"><div><b class="code">7203.T</b><small><span class="side LONG">LONG</span></small></div><div><b class="name">トヨタ自動車</b><small class="exec">MARGIN / 100株</small></div><div class="right"><b>¥3,142</b><b class="pnl green">+¥18,420 (+5.86%)</b><span class="status v">V-LOCK</span><div class="actions"><span>詳細</span><span>チャート</span></div></div></button></div></section>
+<section id="recommend" class="page"><h1>おすすめ</h1><div class="eyebrow">MORNING SCREENING / SAMPLE</div><div class="box"><button class="rec" data-code="7203.T"><b class="rank">1</b><span><b>7203.T　トヨタ自動車</b><small><span class="side LONG">LONG</span> SIGNAL BREAKOUT</small></span><span class="score">92<small>SCORE</small></span></button><button class="rec" data-code="6758.T"><b class="rank">2</b><span><b>6758.T　ソニーグループ</b><small><span class="side SHORT">SHORT</span> SIGNAL MOMENTUM</small></span><span class="score">89<small>SCORE</small></span></button><button class="rec" data-code="8035.T"><b class="rank">3</b><span><b>8035.T　東京エレクトロン</b><small><span class="side SHORT">SHORT</span> SIGNAL TREND</small></span><span class="score">86<small>SCORE</small></span></button></div></section>
+<section id="portfolio" class="page"><h1>保有・成績</h1><div class="eyebrow">LONG / SHORT · CASH / MARGIN · READ ONLY</div><div class="cards4"><div class="metric"><span>LONG</span><b>3</b></div><div class="metric"><span>SHORT</span><b>3</b></div><div class="metric"><span>評価損益</span><b class="green">+¥48,200</b></div><div class="metric"><span>V-LOCK</span><b class="gold">2</b></div></div><div class="box"><button class="holding" data-i="0"><div><b class="code">7203.T</b><small><span class="side LONG">LONG</span></small></div><div><b class="name">トヨタ自動車</b><small class="exec">MARGIN / 100株</small></div><div class="right"><b>¥3,142</b><b class="pnl green">+¥18,420 (+5.86%)</b><span class="status v">V-LOCK</span><div class="actions"><span>詳細</span><span>チャート</span></div></div></button><button class="holding" data-i="1"><div><b class="code">6758.T</b><small><span class="side SHORT">SHORT</span></small></div><div><b class="name">ソニーグループ</b><small class="exec">MARGIN / 100株</small></div><div class="right"><b>¥3,625</b><b class="pnl green">+¥12,800 (+3.66%)</b><span class="status ">TRAILING</span><div class="actions"><span>詳細</span><span>チャート</span></div></div></button><button class="holding" data-i="2"><div><b class="code">8306.T</b><small><span class="side LONG">LONG</span></small></div><div><b class="name">三菱UFJ FG</b><small class="exec">CASH / 100株</small></div><div class="right"><b>¥2,311</b><b class="pnl red">−¥4,260 (−1.81%)</b><span class="status ">HOLDING</span><div class="actions"><span>詳細</span><span>チャート</span></div></div></button><button class="holding" data-i="3"><div><b class="code">8035.T</b><small><span class="side SHORT">SHORT</span></small></div><div><b class="name">東京エレクトロン</b><small class="exec">MARGIN / 20株</small></div><div class="right"><b>¥24,830</b><b class="pnl green">+¥25,600 (+4.32%)</b><span class="status v">V-LOCK</span><div class="actions"><span>詳細</span><span>チャート</span></div></div></button><button class="holding" data-i="4"><div><b class="code">9432.T</b><small><span class="side LONG">LONG</span></small></div><div><b class="name">NTT</b><small class="exec">CASH / 1,000株</small></div><div class="right"><b>¥164.2</b><b class="pnl green">+¥3,120 (+2.03%)</b><span class="status ">TRAILING</span><div class="actions"><span>詳細</span><span>チャート</span></div></div></button><button class="holding" data-i="5"><div><b class="code">9984.T</b><small><span class="side SHORT">SHORT</span></small></div><div><b class="name">ソフトバンクグループ</b><small class="exec">MARGIN / 30株</small></div><div class="right"><b>¥9,821</b><b class="pnl red">−¥7,480 (−2.66%)</b><span class="status ">HOLDING</span><div class="actions"><span>詳細</span><span>チャート</span></div></div></button></div></section>
+<section id="chart" class="page"><h1>チャート</h1><div class="eyebrow">7203.T / 60M / SAMPLE</div><div class="notice">Entry / Current / Current Stop　V-LOCKは金色で表示</div><div class="chartbox"><div class="legend">CURRENT　¥3,142<br>ENTRY　¥2,968<br><span class="gold">STOP　¥3,078</span></div><svg viewBox="0 0 500 400" preserveAspectRatio="none"><polyline points="0,330 50,310 100,320 150,270 200,285 250,220 300,235 350,170 400,185 450,110 500,125" fill="none" stroke="#49a7ff" stroke-width="4"></polyline><line x1="0" y1="285" x2="500" y2="285" stroke="#e8ba50" stroke-dasharray="8 7"></line><text x="14" y="278" fill="#e8ba50" font-size="12">CURRENT STOP / V-LOCK</text></svg></div></section>
+<section id="progress" class="page"><h1>PROGRESS</h1><div class="progress">STAGE 1 / VERMILION ONLY</div><div class="guardian active"><div class="gicon">🔥</div><div><b>VERMILION</b><small>日本株 / QUADRANT</small></div><div class="lock">UNLOCKED<br><small>INITIAL</small></div></div><div class="guardian"><div class="gicon">🐉</div><div><b>AZURE</b><small>日経225マイクロ</small></div><div class="lock">LOCKED</div></div><div class="guardian"><div class="gicon">🐯</div><div><b>WHITE TIGER</b><small>金ミニ</small></div><div class="lock">LOCKED</div></div><div class="guardian"><div class="gicon">●</div><div><b>BLACK WARRIOR</b><small>日本株信用</small></div><div class="lock">LOCKED</div></div></section></div>
+<nav><button class="on" data-p="home"><b>⌂</b>HOME</button><button data-p="recommend"><b>★</b>おすすめ</button><button data-p="portfolio"><b>▦</b>保有</button><button data-p="chart"><b>⌁</b>チャート</button><button data-p="progress"><b>◇</b>PROGRESS</button></nav>
+<div id="sheet" class="sheet"><div class="sheetin"><div class="sheethead"><div id="st"></div><button id="close" class="close">×</button></div><div id="sb"></div></div></div><script>
+const P=[{"code": "7203.T", "name": "トヨタ自動車", "side": "LONG", "execution": "MARGIN", "current": "¥3,142", "pnl": "+¥18,420", "pct": "+5.86%", "r": "+1.82R", "status": "V-LOCK", "hold": "3日", "entry": "¥2,968", "stop": "¥3,078", "qty": "100株"}, {"code": "6758.T", "name": "ソニーグループ", "side": "SHORT", "execution": "MARGIN", "current": "¥3,625", "pnl": "+¥12,800", "pct": "+3.66%", "r": "+1.41R", "status": "TRAILING", "hold": "5日", "entry": "¥3,761", "stop": "¥3,678", "qty": "100株"}, {"code": "8306.T", "name": "三菱UFJ FG", "side": "LONG", "execution": "CASH", "current": "¥2,311", "pnl": "−¥4,260", "pct": "−1.81%", "r": "−0.42R", "status": "HOLDING", "hold": "2日", "entry": "¥2,354", "stop": "¥2,268", "qty": "100株"}, {"code": "8035.T", "name": "東京エレクトロン", "side": "SHORT", "execution": "MARGIN", "current": "¥24,830", "pnl": "+¥25,600", "pct": "+4.32%", "r": "+2.14R", "status": "V-LOCK", "hold": "7日", "entry": "¥26,110", "stop": "¥25,240", "qty": "20株"}, {"code": "9432.T", "name": "NTT", "side": "LONG", "execution": "CASH", "current": "¥164.2", "pnl": "+¥3,120", "pct": "+2.03%", "r": "+0.88R", "status": "TRAILING", "hold": "4日", "entry": "¥160.9", "stop": "¥162.1", "qty": "1,000株"}, {"code": "9984.T", "name": "ソフトバンクグループ", "side": "SHORT", "execution": "MARGIN", "current": "¥9,821", "pnl": "−¥7,480", "pct": "−2.66%", "r": "−0.73R", "status": "HOLDING", "hold": "1日", "entry": "¥9,555", "stop": "¥10,040", "qty": "30株"}], $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+$$("nav button").forEach(b=>b.onclick=()=>{$$("nav button").forEach(x=>x.classList.toggle("on",x===b));$$(".page").forEach(x=>x.classList.toggle("on",x.id===b.dataset.p));scrollTo(0,0)});
+function openP(i){let p=P[i],good=p.pnl.startsWith("+");$("#st").innerHTML=`<span class="side ${p.side}">${p.side}</span> ${p.code} ${p.name}`;$("#sb").innerHTML=`<div class="big ${good?"green":"red"}">${p.pnl} <small>${p.pct}</small></div><div>${p.r} · ${p.status}</div><div class="sect"><h3>CURRENT PROTECTION</h3><div class="grid"><span>Current Stop</span><b>${p.stop}</b><span>Holding</span><b>${p.hold}</b><span>Trailing</span><b>${p.status==="HOLDING"?"OFF":"ACTIVE"}</b><span>Profit Lock</span><b class="${p.status==="V-LOCK"?"gold":""}">${p.status==="V-LOCK"?"SECURED":"—"}</b></div></div><div class="sect"><h3>POSITION</h3><div class="grid"><span>Execution</span><b>${p.execution}</b><span>Entry</span><b>${p.entry}</b><span>Current</span><b>${p.current}</b><span>Quantity</span><b>${p.qty}</b></div></div>`;$("#sheet").classList.add("on")}
+$$(".holding").forEach(b=>b.onclick=()=>openP(+b.dataset.i));$$(".rec").forEach(b=>b.onclick=()=>{let i=P.findIndex(p=>p.code===b.dataset.code);if(i>=0)openP(i)});$("#close").onclick=()=>$("#sheet").classList.remove("on");
+</script>
+<script>globalThis.__codexVisualizationInitialGlobals={"statePersistence":"none","stateModelContext":"none","visualizationStyleVariables":{"--accent":"rgb(232, 243, 254)","--accent-foreground":"rgb(44, 103, 197)","--background":"rgb(252, 252, 252)","--border":"rgba(0, 0, 0, 0.1)","--border-strong":"rgba(0, 0, 0, 0.15)","--card":"color-mix(in oklab, rgb(13, 13, 13) 5%, transparent)","--card-foreground":"rgb(13, 13, 13)","--corner-shape":"round","--control-spacing":"12px","--cursor-interaction":"pointer","--destructive":"rgb(226, 85, 7)","--font-mono":"ui-monospace, SFMono-Regular, \"SF Mono\", menlo, consolas, \"Liberation Mono\", monospace","--font-sans":"-apple-system-body, ui-sans-serif, -apple-system, system-ui, \"Segoe UI\", Helvetica, \"Apple Color Emoji\", Arial, sans-serif, \"Segoe UI Emoji\", \"Segoe UI Symbol\"","--font-size-base":"16px","--font-weight-normal":"400","--foreground":"rgb(13, 13, 13)","--input":"rgba(0, 0, 0, 0.15)","--muted":"color-mix(in srgb, rgb(13, 13, 13) 10%, transparent)","--muted-foreground":"rgb(143, 143, 143)","--popover":"rgb(255, 255, 255)","--popover-foreground":"rgb(13, 13, 13)","--primary":"rgb(44, 103, 197)","--primary-foreground":"rgb(255, 255, 255)","--radius":"8px","--radius-2xl":"16px","--radius-lg":"8px","--radius-md":"6px","--radius-sm":"4px","--ring":"rgb(58, 131, 247)","--secondary":"rgb(243, 243, 243)","--secondary-foreground":"rgb(13, 13, 13)","--blue":"rgb(58, 131, 247)","--orange":"rgb(226, 85, 7)","--green":"rgb(0, 162, 64)","--red":"rgb(224, 46, 42)","--purple":"rgb(146, 79, 247)","--yellow":"rgb(255, 195, 0)","--visualize-paint-gutter":"0px","--viz-series-1":"rgb(44, 103, 197)","--viz-series-2":"#f3c944","--viz-series-3":"#ea77b0","--viz-series-4":"#3db9b0","--viz-series-5":"#5ec978","--viz-series-6":"#f2893c"},"visualizationTheme":"light"};</script>
+<style id="codex-visualization-host-theme">:root {}</style>
+<script>
+(() => {
+  // Host colors are defaults; later authored styles can give the same names
+  // their own meaning (for example, --muted as a chart's label color).
+  const hostStyles = document.getElementById("codex-visualization-host-theme");
+  const hostStyle = hostStyles.sheet.cssRules[0].style;
+  // Typography, geometry and interaction cursors still follow the host.
+  const styleForProperty = (property) =>
+    /^--(?:font-|radius|corner-shape$|control-spacing$|cursor-interaction$|icon-size$|visualize-paint-gutter$)/.test(property)
+      ? document.documentElement.style
+      : hostStyle;
+  const initialGlobals =
+    globalThis.__codexVisualizationInitialGlobals ?? globalThis.openai;
+  delete globalThis.__codexVisualizationInitialGlobals;
+  if (initialGlobals?.statePersistence != null) {
+    globalThis.openai ??= {};
+    globalThis.openai.statePersistence = initialGlobals.statePersistence;
+    globalThis.openai.stateModelContext = initialGlobals.stateModelContext ?? "none";
+  }
+  if (!false) {
+    return;
+  }
+  let appliedProperties = [];
+  const applyHostStyleVariables = (styleVariables) => {
+    if (styleVariables == null || typeof styleVariables !== "object") {
+      return;
+    }
+    for (const property of appliedProperties) {
+      styleForProperty(property).removeProperty(property);
+    }
+    appliedProperties = [];
+    for (const [property, value] of Object.entries(styleVariables)) {
+      if (property.startsWith("--") && typeof value === "string") {
+        styleForProperty(property).setProperty(property, value);
+        appliedProperties.push(property);
+      }
+    }
+  };
+
+  const syncHostStyles = (globals) => {
+    applyHostStyleVariables(globals?.visualizationStyleVariables);
+    const sandboxDocument = globalThis.frameElement?.ownerDocument;
+    if (sandboxDocument != null && globals?.visualizationTheme != null) {
+      let colorSchemeMeta = sandboxDocument.querySelector(
+        'meta[name="color-scheme"]',
+      );
+      if (colorSchemeMeta == null) {
+        colorSchemeMeta = sandboxDocument.createElement("meta");
+        colorSchemeMeta.name = "color-scheme";
+        sandboxDocument.head.appendChild(colorSchemeMeta);
+      }
+      colorSchemeMeta.content = globals.visualizationTheme;
+      sandboxDocument.documentElement.style.colorScheme =
+        globals.visualizationTheme;
+      // Paint the host surface behind transparent saved visualization documents.
+      sandboxDocument.documentElement.style.backgroundColor =
+        hostStyle.getPropertyValue("--background");
+    }
+  };
+
+  syncHostStyles(initialGlobals);
+  globalThis.addEventListener("openai:set_globals", (event) => {
+    syncHostStyles(event.detail?.globals);
+  });
+})();
+</script>
+<script>
+(() => {
+  const reportEnvironmentError = (value) => {
+    const error = value instanceof Error ? value : new Error(String(value));
+    void globalThis.openai
+      .callTool(
+        "__codex_inline_visualization_error__",
+        {
+          message: error.message,
+          name: error.name,
+          stack: error.stack,
+        },
+      )
+      .catch(() => {});
+  };
+
+  globalThis.addEventListener("error", (event) => {
+    if (event.target?.localName === "script") {
+      // A script's own onerror may render a fallback or load an alternative.
+      // Let that handler run; failures it throws still reach the global error path.
+      const handlesError = typeof event.target.onerror === "function";
+      globalThis.queueMicrotask(() => {
+        if (!handlesError && !event.defaultPrevented) {
+          reportEnvironmentError("Visualization script could not be loaded");
+        }
+      });
+    } else if (event.target === globalThis) {
+      reportEnvironmentError(event.error ?? event.message);
+    }
+  }, true);
+  globalThis.addEventListener("unhandledrejection", (event) => {
+    reportEnvironmentError(event.reason);
+  });
+})();
+</script>
+<script id="codex-visualization-variants">
+(() => {
+  let previousSnapshot = "[]";
+  let roots = [];
+  const report = () => {
+    roots = Array.from(
+      document.querySelectorAll(".viz-carousel[data-active-variant]"),
+    ).slice(0, 32);
+    const selectedVariants = roots.flatMap((root, carousel) => {
+      const variant = root.dataset.activeVariant;
+      const label = root.getAttribute("aria-label")?.slice(0, 256);
+      return variant ? [{
+        carousel,
+        ...(label == null ? {} : { label }),
+        variant: variant.slice(0, 256),
+      }] : [];
+    });
+    const snapshot = JSON.stringify(selectedVariants);
+    if (snapshot !== previousSnapshot) {
+      previousSnapshot = snapshot;
+      void globalThis.openai.callTool("__codex_visualization_annotations__", {
+        type: "variants",
+        selectedVariants,
+      }).catch(() => {});
+    }
+  };
+  const observer = new MutationObserver((records) => {
+    if (records.some((record) => record.type === "attributes") || roots.some((root) => !root.isConnected)) {
+      report();
+    }
+  });
+  observer.observe(document, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["data-active-variant"],
+  });
+  report();
+  globalThis.addEventListener("pagehide", () => observer.disconnect(), { once: true });
+})();
+</script>
+<script>
+(() => {
+  let isHovering = false;
+  let isTouch = false;
+  const reportHover = (nextIsHovering, nextIsTouch = false) => {
+    if (nextIsHovering === isHovering && nextIsTouch === isTouch) {
+      return;
+    }
+    isHovering = nextIsHovering;
+    isTouch = nextIsTouch;
+    void globalThis.openai
+      .callTool(
+        "__codex_inline_visualization_hover__",
+        isTouch ? { isHovering, pointerType: "touch" } : { isHovering },
+      )
+      .catch(() => {});
+  };
+
+  globalThis.addEventListener(
+    "pointerover",
+    (event) =>
+      reportHover(event.pointerType !== "touch", event.pointerType === "touch"),
+    { capture: true },
+  );
+  globalThis.addEventListener(
+    "pointerout",
+    (event) => {
+      if (event.pointerType !== "touch" && event.relatedTarget == null) {
+        reportHover(false);
+      }
+    },
+    { capture: true },
+  );
+})();
+</script>
+<script>
+(() => {
+  const report = (method) => {
+    void globalThis.openai.callTool("__codex_inline_visualization_input__", { method }).catch(() => {});
+  };
+  globalThis.addEventListener("pointerdown", () => report("pointer"), { capture: true });
+  globalThis.addEventListener("keydown", (event) => {
+    if (!event.isComposing && event.key !== "Shift" && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      report(["Tab","ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(event.key) ? "keyboard-navigation" : "keyboard");
+    }
+  }, { capture: true });
+})();
+</script>
+<script>
+(() => {
+  const bubbledClicks = new WeakSet();
+  const interactiveSelector = [
+    "button", "input", "select", "textarea", "label", "summary", "a[href]",
+    "audio[controls]", "video[controls]", "[onclick]", "[data-visualization-interactive]",
+    '[contenteditable]:not([contenteditable="false"])',
+    ...[
+      "button", "checkbox", "combobox", "gridcell", "link", "listbox",
+      "menuitem", "menuitemcheckbox", "menuitemradio", "option", "radio",
+      "scrollbar", "searchbox", "slider", "spinbutton", "switch", "tab",
+      "textbox", "treeitem",
+    ].map((role) => '[role~="' + role + '"]'),
+  ].join(",");
+
+  globalThis.addEventListener("click", (event) => bubbledClicks.add(event));
+  globalThis.addEventListener("click", (event) => {
+    // Capture the path before a control can remove itself. Custom delegated
+    // controls can opt in with data-visualization-interactive.
+    const elements = event.composedPath().filter((target) => target instanceof Element);
+    const isInteractiveTarget = elements.some((element) =>
+      element.matches(interactiveSelector) ||
+      (element.hasAttribute("tabindex") && element.tabIndex >= 0)) ||
+      (elements[0] != null && getComputedStyle(elements[0]).cursor === "pointer");
+    // Use a task, not a microtask: native dispatch can run microtasks between
+    // listeners. Propagation flags are reset when dispatch finishes:
+    // https://dom.spec.whatwg.org/#concept-event-dispatch
+    globalThis.setTimeout(() => {
+      void globalThis.openai.callTool("__codex_inline_visualization_click__", {
+        isInteractive: isInteractiveTarget || event.defaultPrevented ||
+          (event.bubbles && !bubbledClicks.has(event)),
+      }).catch(() => {});
+    }, 0);
+  }, { capture: true });
+})();
+</script>
+<script>
+(() => {
+  globalThis.addEventListener("keydown", (event) => {
+    if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey ||
+      event.shiftKey || !["ArrowLeft", "ArrowRight", "Escape"].includes(event.key)) {
+      return;
+    }
+    const target = event.composedPath().find((element) => element instanceof HTMLElement);
+    const editable = target?.closest("[contenteditable]");
+    const editing = target && (target.isContentEditable ||
+      (editable && editable.getAttribute("contenteditable") !== "false") ||
+      target.closest('input, textarea, select, [role="slider"], [role="spinbutton"], [role="combobox"], [role="listbox"], [role="grid"], [role="tree"], [role="tablist"], [role="menu"]'));
+    if (event.key !== "Escape" && editing) { return; }
+    // Let the widget handle the key before forwarding it across the sandbox.
+    globalThis.setTimeout(() => {
+      if (!event.defaultPrevented && globalThis.openai?.displayMode === "fullscreen") {
+        void globalThis.openai.callTool("__codex_inline_visualization_preview_key__", {
+          key: event.key,
+        }).catch(() => {});
+      }
+    }, 0);
+  });
+})();
+</script>
+
+
+
+
+<script>
+(() => {
+  const contentRange = document.createRange();
+  let previousMeasurement = null;
+  let heightReportTimer = null;
+  const reportHeight = () => {
+    const bodyChildren = Array.from(document.body.children).filter(
+      (element) =>
+        element.tagName !== "SCRIPT" &&
+        element.tagName !== "STYLE" &&
+        element.getAttribute("role") !== "tooltip",
+    );
+    const bodyStyle = globalThis.getComputedStyle(document.body);
+    const contentWidth = Math.max(
+      0,
+      Math.round(
+        globalThis.innerWidth -
+          parseFloat(bodyStyle.paddingLeft) -
+          parseFloat(bodyStyle.paddingRight),
+      ),
+    );
+    let contentHeight;
+    if (bodyChildren.length === 0) {
+      contentRange.selectNodeContents(document.body);
+      contentHeight = contentRange.getBoundingClientRect().height;
+    } else if (bodyChildren.length === 1) {
+      const [bodyChild] = bodyChildren;
+      const childRect = bodyChild.getBoundingClientRect();
+      // Child margins can collapse above the root without adding to its height.
+      // The host adds body padding separately.
+      contentHeight =
+        Math.max(bodyChild.scrollHeight, childRect.height) +
+        Math.max(
+          0,
+          childRect.top -
+            document.body.getBoundingClientRect().top -
+            parseFloat(bodyStyle.paddingTop),
+        );
+    } else {
+      const bodyTop = document.body.getBoundingClientRect().top;
+      contentHeight = Math.max(
+        ...bodyChildren.map(
+          (bodyChild) => bodyChild.getBoundingClientRect().bottom - bodyTop,
+        ),
+      );
+    }
+    const viewportHeight = globalThis.innerHeight;
+    const previous = previousMeasurement;
+    previousMeasurement = { contentHeight, contentWidth, viewportHeight };
+    if (
+      previous != null &&
+      contentWidth === previous.contentWidth &&
+      contentHeight - previous.contentHeight ===
+        viewportHeight - previous.viewportHeight
+    ) {
+      return;
+    }
+
+    void globalThis.openai
+      .callTool(
+        "__codex_inline_visualization_height__",
+        { height: contentHeight, width: contentWidth },
+      )
+      .catch(() => {});
+  };
+  const scheduleHeightReport = () => {
+    if (heightReportTimer != null) {
+      return;
+    }
+    // Offscreen frames can suspend animation callbacks while their content loads.
+    heightReportTimer = globalThis.setTimeout(() => {
+      heightReportTimer = null;
+      reportHeight();
+    }, 0);
+  };
+
+  const resizeObserver = new ResizeObserver(scheduleHeightReport);
+  const observeBodyChildren = () => {
+    for (const element of document.body.children) {
+      resizeObserver.observe(element);
+    }
+  };
+  resizeObserver.observe(document.body);
+  observeBodyChildren();
+  new MutationObserver(() => {
+    observeBodyChildren();
+    scheduleHeightReport();
+  }).observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["style", "class", "height", "width"],
+  });
+  globalThis.addEventListener("resize", scheduleHeightReport);
+  reportHeight();
+})();
+</script>
+<style id="codex-visualization-document-scrollbar">html,body{scrollbar-width:none!important}html::-webkit-scrollbar,body::-webkit-scrollbar{display:none!important}</style>
+
+</body></html>
+````
+
+## design_reference/corrected_ui_v_lock_chart.svg
+
+````text
+<svg viewBox="0 0 500 400" preserveAspectRatio="none"><polyline points="0,330 50,310 100,320 150,270 200,285 250,220 300,235 350,170 400,185 450,110 500,125" fill="none" stroke="#49a7ff" stroke-width="4"></polyline><line x1="0" y1="285" x2="500" y2="285" stroke="#e8ba50" stroke-dasharray="8 7"></line><text x="14" y="278" fill="#e8ba50" font-size="12">CURRENT STOP / V-LOCK</text></svg>
+````
+
+## design_reference/QUADRANT_Q_MOBILE_DEMO.html
+
+````text
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><meta name="theme-color" content="#05070a"><title>QUADRANT</title><style>
+:root{--bg:#05070a;--panel:#0c1118;--line:#24303d;--text:#f4f7fb;--muted:#718093;--blue:#168cff;--red:#ff3f57;--green:#22d47b;--gold:#ffb820}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button{font:inherit;color:inherit}#app{max-width:620px;margin:auto;min-height:100vh;padding:env(safe-area-inset-top) 14px calc(86px + env(safe-area-inset-bottom))}
+header{padding:18px 2px 15px;border-bottom:1px solid var(--line)}.brand{font-weight:950;letter-spacing:.18em;font-size:23px}.brand em{font-style:normal;color:#98a6b8;font-size:11px;margin-left:7px}.tag{font-size:9px;color:#6e7b8d;margin-top:5px;letter-spacing:.12em}.live{float:right;margin-top:-29px;border:1px solid #956f18;color:var(--gold);padding:5px 7px;border-radius:6px;font-size:9px;font-weight:900}
+.view{display:none;padding-top:18px}.view.active{display:block}.kicker{font-size:9px;letter-spacing:.2em;color:#69778a;font-weight:900}h2{font-size:20px;margin:4px 0 13px}.pcard,.srow{width:100%;background:linear-gradient(145deg,var(--panel),#090d12);border:1px solid var(--line);border-radius:12px;text-align:left;margin-bottom:9px}.pcard{padding:13px}.pcard:active,.srow:active{transform:scale(.99);background:#111923}.crow{display:flex;justify-content:space-between;gap:10px}.side{display:inline-block;border:1px solid;border-radius:4px;padding:3px 7px;font-size:10px;font-weight:950;margin-right:7px}.long{color:var(--blue)}.short{color:var(--red)}.nm{font-size:11px;color:#7c8a9c;margin-top:5px}.vlock{display:inline-grid;place-items:center;width:24px;height:24px;margin-left:7px;border:1px solid #a97912;border-radius:50%;color:var(--gold);font-weight:1000;box-shadow:0 0 10px #ffb82044}.money{font-size:18px;font-weight:950;text-align:right}.money small{display:block;font-size:10px}.pos{color:var(--green)}.neg{color:var(--red)}.gold{color:var(--gold)}.stats{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid #1e2833;border-bottom:1px solid #1e2833;margin-top:12px;padding:9px 0;text-align:center}.stats small{display:block;color:#657487;font-size:8px}.stats b{font-size:11px}.hint{display:flex;justify-content:space-between;color:#657487;font-size:9px;padding-top:9px}.hint span{color:#a6b1bd;font-weight:800}.srow{display:grid;grid-template-columns:28px 1fr auto;gap:8px;align-items:center;padding:11px}.rank{color:#566476;font-size:10px;font-weight:900}.srow small{display:block;color:#718093;font-size:9px;margin-top:4px}.ss{text-align:right}.ss b{font-size:17px}.empty{padding:32px;text-align:center;color:#6e7b8d;border:1px dashed var(--line);border-radius:12px}
+nav{position:fixed;z-index:20;bottom:0;left:0;right:0;margin:auto;max-width:620px;background:#080c12ee;backdrop-filter:blur(16px);border-top:1px solid var(--line);padding:7px 7px calc(7px + env(safe-area-inset-bottom));display:grid;grid-template-columns:repeat(4,1fr)}nav button{border:0;background:none;color:#657487;min-height:52px;font-size:9px;font-weight:850}nav button b{display:block;font-size:17px}nav button.on{color:#eaf1f8}
+.sheet{display:none;position:fixed;z-index:30;inset:0;background:#05070af2;overflow:auto;padding:calc(12px + env(safe-area-inset-top)) 14px calc(25px + env(safe-area-inset-bottom))}.sheet.open{display:block}.sheetin{max-width:620px;margin:auto}.sheethead{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding:5px 0 14px}.x{width:44px;height:44px;border-radius:50%;border:1px solid #344151;background:#111821;font-size:20px}.bigpl{font-size:29px;font-weight:1000;margin:18px 0 2px}.sect{margin-top:20px;padding-top:14px;border-top:1px solid var(--line)}.sect h3{font-size:9px;letter-spacing:.18em;color:#69778a}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;font-size:12px}.grid span{color:#718093}.chart{position:relative;height:220px;margin-top:8px;border-left:1px solid #293747;border-bottom:1px solid #293747}.chart svg{position:absolute;inset:0;width:100%;height:100%}.level{position:absolute;left:0;right:0;border-top:1px dashed #4c5c70;font-size:9px;color:#8c9bad;padding:4px}.entry{top:35%}.stop{top:68%;border-color:#c18d1c}.legend{display:flex;justify-content:space-between;margin-top:8px;color:#758397;font-size:9px}.demofoot{margin:22px 2px;color:#536173;font-size:9px}
+</style></head><body><div id="app"><header><div class="brand">QUADRANT <em>Q</em></div><div class="tag">SEE THE EDGE. TRADE THE FUTURE</div><div class="live">DEMO · READ ONLY</div></header>
+<section id="portfolio" class="view active"><div class="kicker">PORTFOLIO</div><h2>POSITIONS</h2><button class="pcard" data-i="0"><div class="crow"><div><span class="side long">LONG</span><b>7203</b><span class="vlock">V</span><div class="nm">トヨタ自動車</div></div><div class="money pos">+¥18,420<small>+5.86%</small></div></div><div class="stats"><div><small>CURRENT</small><b>¥3,142</b></div><div><small>R</small><b class="pos">+1.82R</b></div><div><small>STATUS</small><b class="gold">V-LOCK</b></div></div><div class="hint">3D · MARGIN<span>DETAIL ›</span></div></button><button class="pcard" data-i="1"><div class="crow"><div><span class="side short">SHORT</span><b>6758</b><div class="nm">ソニーグループ</div></div><div class="money pos">+¥12,800<small>+3.66%</small></div></div><div class="stats"><div><small>CURRENT</small><b>¥3,625</b></div><div><small>R</small><b class="pos">+1.41R</b></div><div><small>STATUS</small><b class="">TRAIL</b></div></div><div class="hint">5D · MARGIN<span>DETAIL ›</span></div></button><button class="pcard" data-i="2"><div class="crow"><div><span class="side long">LONG</span><b>8306</b><div class="nm">三菱UFJ FG</div></div><div class="money neg">−¥4,260<small>-1.81%</small></div></div><div class="stats"><div><small>CURRENT</small><b>¥2,311</b></div><div><small>R</small><b class="neg">-0.42R</b></div><div><small>STATUS</small><b class="">HOLD</b></div></div><div class="hint">2D · CASH<span>DETAIL ›</span></div></button><button class="pcard" data-i="3"><div class="crow"><div><span class="side short">SHORT</span><b>8035</b><span class="vlock">V</span><div class="nm">東京エレクトロン</div></div><div class="money pos">+¥25,600<small>+4.32%</small></div></div><div class="stats"><div><small>CURRENT</small><b>¥24,830</b></div><div><small>R</small><b class="pos">+2.14R</b></div><div><small>STATUS</small><b class="gold">V-LOCK</b></div></div><div class="hint">7D · MARGIN<span>DETAIL ›</span></div></button><button class="pcard" data-i="4"><div class="crow"><div><span class="side long">LONG</span><b>9432</b><div class="nm">NTT</div></div><div class="money pos">+¥3,120<small>+2.03%</small></div></div><div class="stats"><div><small>CURRENT</small><b>¥164.2</b></div><div><small>R</small><b class="pos">+0.88R</b></div><div><small>STATUS</small><b class="">TRAIL</b></div></div><div class="hint">4D · CASH<span>DETAIL ›</span></div></button><button class="pcard" data-i="5"><div class="crow"><div><span class="side short">SHORT</span><b>9984</b><div class="nm">ソフトバンクグループ</div></div><div class="money neg">−¥7,480<small>-2.66%</small></div></div><div class="stats"><div><small>CURRENT</small><b>¥9,821</b></div><div><small>R</small><b class="neg">-0.73R</b></div><div><small>STATUS</small><b class="">HOLD</b></div></div><div class="hint">1D · MARGIN<span>DETAIL ›</span></div></button><div class="demofoot">SAMPLE DATA · NO ORDER EXECUTION</div></section>
+<section id="orders" class="view"><div class="kicker">08:50</div><h2>MORNING SCREENING</h2><button class="srow" data-code="7203"><span class="rank">01</span><span><span class="side long">LONG</span><b>7203</b><small>トヨタ自動車</small></span><span class="ss"><b>92</b><small>BREAKOUT</small></span></button><button class="srow" data-code="6758"><span class="rank">02</span><span><span class="side short">SHORT</span><b>6758</b><small>ソニーグループ</small></span><span class="ss"><b>89</b><small>MOMENTUM</small></span></button><button class="srow" data-code="8035"><span class="rank">03</span><span><span class="side short">SHORT</span><b>8035</b><small>東京エレクトロン</small></span><span class="ss"><b>86</b><small>TREND</small></span></button><button class="srow" data-code="8306"><span class="rank">04</span><span><span class="side long">LONG</span><b>8306</b><small>三菱UFJ FG</small></span><span class="ss"><b>82</b><small>PULLBACK</small></span></button><button class="srow" data-code="9432"><span class="rank">05</span><span><span class="side long">LONG</span><b>9432</b><small>NTT</small></span><span class="ss"><b>79</b><small>TREND</small></span></button><button class="srow" data-code="9984"><span class="rank">06</span><span><span class="side short">SHORT</span><b>9984</b><small>ソフトバンクグループ</small></span><span class="ss"><b>76</b><small>REVERSAL</small></span></button></section>
+<section id="history" class="view"><div class="kicker">TRADE LOG</div><h2>HISTORY</h2><div class="empty">READ ONLY DEMO</div></section>
+<section id="analytics" class="view"><div class="kicker">PERFORMANCE</div><h2>ANALYTICS</h2><div class="empty">READ ONLY DEMO</div></section>
+<nav><button class="on" data-v="portfolio"><b>▦</b>PORTFOLIO</button><button data-v="orders"><b>⌁</b>SCREEN</button><button data-v="history"><b>↺</b>HISTORY</button><button data-v="analytics"><b>◇</b>ANALYTICS</button></nav></div>
+<div id="sheet" class="sheet"><div class="sheetin"><div class="sheethead"><div id="shTitle"></div><button class="x" id="close">×</button></div><div id="shBody"></div></div></div><script>
+const P=[{"code": "7203", "name": "トヨタ自動車", "side": "LONG", "current": 3142, "pnl": 18420, "pct": 5.86, "r": 1.82, "status": "V-LOCK", "hold": "3D", "exe": "MARGIN", "entry": 2968, "stop": 3078, "qty": 100}, {"code": "6758", "name": "ソニーグループ", "side": "SHORT", "current": 3625, "pnl": 12800, "pct": 3.66, "r": 1.41, "status": "TRAIL", "hold": "5D", "exe": "MARGIN", "entry": 3761, "stop": 3678, "qty": 100}, {"code": "8306", "name": "三菱UFJ FG", "side": "LONG", "current": 2311, "pnl": -4260, "pct": -1.81, "r": -0.42, "status": "HOLD", "hold": "2D", "exe": "CASH", "entry": 2354, "stop": 2268, "qty": 100}, {"code": "8035", "name": "東京エレクトロン", "side": "SHORT", "current": 24830, "pnl": 25600, "pct": 4.32, "r": 2.14, "status": "V-LOCK", "hold": "7D", "exe": "MARGIN", "entry": 26110, "stop": 25240, "qty": 20}, {"code": "9432", "name": "NTT", "side": "LONG", "current": 164.2, "pnl": 3120, "pct": 2.03, "r": 0.88, "status": "TRAIL", "hold": "4D", "exe": "CASH", "entry": 160.9, "stop": 162.1, "qty": 1000}, {"code": "9984", "name": "ソフトバンクグループ", "side": "SHORT", "current": 9821, "pnl": -7480, "pct": -2.66, "r": -0.73, "status": "HOLD", "hold": "1D", "exe": "MARGIN", "entry": 9555, "stop": 10040, "qty": 30}];const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+$$("nav button").forEach(b=>b.onclick=()=>{$$("nav button").forEach(x=>x.classList.toggle("on",x===b));$$(".view").forEach(v=>v.classList.toggle("active",v.id===b.dataset.v));scrollTo(0,0)});
+const f=n=>Number(n).toLocaleString("ja-JP",{maximumFractionDigits:1});
+function openP(i){let p=P[i],good=p.pnl>=0,side=p.side.toLowerCase();$("#shTitle").innerHTML=`<span class="side ${side}">${p.side}</span><b>${p.code} ${p.name}</b>${p.status==="V-LOCK"?'<span class="vlock">V</span>':""}`;let pts=p.side==="LONG"?"0,178 55,164 110,170 165,135 220,146 275,104 330,115 385,75 440,88 500,52":"0,45 55,60 110,52 165,88 220,77 275,120 330,108 385,150 440,138 500,175";$("#shBody").innerHTML=`<div class="bigpl ${good?"pos":"neg"}">${good?"+":"−"}¥${Math.abs(p.pnl).toLocaleString()}</div><div class="${good?"pos":"neg"}">${p.pct>=0?"+":""}${p.pct.toFixed(2)}% · ${p.r>=0?"+":""}${p.r.toFixed(2)}R</div><div class="sect"><h3>CURRENT PROTECTION</h3><div class="grid"><span>Current Stop</span><b>¥${f(p.stop)}</b><span>Distance</span><b>¥${f(Math.abs(p.current-p.stop))}</b><span>Trailing</span><b>${p.status==="HOLD"?"OFF":"ACTIVE"}</b><span>Profit Lock</span><b class="${p.status==="V-LOCK"?"gold":""}">${p.status==="V-LOCK"?"SECURED":"—"}</b></div></div><div class="sect"><h3>POSITION</h3><div class="grid"><span>Execution</span><b>${p.exe}</b><span>Entry</span><b>¥${f(p.entry)}</b><span>Current</span><b>¥${f(p.current)}</b><span>Quantity</span><b>${p.qty.toLocaleString()}</b></div></div><div class="sect"><h3>CHART</h3><div class="chart"><div class="level entry">ENTRY ¥${f(p.entry)}</div><div class="level stop">CURRENT STOP ¥${f(p.stop)}</div><svg viewBox="0 0 500 220" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${p.side==="LONG"?"#168cff":"#ff3f57"}" stroke-width="4" vector-effect="non-scaling-stroke"/></svg></div><div class="legend"><span>ENTRY</span><b>CURRENT ¥${f(p.current)}</b><span>STOP</span></div></div>`;$("#sheet").classList.add("open");document.body.style.overflow="hidden"}
+$$(".pcard").forEach(b=>b.onclick=()=>openP(+b.dataset.i));$("#close").onclick=()=>{$("#sheet").classList.remove("open");document.body.style.overflow=""};$$(".srow").forEach(b=>b.onclick=()=>{let i=P.findIndex(p=>p.code===b.dataset.code);if(i>=0)openP(i)});
+</script></body></html>
+````
+
+## design_reference/quadrant_showcase.html
+
+````text
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<title>QUADRANT / Q — READ ONLY SHOWCASE</title>
+<style>
+:root{color-scheme:dark;--bg:#0e1219;--panel:#141b26;--line:#293343;--text:#ecf0f6;--muted:#a5afc0;--blue:#80b7ff;--red:#ff8590;--green:#68dba5;--gold:#efcc7c}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Yu Gothic UI",Meiryo,sans-serif}
+button{font:inherit;color:var(--text);background:#202b3c;border:1px solid #3c4c62;border-radius:5px;padding:7px 12px;cursor:pointer}
+button:hover{background:#30405a;border-color:#95a8c3}button:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+header{position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:space-between;gap:15px;padding:19px 32px;background:#101620;border-bottom:1px solid var(--line)}
+.brand{font-size:23px;letter-spacing:3px;font-weight:700}.ro{font-size:11px;letter-spacing:2px;color:var(--muted);margin-left:20px}
+.safety{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;font-weight:700;letter-spacing:1.5px}.demo{color:var(--gold);border:1px solid #685736;padding:5px 10px}.noorder{padding:5px 0;color:var(--muted)}
+main{max-width:1520px;margin:auto;padding:28px 32px 40px}.intro{display:flex;justify-content:space-between;gap:20px;align-items:baseline;margin-bottom:24px}
+h1{font-size:25px;font-weight:500;margin:0 0 5px}p{margin:0;color:var(--muted)}.eyebrow{font-size:11px;letter-spacing:2px;color:var(--muted);margin-bottom:7px}
+section{margin-bottom:28px}.sectionhead{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px}
+h2{font-size:15px;letter-spacing:1.8px;margin:0;font-weight:650}.sub{color:var(--muted);font-size:12px}
+.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+table{width:100%;border-collapse:collapse;white-space:nowrap}th{text-align:left;font-size:10px;color:var(--muted);letter-spacing:1.2px;font-weight:500;background:#18202d;padding:12px 16px}
+td{padding:13px 16px;border-top:1px solid var(--line);font-size:13px}tbody tr:hover{background:#1a2433}.num{text-align:right;font-variant-numeric:tabular-nums}.code{font-weight:700;letter-spacing:.6px}
+.rank{color:var(--muted);font-size:12px}.side{display:inline-block;min-width:62px;text-align:center;border:1px solid;border-radius:4px;padding:3px 8px;font-size:11px;font-weight:700;letter-spacing:1px}
+.long{color:var(--blue);border-color:#598ac2}.short{color:var(--red);border-color:#ba5965}.positive{color:var(--green)}.negative{color:var(--red)}.pnl{font-weight:650}
+.status{font-size:11px;letter-spacing:.7px;font-weight:650}.holding{color:#c2cada}.trailing{color:var(--blue)}.v-lock,.gold{color:var(--gold)}.secured{display:block;font-size:8px;letter-spacing:1px;color:var(--gold);margin-top:2px}
+.actions{display:flex;gap:7px}.actions button{padding:5px 10px;font-size:12px}.score{font-size:17px;font-weight:650}.signal{font-size:10px;letter-spacing:.5px;color:#c2ccdc}
+.legend{display:flex;gap:22px;font-size:11px;color:var(--muted);margin-top:12px;flex-wrap:wrap}footer{border-top:1px solid var(--line);padding-top:16px;font-size:11px;color:var(--muted)}
+.overlay{position:fixed;inset:0;background:#05080ec9;z-index:20}.overlay[hidden]{display:none}.drawer{position:absolute;right:0;top:0;bottom:0;width:min(460px,100%);overflow:auto;background:#151d29;border-left:1px solid #415169;padding:25px 28px}
+.dialogtop{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}.dialogtop .eyebrow{margin:0}.dialogname{font-size:23px;letter-spacing:1px;margin:0 0 4px}.company{font-size:16px;margin:0 0 15px}
+.badges{display:flex;align-items:center;gap:15px;margin-bottom:24px}.metrics{display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:8px;padding:17px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.metrics small{display:block;color:var(--muted);font-size:10px;margin-bottom:5px}.metrics strong{font-size:21px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.block{margin-top:24px}.block h3{font-size:11px;letter-spacing:1.6px;color:var(--muted);margin:0 0 12px}.protection{padding:16px;border:1px solid #52677d;border-radius:6px;background:#1b2939}
+dl{margin:0}dl>div{display:flex;justify-content:space-between;gap:16px;padding:7px 0}dt{color:var(--muted);font-size:12px}dd{margin:0;text-align:right;font-size:13px}dd.emphasis{font-size:20px;font-weight:650;color:var(--blue)}
+.note{font-size:10px;color:var(--muted);margin-top:12px;line-height:1.7}.modal{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(960px,94vw);max-height:92vh;overflow:auto;padding:25px;background:#151d29;border:1px solid #43536c;border-radius:10px}
+.chartlegend{display:flex;gap:22px;margin:18px 0;font-size:11px;flex-wrap:wrap}.chartlegend span:before{content:"";display:inline-block;width:20px;height:2px;background:currentColor;margin:0 7px 3px 0}.price{color:#dce7f8}.entry{color:#929fb7}.stop{color:var(--blue);font-weight:700}
+svg{display:block;width:100%;height:auto;background:#101823;border:1px solid var(--line);border-radius:6px}
+.modal .chartfoot{display:flex;justify-content:space-between;margin-top:12px;gap:15px;font-size:11px;color:var(--muted)}
+@media(max-width:760px){header{padding:14px 16px;align-items:flex-start;flex-direction:column;gap:8px}.brand{font-size:19px}.ro{margin-left:12px}main{padding:22px 16px}.intro{display:block}.intro .sub{margin-top:8px}td,th{padding:12px}.sectionhead{gap:10px}.metrics strong{font-size:18px}.drawer{padding:20px}.modal{padding:16px}}
+</style>
+</head>
+<body>
+<header><div><span class="brand">QUADRANT / Q</span><span class="ro">READ ONLY</span></div><div class="safety"><span class="demo">DEMO / SAMPLE DATA</span><span class="noorder">NO ORDER EXECUTION</span></div></header>
+<main id="main">
+<div class="intro"><div><div class="eyebrow">QUADRANT READ ONLY SHOWCASE</div><h1>候補とポジションを、一目で。</h1><p>すべて架空のサンプルです。実市場価格・実績を示すものではありません。</p></div><span class="sub">OFFLINE / SAMPLE SESSION</span></div>
+<section aria-labelledby="screen-title"><div class="sectionhead"><h2 id="screen-title">MORNING SCREENING</h2><span class="sub">朝の候補 · SAMPLE / 6 CANDIDATES</span></div>
+<div class="tablewrap"><table id="screening"><thead><tr><th>RANK</th><th>CODE</th><th>NAME</th><th>SIDE</th><th class="num">SCORE</th><th>SIGNAL</th><th>操作</th></tr></thead><tbody></tbody></table></div></section>
+<section aria-labelledby="positions-title"><div class="sectionhead"><h2 id="positions-title">POSITIONS</h2><span class="sub">6 SAMPLE POSITIONS · JPY</span></div>
+<div class="tablewrap"><table id="positions"><thead><tr><th>CODE</th><th>NAME</th><th>SIDE</th><th class="num">CURRENT</th><th class="num">P/L</th><th class="num">P/L %</th><th class="num">R</th><th>STATUS</th><th>HOLDING</th><th>操作</th></tr></thead><tbody></tbody></table></div>
+<div class="legend"><span>HOLDING · 保有中</span><span>TRAILING · ストップ追随中</span><span class="gold">V-LOCK · PROFIT SECURED</span><span>損益は価格差による架空の評価損益</span></div></section>
+<footer>DEMO / SAMPLE DATA · NO ORDER EXECUTION<br>CASH / MARGINはサンプル表示です。正式なLONGの執行方式を確定するものではありません。</footer>
+</main>
+<div id="detail-overlay" class="overlay" hidden><aside id="drawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="detail-name" tabindex="-1"></aside></div>
+<div id="chart-overlay" class="overlay" hidden><div id="chart-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="chart-name" tabindex="-1"></div></div>
+<script id="sample-data" type="application/json">[{"code": "7203", "name": "トヨタ自動車", "side": "LONG", "execution": "CASH", "entry": 2800, "current": 2960, "stop": 2890, "quantity": 200, "risk": 100, "status": "V-LOCK", "score": 92, "signal": "TREND CONTINUATION", "holding": "6 sessions", "entry_time": "SAMPLE D−6 / 09:15 JST", "pnl": 32000, "pct": 5.714285714285714, "r": 1.6, "distance": 70, "distance_pct": 2.364864864864865, "strategy": "SAMPLE / TREND CONTINUATION", "trailing": "ACTIVE", "profit_lock": "SECURED", "series": [2800.0, 2807.47, 2809.14, 2809.11, 2825.13, 2834.72, 2821.77, 2826.87, 2855.61, 2853.67, 2832.85, 2853.7, 2883.5, 2864.68, 2850.16, 2885.67, 2902.78, 2874.43, 2876.69, 2914.74, 2914.15, 2890.63, 2908.19, 2935.14, 2924.48, 2915.94, 2936.6, 2947.88, 2941.36, 2945.87, 2956.4, 2960.0]}, {"code": "6758", "name": "ソニーグループ", "side": "SHORT", "execution": "MARGIN", "entry": 3400, "current": 3210, "stop": 3290, "quantity": 100, "risk": 120, "status": "V-LOCK", "score": 89, "signal": "DOWNTREND", "holding": "4 sessions", "entry_time": "SAMPLE D−4 / 09:30 JST", "pnl": 19000, "pct": 5.588235294117648, "r": 1.5833333333333333, "distance": 80, "distance_pct": 2.4922118380062304, "strategy": "SAMPLE / DOWNTREND", "trailing": "ACTIVE", "profit_lock": "SECURED", "series": [3400.0, 3396.64, 3386.32, 3373.96, 3380.86, 3380.05, 3352.19, 3345.98, 3368.15, 3353.5, 3316.19, 3328.89, 3352.33, 3317.42, 3287.68, 3317.96, 3326.17, 3279.83, 3270.22, 3303.56, 3290.53, 3249.98, 3258.73, 3278.75, 3253.63, 3231.07, 3243.54, 3244.75, 3224.6, 3217.69, 3218.0, 3210.0]}, {"code": "8306", "name": "三菱UFJフィナンシャルG", "side": "LONG", "execution": "CASH", "entry": 1800, "current": 1854, "stop": 1785, "quantity": 300, "risk": 60, "status": "TRAILING", "score": 85, "signal": "MOMENTUM", "holding": "3 sessions", "entry_time": "SAMPLE D−3 / 10:00 JST", "pnl": 16200, "pct": 3.0, "r": 0.9, "distance": 69, "distance_pct": 3.7216828478964405, "strategy": "SAMPLE / MOMENTUM", "trailing": "ACTIVE", "profit_lock": "NOT LOCKED", "series": [1800.0, 1803.13, 1802.77, 1801.4, 1809.66, 1814.06, 1804.93, 1806.64, 1822.53, 1820.01, 1806.16, 1817.32, 1833.84, 1821.19, 1811.13, 1831.08, 1839.99, 1821.62, 1821.62, 1843.1, 1841.39, 1825.93, 1835.11, 1849.92, 1842.17, 1835.7, 1846.74, 1852.15, 1846.88, 1848.23, 1853.19, 1854.0]}, {"code": "8035", "name": "東京エレクトロン", "side": "SHORT", "execution": "MARGIN", "entry": 25000, "current": 25400, "stop": 25900, "quantity": 100, "risk": 900, "status": "HOLDING", "score": 81, "signal": "PULLBACK", "holding": "2 sessions", "entry_time": "SAMPLE D−2 / 09:45 JST", "pnl": -40000, "pct": -1.6, "r": -0.4444444444444444, "distance": 500, "distance_pct": 1.968503937007874, "strategy": "SAMPLE / PULLBACK", "trailing": "INACTIVE", "profit_lock": "NOT LOCKED", "series": [25000.0, 25033.67, 25015.16, 24981.34, 25091.95, 25144.73, 24994.66, 25006.98, 25232.13, 25181.07, 24960.14, 25114.24, 25348.91, 25145.97, 24981.8, 25267.78, 25388.23, 25099.53, 25086.3, 25395.28, 25356.39, 25111.17, 25235.64, 25444.65, 25315.16, 25204.79, 25357.18, 25425.16, 25332.89, 25339.93, 25401.13, 25400.0]}, {"code": "9432", "name": "NTT", "side": "LONG", "execution": "CASH", "entry": 160, "current": 156, "stop": 152, "quantity": 1000, "risk": 8, "status": "HOLDING", "score": 78, "signal": "BASE WATCH", "holding": "1 session", "entry_time": "SAMPLE D−1 / 10:15 JST", "pnl": -4000, "pct": -2.5, "r": -0.5, "distance": 4, "distance_pct": 2.564102564102564, "strategy": "SAMPLE / BASE WATCH", "trailing": "INACTIVE", "profit_lock": "NOT LOCKED", "series": [160.0, 160.06, 159.65, 159.1, 159.84, 160.07, 158.49, 158.36, 160.11, 159.42, 157.21, 158.33, 160.18, 158.13, 156.43, 158.72, 159.55, 156.74, 156.38, 158.88, 158.29, 155.87, 156.73, 158.35, 156.95, 155.73, 156.84, 157.2, 156.13, 155.95, 156.25, 156.0]}, {"code": "9984", "name": "ソフトバンクグループ", "side": "SHORT", "execution": "MARGIN", "entry": 9800, "current": 9510, "stop": 9870, "quantity": 100, "risk": 400, "status": "TRAILING", "score": 76, "signal": "WEAKNESS", "holding": "5 sessions", "entry_time": "SAMPLE D−5 / 09:20 JST", "pnl": 29000, "pct": 2.9591836734693877, "r": 0.725, "distance": 360, "distance_pct": 3.7854889589905363, "strategy": "SAMPLE / WEAKNESS", "trailing": "ACTIVE", "profit_lock": "NOT LOCKED", "series": [9800.0, 9799.88, 9776.56, 9746.44, 9780.51, 9788.88, 9707.09, 9697.47, 9782.45, 9744.67, 9631.39, 9684.79, 9774.0, 9668.71, 9580.66, 9692.67, 9731.11, 9587.71, 9566.74, 9688.98, 9656.6, 9532.53, 9572.76, 9650.56, 9577.92, 9513.78, 9566.42, 9581.54, 9525.44, 9513.48, 9525.59, 9510.0]}]</script>
+<script>
+"use strict";
+const samples=JSON.parse(document.getElementById("sample-data").textContent);
+const byCode=Object.fromEntries(samples.map(p=>[p.code,p]));
+const fmt=n=>Number(n).toLocaleString("en-US",{maximumFractionDigits:2});
+const signed=(n,d=0)=>(n<0?"−":"+")+Math.abs(n).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
+const tone=p=>p.pnl<0?"negative":"positive";
+const side=p=>'<span class="side '+p.side.toLowerCase()+'">'+p.side+'</span>';
+const status=p=>'<span class="status '+p.status.toLowerCase()+'">'+p.status+'</span>'+(p.status==="V-LOCK"?'<span class="secured">PROFIT SECURED</span>':'');
+const actions=(p,scope)=>'<div class="actions"><button data-action="detail" data-code="'+p.code+'" aria-label="'+scope+' '+p.code+' 詳細">詳細</button><button data-action="chart" data-code="'+p.code+'" aria-label="'+scope+' '+p.code+' チャート">チャート</button></div>';
+document.querySelector("#screening tbody").innerHTML=samples.map((p,i)=>'<tr><td class="rank">'+String(i+1).padStart(2,"0")+'</td><td class="code">'+p.code+'</td><td>'+p.name+'</td><td>'+side(p)+'</td><td class="num score">'+p.score+'</td><td class="signal">'+p.signal+'</td><td>'+actions(p,"screening")+'</td></tr>').join("");
+document.querySelector("#positions tbody").innerHTML=samples.map(p=>'<tr><td class="code">'+p.code+'</td><td>'+p.name+'</td><td>'+side(p)+'</td><td class="num">'+fmt(p.current)+'</td><td class="num pnl '+tone(p)+'">'+signed(p.pnl)+'</td><td class="num '+tone(p)+'">'+signed(p.pct,2)+'%</td><td class="num '+tone(p)+'">'+signed(p.r,2)+'R</td><td>'+status(p)+'</td><td class="sub">'+p.holding+'</td><td>'+actions(p,"positions")+'</td></tr>').join("");
+const detailOverlay=document.getElementById("detail-overlay"),chartOverlay=document.getElementById("chart-overlay");
+let activeOverlay=null,returnFocus=null;
+function openOverlay(overlay,trigger){returnFocus=trigger;activeOverlay=overlay;overlay.hidden=false;document.getElementById("main").inert=true;document.body.style.overflow="hidden";overlay.querySelector('[data-close]').focus();}
+function closeOverlay(){if(!activeOverlay)return;activeOverlay.hidden=true;activeOverlay=null;document.getElementById("main").inert=false;document.body.style.overflow="";if(returnFocus)returnFocus.focus();}
+const pair=(a,b,c="")=>'<div><dt>'+a+'</dt><dd class="'+c+'">'+b+'</dd></div>';
+function detail(p,trigger){
+ document.getElementById("drawer").innerHTML='<div class="dialogtop"><span class="eyebrow">DEMO / SAMPLE DATA</span><button data-close aria-label="Close detail">Close ×</button></div><h2 class="dialogname" id="detail-name">'+p.code+'</h2><p class="company">'+p.name+'</p><div class="badges">'+side(p)+(p.status==="V-LOCK"?'<div>'+status(p)+'</div>':'')+'</div><div class="metrics '+tone(p)+'"><div><small>P/L · JPY</small><strong>'+signed(p.pnl)+'</strong></div><div><small>P/L %</small><strong>'+signed(p.pct,2)+'%</strong></div><div><small>Current R</small><strong>'+signed(p.r,2)+'R</strong></div></div><div class="block protection"><h3>CURRENT PROTECTION</h3><dl>'+pair("Current Stop","¥"+fmt(p.stop),"emphasis")+pair("Distance","¥"+fmt(p.distance)+" / "+p.distance_pct.toFixed(2)+"%")+pair("Trailing",p.trailing)+pair("Profit Lock",p.profit_lock,p.status==="V-LOCK"?"gold":"")+'</dl></div><div class="block"><h3>POSITION</h3><dl>'+pair("Execution",p.execution+" · SAMPLE")+pair("Entry","¥"+fmt(p.entry))+pair("Current","¥"+fmt(p.current))+pair("Quantity",fmt(p.quantity)+" shares")+'</dl><p class="note">Executionは架空例です。正式なLONGの執行方式を確定しません。</p></div><div class="block"><h3>TRADE</h3><dl>'+pair("Entry Time",p.entry_time)+pair("Holding Period",p.holding)+pair("Strategy",p.strategy)+'</dl></div><p class="note">NO ORDER EXECUTION · 架空のサンプルセッション</p>';
+ openOverlay(detailOverlay,trigger);
+}
+function chart(p,trigger){
+ const low=Math.min(...p.series,p.entry,p.stop),high=Math.max(...p.series,p.entry,p.stop),pad=(high-low)*.22;
+ const min=low-pad,max=high+pad,y=v=>330-(v-min)/(max-min)*285;
+ const points=p.series.map((v,i)=>(35+i*650/31).toFixed(2)+','+y(v).toFixed(2)).join(" ");
+ const grid=Array.from({length:5},(_,i)=>{const v=min+(max-min)*i/4;return '<line x1="35" x2="685" y1="'+y(v)+'" y2="'+y(v)+'" stroke="#253245"/><text x="35" y="'+(y(v)-7)+'" fill="#8290a6" font-size="10">'+fmt(v)+'</text>';}).join("");
+ const line=(value,label,color,dash)=>'<g data-level="'+label+'" data-value="'+value+'"><line x1="35" x2="685" y1="'+y(value)+'" y2="'+y(value)+'" stroke="'+color+'" stroke-width="'+(label==="CURRENT STOP"?2:1)+'" stroke-dasharray="'+dash+'"/><text x="702" y="'+(y(value)-5)+'" fill="'+color+'" font-size="10" font-weight="700">'+label+'</text><text x="702" y="'+(y(value)+13)+'" fill="'+color+'" font-size="14">'+fmt(value)+'</text></g>';
+ const svg='<svg viewBox="0 0 840 380" role="img" aria-label="'+p.code+' sample price chart"><title>'+p.name+' — fictional price series</title>'+grid+'<polyline data-series="PRICE" points="'+points+'" fill="none" stroke="#dce7f8" stroke-width="2.5" stroke-linejoin="round"/>'+line(p.entry,"ENTRY","#929fb7","5 5")+line(p.stop,"CURRENT STOP","#80b7ff","7 4")+'<circle cx="685" cy="'+y(p.current)+'" r="4" fill="#dce7f8"/>'+(p.status==="V-LOCK"?'<text data-v-lock="true" x="666" y="'+(y(p.stop)-10)+'" fill="#efcc7c" font-size="23" font-weight="700">V</text>':'')+'<text x="35" y="362" fill="#a5afc0" font-size="10">SAMPLE SERIES / START</text><text x="606" y="362" fill="#a5afc0" font-size="10">SAMPLE / END</text></svg>';
+ document.getElementById("chart-modal").innerHTML='<div class="dialogtop"><div><div class="eyebrow">DEMO / SAMPLE DATA · NO ORDER EXECUTION</div><h2 id="chart-name">'+p.code+' / '+p.name+'</h2></div><button data-close aria-label="Close chart">Close ×</button></div>'+side(p)+'<div class="chartlegend"><span class="price">PRICE · '+fmt(p.current)+'</span><span class="entry">ENTRY · '+fmt(p.entry)+'</span><span class="stop">CURRENT STOP · '+fmt(p.stop)+'</span></div>'+svg+'<div class="chartfoot"><span>架空の価格系列 · JPY · 時間軸はサンプル観測順</span><span class="gold">'+(p.status==="V-LOCK"?"V · PROFIT SECURED":"")+'</span></div>';
+ openOverlay(chartOverlay,trigger);
+}
+document.addEventListener("click",e=>{const b=e.target.closest("button");if(b?.hasAttribute("data-close"))return closeOverlay();if(b?.dataset.action){const p=byCode[b.dataset.code];if(b.dataset.action==="detail")detail(p,b);else chart(p,b);}});
+[detailOverlay,chartOverlay].forEach(o=>o.addEventListener("click",e=>{if(e.target===o)closeOverlay();}));
+document.addEventListener("keydown",e=>{if(!activeOverlay)return;if(e.key==="Escape"){e.preventDefault();closeOverlay();}else if(e.key==="Tab"){const all=activeOverlay.querySelectorAll("button");if(all.length===1){e.preventDefault();all[0].focus();}}});
+</script>
+</body></html>
+
+````
+
+## design_reference/quadrant_showcase.py
+
+````text
+"""QUADRANT / Q: isolated, fictional, offline read-only showcase.
+Run with Python standard library only. Writes exactly one sibling HTML file.
+"""
+import json
+import math
+from pathlib import Path
+from html.parser import HTMLParser
+
+ROWS = [
+    dict(code="7203", name="トヨタ自動車", side="LONG", execution="CASH", entry=2800, current=2960, stop=2890, quantity=200, risk=100, status="V-LOCK", score=92, signal="TREND CONTINUATION", holding="6 sessions", entry_time="SAMPLE D−6 / 09:15 JST"),
+    dict(code="6758", name="ソニーグループ", side="SHORT", execution="MARGIN", entry=3400, current=3210, stop=3290, quantity=100, risk=120, status="V-LOCK", score=89, signal="DOWNTREND", holding="4 sessions", entry_time="SAMPLE D−4 / 09:30 JST"),
+    dict(code="8306", name="三菱UFJフィナンシャルG", side="LONG", execution="CASH", entry=1800, current=1854, stop=1785, quantity=300, risk=60, status="TRAILING", score=85, signal="MOMENTUM", holding="3 sessions", entry_time="SAMPLE D−3 / 10:00 JST"),
+    dict(code="8035", name="東京エレクトロン", side="SHORT", execution="MARGIN", entry=25000, current=25400, stop=25900, quantity=100, risk=900, status="HOLDING", score=81, signal="PULLBACK", holding="2 sessions", entry_time="SAMPLE D−2 / 09:45 JST"),
+    dict(code="9432", name="NTT", side="LONG", execution="CASH", entry=160, current=156, stop=152, quantity=1000, risk=8, status="HOLDING", score=78, signal="BASE WATCH", holding="1 session", entry_time="SAMPLE D−1 / 10:15 JST"),
+    dict(code="9984", name="ソフトバンクグループ", side="SHORT", execution="MARGIN", entry=9800, current=9510, stop=9870, quantity=100, risk=400, status="TRAILING", score=76, signal="WEAKNESS", holding="5 sessions", entry_time="SAMPLE D−5 / 09:20 JST"),
+]
+for p in ROWS:
+    direction = 1 if p["side"] == "LONG" else -1
+    change = direction * (p["current"] - p["entry"])
+    p.update(pnl=change*p["quantity"], pct=change/p["entry"]*100,
+             r=change/p["risk"], distance=abs(p["current"]-p["stop"]),
+             distance_pct=abs(p["current"]-p["stop"])/p["current"]*100,
+             strategy="SAMPLE / " + p["signal"],
+             trailing="ACTIVE" if p["status"] in ("TRAILING", "V-LOCK") else "INACTIVE",
+             profit_lock="SECURED" if p["status"] == "V-LOCK" else "NOT LOCKED")
+    p["series"] = [round(p["entry"]+(p["current"]-p["entry"])*i/31
+                        + math.sin(i*1.7)*p["risk"]*.23*math.sin(math.pi*i/31), 2)
+                   for i in range(32)]
+
+def audit_data():
+    assert {p["code"] for p in ROWS} == {"7203","6758","8306","8035","9432","9984"}
+    assert {p["status"] for p in ROWS} == {"HOLDING","TRAILING","V-LOCK"}
+    assert {p["side"] for p in ROWS} == {"LONG","SHORT"}
+    assert {p["execution"] for p in ROWS} == {"CASH","MARGIN"}
+    assert any(p["pnl"] > 0 for p in ROWS) and any(p["pnl"] < 0 for p in ROWS)
+    for p in ROWS:
+        d = 1 if p["side"] == "LONG" else -1
+        delta = d*(p["current"]-p["entry"])
+        assert p["pnl"] == delta*p["quantity"]
+        assert math.isclose(p["pct"], delta/p["entry"]*100)
+        assert math.isclose(p["r"], delta/p["risk"])
+        assert p["pnl"]*p["pct"] > 0 and p["pnl"]*p["r"] > 0
+        assert p["distance"] == abs(p["current"]-p["stop"])
+        assert math.isclose(p["distance_pct"], p["distance"]/p["current"]*100)
+        assert d*(p["current"]-p["stop"]) > 0
+        if p["status"] == "V-LOCK":
+            assert p["pnl"] > 0 and d*(p["stop"]-p["entry"]) > 0
+        assert p["series"][0] == p["entry"] and p["series"][-1] == p["current"]
+    print("DATA INVARIANTS: PASS / 6 fictional positions")
+
+TEMPLATE = r'''<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'">
+<title>QUADRANT / Q — READ ONLY SHOWCASE</title>
+<style>
+:root{color-scheme:dark;--bg:#0e1219;--panel:#141b26;--line:#293343;--text:#ecf0f6;--muted:#a5afc0;--blue:#80b7ff;--red:#ff8590;--green:#68dba5;--gold:#efcc7c}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI","Yu Gothic UI",Meiryo,sans-serif}
+button{font:inherit;color:var(--text);background:#202b3c;border:1px solid #3c4c62;border-radius:5px;padding:7px 12px;cursor:pointer}
+button:hover{background:#30405a;border-color:#95a8c3}button:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
+header{position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:space-between;gap:15px;padding:19px 32px;background:#101620;border-bottom:1px solid var(--line)}
+.brand{font-size:23px;letter-spacing:3px;font-weight:700}.ro{font-size:11px;letter-spacing:2px;color:var(--muted);margin-left:20px}
+.safety{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;font-weight:700;letter-spacing:1.5px}.demo{color:var(--gold);border:1px solid #685736;padding:5px 10px}.noorder{padding:5px 0;color:var(--muted)}
+main{max-width:1520px;margin:auto;padding:28px 32px 40px}.intro{display:flex;justify-content:space-between;gap:20px;align-items:baseline;margin-bottom:24px}
+h1{font-size:25px;font-weight:500;margin:0 0 5px}p{margin:0;color:var(--muted)}.eyebrow{font-size:11px;letter-spacing:2px;color:var(--muted);margin-bottom:7px}
+section{margin-bottom:28px}.sectionhead{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px}
+h2{font-size:15px;letter-spacing:1.8px;margin:0;font-weight:650}.sub{color:var(--muted);font-size:12px}
+.tablewrap{overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+table{width:100%;border-collapse:collapse;white-space:nowrap}th{text-align:left;font-size:10px;color:var(--muted);letter-spacing:1.2px;font-weight:500;background:#18202d;padding:12px 16px}
+td{padding:13px 16px;border-top:1px solid var(--line);font-size:13px}tbody tr:hover{background:#1a2433}.num{text-align:right;font-variant-numeric:tabular-nums}.code{font-weight:700;letter-spacing:.6px}
+.rank{color:var(--muted);font-size:12px}.side{display:inline-block;min-width:62px;text-align:center;border:1px solid;border-radius:4px;padding:3px 8px;font-size:11px;font-weight:700;letter-spacing:1px}
+.long{color:var(--blue);border-color:#598ac2}.short{color:var(--red);border-color:#ba5965}.positive{color:var(--green)}.negative{color:var(--red)}.pnl{font-weight:650}
+.status{font-size:11px;letter-spacing:.7px;font-weight:650}.holding{color:#c2cada}.trailing{color:var(--blue)}.v-lock,.gold{color:var(--gold)}.secured{display:block;font-size:8px;letter-spacing:1px;color:var(--gold);margin-top:2px}
+.actions{display:flex;gap:7px}.actions button{padding:5px 10px;font-size:12px}.score{font-size:17px;font-weight:650}.signal{font-size:10px;letter-spacing:.5px;color:#c2ccdc}
+.legend{display:flex;gap:22px;font-size:11px;color:var(--muted);margin-top:12px;flex-wrap:wrap}footer{border-top:1px solid var(--line);padding-top:16px;font-size:11px;color:var(--muted)}
+.overlay{position:fixed;inset:0;background:#05080ec9;z-index:20}.overlay[hidden]{display:none}.drawer{position:absolute;right:0;top:0;bottom:0;width:min(460px,100%);overflow:auto;background:#151d29;border-left:1px solid #415169;padding:25px 28px}
+.dialogtop{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}.dialogtop .eyebrow{margin:0}.dialogname{font-size:23px;letter-spacing:1px;margin:0 0 4px}.company{font-size:16px;margin:0 0 15px}
+.badges{display:flex;align-items:center;gap:15px;margin-bottom:24px}.metrics{display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:8px;padding:17px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.metrics small{display:block;color:var(--muted);font-size:10px;margin-bottom:5px}.metrics strong{font-size:21px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.block{margin-top:24px}.block h3{font-size:11px;letter-spacing:1.6px;color:var(--muted);margin:0 0 12px}.protection{padding:16px;border:1px solid #52677d;border-radius:6px;background:#1b2939}
+dl{margin:0}dl>div{display:flex;justify-content:space-between;gap:16px;padding:7px 0}dt{color:var(--muted);font-size:12px}dd{margin:0;text-align:right;font-size:13px}dd.emphasis{font-size:20px;font-weight:650;color:var(--blue)}
+.note{font-size:10px;color:var(--muted);margin-top:12px;line-height:1.7}.modal{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(960px,94vw);max-height:92vh;overflow:auto;padding:25px;background:#151d29;border:1px solid #43536c;border-radius:10px}
+.chartlegend{display:flex;gap:22px;margin:18px 0;font-size:11px;flex-wrap:wrap}.chartlegend span:before{content:"";display:inline-block;width:20px;height:2px;background:currentColor;margin:0 7px 3px 0}.price{color:#dce7f8}.entry{color:#929fb7}.stop{color:var(--blue);font-weight:700}
+svg{display:block;width:100%;height:auto;background:#101823;border:1px solid var(--line);border-radius:6px}
+.modal .chartfoot{display:flex;justify-content:space-between;margin-top:12px;gap:15px;font-size:11px;color:var(--muted)}
+@media(max-width:760px){header{padding:14px 16px;align-items:flex-start;flex-direction:column;gap:8px}.brand{font-size:19px}.ro{margin-left:12px}main{padding:22px 16px}.intro{display:block}.intro .sub{margin-top:8px}td,th{padding:12px}.sectionhead{gap:10px}.metrics strong{font-size:18px}.drawer{padding:20px}.modal{padding:16px}}
+</style>
+</head>
+<body>
+<header><div><span class="brand">QUADRANT / Q</span><span class="ro">READ ONLY</span></div><div class="safety"><span class="demo">DEMO / SAMPLE DATA</span><span class="noorder">NO ORDER EXECUTION</span></div></header>
+<main id="main">
+<div class="intro"><div><div class="eyebrow">QUADRANT READ ONLY SHOWCASE</div><h1>候補とポジションを、一目で。</h1><p>すべて架空のサンプルです。実市場価格・実績を示すものではありません。</p></div><span class="sub">OFFLINE / SAMPLE SESSION</span></div>
+<section aria-labelledby="screen-title"><div class="sectionhead"><h2 id="screen-title">MORNING SCREENING</h2><span class="sub">朝の候補 · SAMPLE / 6 CANDIDATES</span></div>
+<div class="tablewrap"><table id="screening"><thead><tr><th>RANK</th><th>CODE</th><th>NAME</th><th>SIDE</th><th class="num">SCORE</th><th>SIGNAL</th><th>操作</th></tr></thead><tbody></tbody></table></div></section>
+<section aria-labelledby="positions-title"><div class="sectionhead"><h2 id="positions-title">POSITIONS</h2><span class="sub">6 SAMPLE POSITIONS · JPY</span></div>
+<div class="tablewrap"><table id="positions"><thead><tr><th>CODE</th><th>NAME</th><th>SIDE</th><th class="num">CURRENT</th><th class="num">P/L</th><th class="num">P/L %</th><th class="num">R</th><th>STATUS</th><th>HOLDING</th><th>操作</th></tr></thead><tbody></tbody></table></div>
+<div class="legend"><span>HOLDING · 保有中</span><span>TRAILING · ストップ追随中</span><span class="gold">V-LOCK · PROFIT SECURED</span><span>損益は価格差による架空の評価損益</span></div></section>
+<footer>DEMO / SAMPLE DATA · NO ORDER EXECUTION<br>CASH / MARGINはサンプル表示です。正式なLONGの執行方式を確定するものではありません。</footer>
+</main>
+<div id="detail-overlay" class="overlay" hidden><aside id="drawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="detail-name" tabindex="-1"></aside></div>
+<div id="chart-overlay" class="overlay" hidden><div id="chart-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="chart-name" tabindex="-1"></div></div>
+<script id="sample-data" type="application/json">__DATA__</script>
+<script>
+"use strict";
+const samples=JSON.parse(document.getElementById("sample-data").textContent);
+const byCode=Object.fromEntries(samples.map(p=>[p.code,p]));
+const fmt=n=>Number(n).toLocaleString("en-US",{maximumFractionDigits:2});
+const signed=(n,d=0)=>(n<0?"−":"+")+Math.abs(n).toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
+const tone=p=>p.pnl<0?"negative":"positive";
+const side=p=>'<span class="side '+p.side.toLowerCase()+'">'+p.side+'</span>';
+const status=p=>'<span class="status '+p.status.toLowerCase()+'">'+p.status+'</span>'+(p.status==="V-LOCK"?'<span class="secured">PROFIT SECURED</span>':'');
+const actions=(p,scope)=>'<div class="actions"><button data-action="detail" data-code="'+p.code+'" aria-label="'+scope+' '+p.code+' 詳細">詳細</button><button data-action="chart" data-code="'+p.code+'" aria-label="'+scope+' '+p.code+' チャート">チャート</button></div>';
+document.querySelector("#screening tbody").innerHTML=samples.map((p,i)=>'<tr><td class="rank">'+String(i+1).padStart(2,"0")+'</td><td class="code">'+p.code+'</td><td>'+p.name+'</td><td>'+side(p)+'</td><td class="num score">'+p.score+'</td><td class="signal">'+p.signal+'</td><td>'+actions(p,"screening")+'</td></tr>').join("");
+document.querySelector("#positions tbody").innerHTML=samples.map(p=>'<tr><td class="code">'+p.code+'</td><td>'+p.name+'</td><td>'+side(p)+'</td><td class="num">'+fmt(p.current)+'</td><td class="num pnl '+tone(p)+'">'+signed(p.pnl)+'</td><td class="num '+tone(p)+'">'+signed(p.pct,2)+'%</td><td class="num '+tone(p)+'">'+signed(p.r,2)+'R</td><td>'+status(p)+'</td><td class="sub">'+p.holding+'</td><td>'+actions(p,"positions")+'</td></tr>').join("");
+const detailOverlay=document.getElementById("detail-overlay"),chartOverlay=document.getElementById("chart-overlay");
+let activeOverlay=null,returnFocus=null;
+function openOverlay(overlay,trigger){returnFocus=trigger;activeOverlay=overlay;overlay.hidden=false;document.getElementById("main").inert=true;document.body.style.overflow="hidden";overlay.querySelector('[data-close]').focus();}
+function closeOverlay(){if(!activeOverlay)return;activeOverlay.hidden=true;activeOverlay=null;document.getElementById("main").inert=false;document.body.style.overflow="";if(returnFocus)returnFocus.focus();}
+const pair=(a,b,c="")=>'<div><dt>'+a+'</dt><dd class="'+c+'">'+b+'</dd></div>';
+function detail(p,trigger){
+ document.getElementById("drawer").innerHTML='<div class="dialogtop"><span class="eyebrow">DEMO / SAMPLE DATA</span><button data-close aria-label="Close detail">Close ×</button></div><h2 class="dialogname" id="detail-name">'+p.code+'</h2><p class="company">'+p.name+'</p><div class="badges">'+side(p)+(p.status==="V-LOCK"?'<div>'+status(p)+'</div>':'')+'</div><div class="metrics '+tone(p)+'"><div><small>P/L · JPY</small><strong>'+signed(p.pnl)+'</strong></div><div><small>P/L %</small><strong>'+signed(p.pct,2)+'%</strong></div><div><small>Current R</small><strong>'+signed(p.r,2)+'R</strong></div></div><div class="block protection"><h3>CURRENT PROTECTION</h3><dl>'+pair("Current Stop","¥"+fmt(p.stop),"emphasis")+pair("Distance","¥"+fmt(p.distance)+" / "+p.distance_pct.toFixed(2)+"%")+pair("Trailing",p.trailing)+pair("Profit Lock",p.profit_lock,p.status==="V-LOCK"?"gold":"")+'</dl></div><div class="block"><h3>POSITION</h3><dl>'+pair("Execution",p.execution+" · SAMPLE")+pair("Entry","¥"+fmt(p.entry))+pair("Current","¥"+fmt(p.current))+pair("Quantity",fmt(p.quantity)+" shares")+'</dl><p class="note">Executionは架空例です。正式なLONGの執行方式を確定しません。</p></div><div class="block"><h3>TRADE</h3><dl>'+pair("Entry Time",p.entry_time)+pair("Holding Period",p.holding)+pair("Strategy",p.strategy)+'</dl></div><p class="note">NO ORDER EXECUTION · 架空のサンプルセッション</p>';
+ openOverlay(detailOverlay,trigger);
+}
+function chart(p,trigger){
+ const low=Math.min(...p.series,p.entry,p.stop),high=Math.max(...p.series,p.entry,p.stop),pad=(high-low)*.22;
+ const min=low-pad,max=high+pad,y=v=>330-(v-min)/(max-min)*285;
+ const points=p.series.map((v,i)=>(35+i*650/31).toFixed(2)+','+y(v).toFixed(2)).join(" ");
+ const grid=Array.from({length:5},(_,i)=>{const v=min+(max-min)*i/4;return '<line x1="35" x2="685" y1="'+y(v)+'" y2="'+y(v)+'" stroke="#253245"/><text x="35" y="'+(y(v)-7)+'" fill="#8290a6" font-size="10">'+fmt(v)+'</text>';}).join("");
+ const line=(value,label,color,dash)=>'<g data-level="'+label+'" data-value="'+value+'"><line x1="35" x2="685" y1="'+y(value)+'" y2="'+y(value)+'" stroke="'+color+'" stroke-width="'+(label==="CURRENT STOP"?2:1)+'" stroke-dasharray="'+dash+'"/><text x="702" y="'+(y(value)-5)+'" fill="'+color+'" font-size="10" font-weight="700">'+label+'</text><text x="702" y="'+(y(value)+13)+'" fill="'+color+'" font-size="14">'+fmt(value)+'</text></g>';
+ const svg='<svg viewBox="0 0 840 380" role="img" aria-label="'+p.code+' sample price chart"><title>'+p.name+' — fictional price series</title>'+grid+'<polyline data-series="PRICE" points="'+points+'" fill="none" stroke="#dce7f8" stroke-width="2.5" stroke-linejoin="round"/>'+line(p.entry,"ENTRY","#929fb7","5 5")+line(p.stop,"CURRENT STOP","#80b7ff","7 4")+'<circle cx="685" cy="'+y(p.current)+'" r="4" fill="#dce7f8"/>'+(p.status==="V-LOCK"?'<text data-v-lock="true" x="666" y="'+(y(p.stop)-10)+'" fill="#efcc7c" font-size="23" font-weight="700">V</text>':'')+'<text x="35" y="362" fill="#a5afc0" font-size="10">SAMPLE SERIES / START</text><text x="606" y="362" fill="#a5afc0" font-size="10">SAMPLE / END</text></svg>';
+ document.getElementById("chart-modal").innerHTML='<div class="dialogtop"><div><div class="eyebrow">DEMO / SAMPLE DATA · NO ORDER EXECUTION</div><h2 id="chart-name">'+p.code+' / '+p.name+'</h2></div><button data-close aria-label="Close chart">Close ×</button></div>'+side(p)+'<div class="chartlegend"><span class="price">PRICE · '+fmt(p.current)+'</span><span class="entry">ENTRY · '+fmt(p.entry)+'</span><span class="stop">CURRENT STOP · '+fmt(p.stop)+'</span></div>'+svg+'<div class="chartfoot"><span>架空の価格系列 · JPY · 時間軸はサンプル観測順</span><span class="gold">'+(p.status==="V-LOCK"?"V · PROFIT SECURED":"")+'</span></div>';
+ openOverlay(chartOverlay,trigger);
+}
+document.addEventListener("click",e=>{const b=e.target.closest("button");if(b?.hasAttribute("data-close"))return closeOverlay();if(b?.dataset.action){const p=byCode[b.dataset.code];if(b.dataset.action==="detail")detail(p,b);else chart(p,b);}});
+[detailOverlay,chartOverlay].forEach(o=>o.addEventListener("click",e=>{if(e.target===o)closeOverlay();}));
+document.addEventListener("keydown",e=>{if(!activeOverlay)return;if(e.key==="Escape"){e.preventDefault();closeOverlay();}else if(e.key==="Tab"){const all=activeOverlay.querySelectorAll("button");if(all.length===1){e.preventDefault();all[0].focus();}}});
+</script>
+</body></html>
+'''
+
+class AuditHTML(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.external = []
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        for key in ("src", "href", "action", "srcset"):
+            if key in a:
+                self.external.append((tag, key, a[key]))
+        assert tag not in ("iframe", "form", "object", "embed", "link")
+
+def main():
+    audit_data()
+    html = TEMPLATE.replace("__DATA__", json.dumps(ROWS, ensure_ascii=False))
+    parser = AuditHTML()
+    parser.feed(html)
+    assert not parser.external
+    for forbidden in ("fetch(", "XMLHttpRequest", "WebSocket", "http://", "https://",
+                      "Initial Stop", "TODAY", "LIVE", "onclick="):
+        assert forbidden not in html, forbidden
+    assert "connect-src 'none'" in html
+    target = Path(__file__).resolve().with_name("quadrant_showcase.html")
+    target.write_text(html, encoding="utf-8")
+    assert target.read_text(encoding="utf-8") == html
+    print("HTML / ISOLATION STATIC AUDIT: PASS")
+    print(target)
+
+if __name__ == "__main__":
+    main()
+
 
 ````
 
@@ -519,6 +1221,258 @@ QはREAD ONLY表示です。UI表示のために注文・risk・broker authority
 
 正本: https://github.com/masaA309/PHOENIX
 
+
+## 追加回収資料
+
+[画像・UI一覧](VISUAL_DESIGN_INDEX.md) / [回収した詳細仕様](RECOVERED_UI_SPEC.md)
+
+四神獣＋金色麒麟はdesign_assets/stage6.jpg。修正版UI添付の表示HTMLとV-LOCKチャートSVGをdesign_referenceへ追加。表示HTMLはブラウザーDOMの保存であり元添付とのbyte一致は未証明。独立Vロゴの原画像は未回収。旧DEMO案と修正版を一覧で区別。
+
+````
+
+## recovered_history/browser_1.txt
+
+````text
+過去のメッセージを読み込み中…
+10月1日(木) 6:53
+あなたの発言:
+つくって
+分析エラー
+分析済み
+ChatGPT の発言:
+
+そうです。今回は元のQUADRANT画面を基準に、スマホでアプリのようにタップ操作する版として作り直しました。
+phoenix_q_p7_integrated_margin_…
+
+今回は、
+
+下部ナビ PORTFOLIO / SCREEN / HISTORY / ANALYTICS
+ポジションをタップ → 全画面詳細
+LONG青枠 / SHORT赤枠
+利益緑 / 損失赤
+金V-LOCK
+HOLD / TRAIL / V-LOCK
+Current Stop / Distance / Execution / Entry / Current
+詳細内チャート
+Morning Screeningから銘柄タップ → 同じ詳細画面
+
+まで操作できるようにしています。 
+
+QUADRANT_Q_MOBILE_DEMO.html
+HTML
+あなたの発言:
+いや、動かんけど
+ChatGPT の発言:
+
+その通り。原因ははっきりしています。
+
+私がまた「HTMLファイルをChatGPTのファイルプレビューで開けば、SafariのWebアプリと同じようにJavaScriptが動く」と扱ってしまった。
+見た目は表示できても、そこでタップ用JavaScriptが実行されなければ、PORTFOLIOや詳細画面は動きません。コードを直すだけでは解決しない問題です。
+
+今回必要なのはHTMLファイルではなく、Safariから普通のWebサイトとしてアクセスできるURLです。
+
+つまり完成形は、
+
+iPhone → Safari → https://... → QUADRANT起動 → タブ/銘柄/詳細/チャートをタップ操作
+
+です。
+
+ここから同じHTMLファイルを何度作り直しても意味がないので止めます。次は公開URLを持つWebアプリとして作る経路に切り替えます。Codexは使いません。
+
+あなたの発言:
+そ!をやれって
+ChatGPT の発言:
+
+そうです。公開URLまで作るという意味です。
+
+ただし、いま確認したところ、このチャットにある実行環境には Webサイトを外部公開して https://... を発行するデプロイ機能がありません。ここでまたHTMLを渡して「できました」とするのは同じ失敗なのでやりません。
+
+現在できているのはQモバイル版のWebアプリ本体まで。次に必要なのは外部ホスティングへのデプロイです。あなたのWindows側を操作できる接続手段があれば、私がそこから公開まで実行できます。
+
+この作業に使えるPC接続（Remote Desktop Commander等）が現在使えない状態なので、このチャット単体から公開URLそのものを発行するところだけは実行不能です。ここは誤魔化しません。
+
+あなたの発言:
+PCできるから早く出して
+ChatGPT の発言:
+
+PCでやるなら最短で出せます。
+ただ、公開先を勝手に決めるとまたズレるので一点だけ。
+
+前にブラウザで開いていたやつと同じ方法で公開するなら、そのサービス名だけ教えて。
+例：GitHub Pages / Netlify / Cloudflare Pages など。
+
+サービス名が分からなければ、PC画面のスクショを1枚送ってください。そこから特定して、DEMO-Qを公開URLにする操作だけ出します。
+
+あなたの発言:
+ただしこれは現物買い版
+ChatGPT の発言:
+
+これで分かりました。前に使っていたのは Tailscale の *.ts.net 経路です。
+同じ方式で出せます。公開するなら Tailscale Funnel が該当します。
+Tailscale
++1
+
+そして画像の現物買い版をコピーするのではなく、現在確定しているQ仕様（LONG/SHORT・V-LOCK・TRAILING・詳細・チャート）を、この既存QUADRANTのスマホUIに載せるのが今回の正解です。
+
+PCで PowerShell を開いて、まずこれだけ実行してください。
+
+powershell
+tailscale funnel status
+
+出てきた結果をそのまま貼ってください。
+
+これだけは必要です。スクショのURLが途中省略されているため、既存Funnelのホスト名・転送先を私が推測して上書きするのは危険です。
+
+既存構成を確認したら、次は私が 既存QUADRANTを壊さず、DEMO-Qを別経路で公開するための確定コマンドだけ出します。
+Tailscale公式でもFunnelはWindowsから公開でき、tailscale funnel の出力にそのままiPhoneで開ける https://*.ts.net URLが出ます。
+Tailscale
++1
+
+Tailscale Funnel公式ドキュメント
+
+あなたの発言:
+
+ashtc@masaki-gaming MINGW64 /c/dev/PHOENIX (main)
+$ tailscale funnel status
+https://masaki-gaming.tailb86d1f.ts.net (tailnet only)
+|-- / proxy http://127.0.0.1:5177
+(.venv)
+ashtc@masaki-gaming MINGW64 /c/dev/PHOENIX (main)
+$
+
+ChatGPT の発言:
+
+確認できた。既存Qは 5177 番で稼働中なので、そこは触らない。
+しかも現在の表示は (tailnet only) なので、これは Funnel ではなくTailscale内限定の既存経路です。Tailscaleは --set-path で別パスを追加できるので、既存 / を壊さず DEMO-Q を分離できます。
+Tailscale
++1
+
+ただし今の目的は、まずあなたのiPhoneから確実に開くこと。既存Qと同じTailscale環境を使って、/demo-q だけ追加します。
+
+Git BashでPHOENIXから出て、以下をそのまま実行してください。
+
+Bash
+mkdir -p /c/dev/DEMO-Q
+cd /c/dev/DEMO-Q
+
+次に、さっき私が作ったファイルをPCに保存して C:\dev\DEMO-Q\index.html に置きます。
+
+保存したら名前を index.html にしてください。
+
+その後、Git Bashでこれだけ実行します。
+
+Bash
+cd /c/dev/DEMO-Q
+python -m http.server 5188 --bind 127.0.0.1
+
+このターミナルは閉じずにそのまま。別のGit Bashを開いて、
+
+Bash
+tailscale serve --set-path=/demo-q --bg http://127.0.0.1:5188
+tailscale serve status
+
+公式仕様上、--set-path は既存ルートとは別のURLパスをマウントできます。
+Tailscale
+
+最後にiPhone Safariで、
+
+DEMO-Qを開く
+
+です。
+
+5177の既存QUADRANT / は変更しません。PHOENIXも変更しません。OneDriveも使いません。
+
+なお、今見せてもらった旧版は現物LONG前提なので、今回のデモはその画面構造を土台にしつつ、現在のQ仕様である LONG/SHORT、CASH/MARGIN分離、TRAILING、V-LOCK、Current Stop中心の詳細へ置き換える対象です。
+
+QUADRANT_Q_MOBILE_DEMO.html
+HTML
+あなたの発言:
+私が作ったファイルはない
+ChatGPT の発言:
+
+そう。言い方が間違っていました。あなたが作ったファイルはありません。DEMO-Q本体は私が作ったファイルです。
+
+PC側にまだ存在しないので、まずこれをPCへ保存します。
+
+PCでリンクを開いて保存するとき、保存先を
+
+プレーンテキスト
+C:\dev\DEMO-Q\index.html
+
+にしてください。DEMO-Q フォルダがなければ作成します。
+
+その後だけ、Git Bashで：
+
+Bash
+cd /c/dev/DEMO-Q
+python -m http.server 5188 --bind 127.0.0.1
+
+これでPC上のDEMO-Qが起動します。まだ5177の既存Qには一切触りません。
+
+ここまでできたら、私が次に既存Qを壊さず https://masaki-gaming.tailb86d1f.ts.net/demo-q/ へ載せるところまで続けます。
+
+QUADRANT_Q_MOBILE_DEMO.html
+HTML
+ChatGPT は間違えることがあります。重要な情報は確認してください。
+最新の応答
+
+
+
+
+思考量
+Instant
+````
+
+## RECOVERED_UI_SPEC.md
+
+````text
+# Q UI 完成像・トレール・V表示の回収仕様
+
+出典: [UI設計継続確認](https://chatgpt.com/c/6ab2b778-c380-83ee-b6a5-08cb6868c99e)、2026-10-01、10-03、10-05の会話。既存会話の回収要約であり、新規設計や本番実装の完了証明ではありません。
+
+## 見た目と完成像
+
+Qロゴ、FOUR GUARDIANS、LIVE / READ ONLY、金縁のカード、日本語中心の画面を維持する。10月1日の修正では HOME・おすすめ・保有・チャート・PROGRESS の既存構成を維持し、LONG/SHORT、CASH/MARGIN、トレールと利益保護、詳細、Current Stop、Morning Screeningを組み込む方針。
+
+`design_reference/QUADRANT_Q_MOBILE_DEMO.html` の PORTFOLIO / SCREEN / HISTORY / ANALYTICS は、その後ユーザーが拒否した案。`quadrant_showcase.html` と生成元Pythonも検討履歴であり、最終承認UIと取り違えない。10月1日07:14の修正版index.htmlは別の添付物。
+
+四神獣の最終段階は `design_assets/stage6.jpg`。上の赤い朱雀、左の青龍、右の白虎、下の紫の玄武に加えて、中央に金色の麒麟を配置した4+1。stage4は四神獣とQ、stage5は中央麒麟が暗い移行段階。旧READMEにあるFX/GOLD/US INDICES等の獣と市場の対応を現行authorityとして流用しない。
+
+## 10月5日時点の画面ごとの役割
+
+|画面|必要な情報|
+|---|---|
+|HOME|MARKET BRIEF、Morning Screening、重要な状態|
+|SCREENING|朝と場中の候補、鮮度、出典|
+|POSITIONS|LONG/SHORTとCASH/MARGINを分離、損益、R、HOLDING/TRAILING/EXIT_PENDING、独立したV利益保護バッジ|
+|DETAIL / CHART|Entry、Current、Current Stop、保護状態、source authority|
+|HISTORY|SIDE、ENTRY、EXIT、RESULT、EXIT REASON|
+|SYSTEM|本線・RSS・artifact接続、鮮度、由来。注文操作のauthorityを持たない|
+
+画面役割と10月1日の日本語ナビの関係は会話の時系列として保持し、回収作業で新たな統合デザインを確定しない。ユーザーは10月1日および10月5日にDEMOをやめ、本UIを作ると指定している。
+
+## トレールとV利益保護
+
+TRAILINGという状態と、Vが示す利益保護を混同しない。VはUI側の表示値であり、本線のruntime state、exit trigger、注文命令ではない。
+
+Current Stopで決済された場合に、適用コストを差し引いても利益が残ることが確認できたときに金色のVを表示する。単に含み益がある、トレール中、StopがEntryの利益側へ移っただけでは確定しない。確認不能ならNOT_PROVENまたは非点灯。SHORTのeffective_stopがEntryを下回る場合にもコスト確認が必要。
+
+Vの利益保護表示は実際の決済完了・実現利益と分ける。将来の約定価格やギャップを保証する表示に変えない。原会話の「利益確保」「PROFIT SECURED」「V-LOCK」を、今回の回収で新しい売買ロジックに変換しない。
+
+DETAILは CURRENT PROTECTION（Current Stop、Distance、Trailing、Profit Lock）、POSITION（Execution、Entry、Current、Quantity）、TRADE（Entry日時、Holding Period、Strategy）を整理して見せる。
+
+回収されたPositionView項目: side、execution、entry_price、current_price、quantity、pnl、pnl_pct、current_r、status、current_stop、pending_stop、pending_stop_effective_session、held_sessions、exit_reason、freshness、authority、v_lock_display。v_lock_displayはACTIVE / INACTIVE / NOT_PROVEN。QからPHOENIXへ書き戻さない。
+
+## MARKET BRIEFと継続更新
+
+10月3日の構想は記事全文の羅列ではなく、市場地合い、追い風・材料、リスク、テーマ、イベント、関連スクリーニング候補、出典を整理するもの。公開・更新日時と古い情報の表示を持つ。HOMEの「本日のおすすめ」の上付近に置き、タップで展開する。
+
+本線 → 読取専用Q Data/API層（screening、positions/executions、ニュース収集、正規化・重複除去、Market Brief）→ iPhone / PC UI。スマホを閉じてもサーバー側の収集・保存・更新が継続する構想。ニュースで本線のscoreやsignalを変更しない。
+
+## 現在状態との区別
+
+ユーザーの現在の説明は「Q本線のファイルは通ってる」。過去会話のSHORT未接続等を現在の不具合と再判定しない。今回の作業は成果物の回収・移管であり、本線の再検証や再設計ではない。
+
 ````
 
 ## source/QUADRANT_TERMINAL_v0.4.0/backend/app.py
@@ -538,6 +1492,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from rss_readonly import ExcelRssReadOnlyAdapter, RssReadOnlyUnavailable
 from phoenix_analysis_readonly import PhoenixAnalysisReadOnlyAdapter
+from vermilion_readonly import VermilionReadOnlyAdapter
 
 VERSION = "0.4.0"
 DATA_SOURCE = os.environ.get("QUADRANT_DATA_SOURCE", "rss").strip().lower()
@@ -614,6 +1569,7 @@ BASE_STATE: dict[str, Any] = {
 
 RSS_ADAPTER = ExcelRssReadOnlyAdapter.from_environment()
 PHOENIX_ANALYSIS = PhoenixAnalysisReadOnlyAdapter.from_environment()
+VERMILION = VermilionReadOnlyAdapter.from_environment()
 
 
 def _sma(values: list[float], period: int) -> list[float | None]:
@@ -761,14 +1717,33 @@ def attach_phoenix_analysis(state: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
+def attach_vermilion(state: dict[str, Any]) -> dict[str, Any]:
+    """制度信用LONG (VERMILION) runner state -> Q display. Read only; RSS cash holdings stay as they are."""
+    prices = {p.get("ticker"): p.get("last") for p in state.get("positions", []) if p.get("last")}
+    prices.update({w.get("ticker"): w.get("price") for w in state.get("watchlist", []) if w.get("price")})
+    try:
+        vermilion = VERMILION.snapshot(prices)
+    except Exception as exc:  # display must never break the snapshot
+        vermilion = {"available": False, "mode": "ERROR", "error": str(exc)[:200], "positions": [], "planned": [], "events": []}
+    for row in state.get("positions", []):
+        row.setdefault("execution", "CASH" if row.get("account_type") in ("特定", "一般", "NISA") else "NOT_PROVEN")
+        row.setdefault("side", "LONG" if row.get("execution") == "CASH" else "NOT_PROVEN")
+    if vermilion.get("mode") == "LIVE":
+        state["positions"] = list(state.get("positions", [])) + vermilion["positions"]
+    state["vermilion"] = vermilion
+    state.setdefault("system", {})["vermilion"] = vermilion.get("mode", "NOT_CONNECTED") if vermilion.get("available") else "NOT_CONNECTED"
+    return state
+
+
 async def build_state(step: int = 0) -> dict[str, Any]:
     if DATA_SOURCE == "mock":
-        return build_mock_state(step)
+        return await asyncio.to_thread(attach_vermilion, build_mock_state(step))
     try:
         state = await asyncio.to_thread(RSS_ADAPTER.snapshot)
     except RssReadOnlyUnavailable as exc:
         state = rss_unavailable_state(str(exc))
-    return await asyncio.to_thread(attach_phoenix_analysis, state)
+    state = await asyncio.to_thread(attach_phoenix_analysis, state)
+    return await asyncio.to_thread(attach_vermilion, state)
 
 
 @app.get("/health")
@@ -1254,6 +2229,18 @@ def _locate_table(rows: list[list[Any]], required_headers: Iterable[str]) -> tup
                 table.append(data_row)
             return headers, table
     raise RssReadOnlyUnavailable(f"RSS table header not found: {', '.join(required_headers)}")
+
+
+def _margin_value(values: dict[str, Any], names: tuple[str, ...]) -> float | None:
+    """First present, numeric value among `names`; '－' (margin account not opened) -> None."""
+    for name in names:
+        text = _as_text(values.get(name))
+        if text and text not in ("－", "-", "ー"):
+            try:
+                return float(text.replace(",", ""))
+            except ValueError:
+                return None
+    return None
 
 
 def _row_dict(headers: list[str], row: list[Any]) -> dict[str, Any]:
@@ -1765,6 +2752,9 @@ class ExcelRssReadOnlyAdapter:
             "day_pnl": day_pnl,
             "day_pnl_pct": day_pct,
             "unrealized_pnl": unrealized,
+            # 信用余力は「自動振替含む」列で判定する（信用口座単体は0になり得る: 2026-10-25 実機確認）
+            "margin_power": _margin_value(values, ("自動振替含む_信用新規建余力", "信用口座_信用新規建余力")),
+            "margin_ratio": _margin_value(values, ("自動振替含む_保証金率(新規建)", "信用口座_保証金率(新規建)")),
         }
 
     @staticmethod
@@ -1857,6 +2847,153 @@ def test_readonly_function_allowlist_and_mutation_denylist_are_disjoint():
     assert READ_ONLY_FUNCTIONS
     for allowed in READ_ONLY_FUNCTIONS:
         assert all(token.lower() not in allowed.lower() for token in FORBIDDEN_ORDER_TOKENS)
+
+````
+
+## source/QUADRANT_TERMINAL_v0.4.0/backend/vermilion_readonly.py
+
+````text
+"""VERMILION (制度信用LONG) read-only adapter for Q.
+
+Reads the margin-LONG runner state written by PHOENIX `run_margin_long.py`
+(state/margin_long/live when it exists, otherwise state/margin_long/shadow).
+Display only: never writes, never imports order code, never changes gates.
+Missing/invalid data is shown as NOT_PROVEN, never guessed.
+"""
+from __future__ import annotations
+
+import json
+import os
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+STALE_SECONDS = 36 * 3600  # state is updated at least every trading day (EOD)
+MAX_HOLD_SESSIONS = 40
+
+
+def _read_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _tail_jsonl(path: Path, limit: int = 200) -> list[dict[str, Any]]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()[-limit:]
+    except OSError:
+        return []
+    out = []
+    for line in lines:
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(item, dict):
+            out.append(item)
+    return out
+
+
+def _gate_flags(phoenix_root: Path) -> dict[str, str]:
+    """Static read of the release gates in source (display only)."""
+    gates = {"route": "NOT_PROVEN", "broker_live": "NOT_PROVEN", "armed": "NOT_PROVEN"}
+    try:
+        text = (phoenix_root / "phoenix_core" / "rakuten_rss_long_margin.py").read_text(encoding="utf-8")
+        gates["route"] = "CLOSED" if "LONG_MARGIN_ROUTE_RELEASED = False" in text else "OPEN"
+    except OSError:
+        pass
+    try:
+        text = (phoenix_root / "run_margin_long.py").read_text(encoding="utf-8")
+        gates["broker_live"] = "CLOSED" if "    live = False\n" in text else "OPEN"
+        gates["armed"] = "CLOSED" if "armed=False" in text else "OPEN"
+    except OSError:
+        pass
+    return gates
+
+
+class VermilionReadOnlyAdapter:
+    def __init__(self, phoenix_root: Path) -> None:
+        self.root = phoenix_root.resolve()
+        self.base = self.root / "state" / "margin_long"
+
+    @classmethod
+    def from_environment(cls) -> "VermilionReadOnlyAdapter":
+        default = Path(__file__).resolve().parents[2]
+        return cls(Path(os.environ.get("QUADRANT_PHOENIX_ROOT", str(default))))
+
+    def _source_dir(self) -> tuple[str, Path] | None:
+        for mode in ("live", "shadow"):
+            directory = self.base / mode
+            if (directory / "state.json").exists():
+                return mode.upper(), directory
+        return None
+
+    def snapshot(self, last_prices: dict[str, float] | None = None) -> dict[str, Any]:
+        last_prices = last_prices or {}
+        gates = _gate_flags(self.root)
+        found = self._source_dir()
+        if found is None:
+            return {"available": False, "mode": "NOT_CONNECTED", "gates": gates, "positions": [], "planned": [],
+                    "events": [], "updated_at": "", "stale": True}
+        mode, directory = found
+        state = _read_json(directory / "state.json") or {}
+        meta = _read_json(directory / "meta.json") or {}
+        try:
+            mtime = datetime.fromtimestamp((directory / "state.json").stat().st_mtime)
+        except OSError:
+            mtime = None
+        stale = mtime is None or (datetime.now() - mtime).total_seconds() > STALE_SECONDS
+        positions = []
+        pending = state.get("pending_closes", {}) or {}
+        for ticker, p in (state.get("positions", {}) or {}).items():
+            try:
+                entry = float(p["entry_price"]); r = float(p["initial_r"]); qty = int(p["quantity"])
+                eff = float(p["effective_stop"]); pend = float(p.get("pending_stop", eff)); init = float(p["initial_stop"])
+            except (KeyError, TypeError, ValueError):
+                positions.append({"ticker": ticker, "side": "LONG", "execution": "MARGIN", "status": "NOT_PROVEN",
+                                  "qty": 0, "avg_price": 0, "last": 0, "pnl": 0, "pnl_pct": 0, "source": mode})
+                continue
+            last = last_prices.get(ticker)
+            status = ("EXIT_PENDING" if ticker in pending or p.get("time_exit_due")
+                      else "TRAILING" if eff > init + 1e-9 else "HOLDING")
+            row = {
+                "ticker": ticker, "side": "LONG", "execution": "MARGIN", "status": status, "source": mode,
+                "engine": "VERMILION", "qty": qty, "avg_price": round(entry, 2),
+                "initial_stop": round(init, 2), "current_stop": round(eff, 2),
+                "pending_stop": round(max(pend, eff), 2), "initial_r": round(r, 2),
+                "held_sessions": int(p.get("held_sessions", 0)), "max_hold_sessions": MAX_HOLD_SESSIONS,
+                "time_exit_due": bool(p.get("time_exit_due")), "open_date": str(p.get("open_date", "")),
+                "locked_r": round((eff - entry) / r, 2) if r > 0 else None,
+            }
+            if isinstance(last, (int, float)) and last > 0:
+                row.update(last=float(last), pnl=round((last - entry) * qty), pnl_pct=round((last / entry - 1) * 100, 2),
+                           current_r=round((last - entry) / r, 2) if r > 0 else None, market_value=round(last * qty))
+            else:
+                row.update(last=0, pnl=0, pnl_pct=0, current_r=None, price_status="NOT_PROVEN")
+            # V-LOCK (display): the stop already protects a profit at or above entry
+            row["v_lock_display"] = "ACTIVE" if eff >= entry else "INACTIVE"
+            positions.append(row)
+        planned = [{"ticker": x.get("ticker"), "quantity": x.get("quantity"), "limit_price": x.get("limit_price"),
+                    "signal_date": x.get("signal_date"), "submitted": bool(x.get("client_order_id"))}
+                   for x in state.get("planned", []) or []]
+        events = []
+        for e in _tail_jsonl(directory / "shadow_log.jsonl")[-40:]:
+            level = "ERROR" if e.get("result") in ("ERROR",) else "WARN" if e.get("result") == "RSS_UNAVAILABLE" else "INFO"
+            text = e.get("result") or ""
+            for key in ("paper_open", "paper_close", "entry_skipped_gap"):
+                if key in e:
+                    text = f"{key} {e[key]} {e.get('price', e.get('open', ''))} {e.get('reason', '')}".strip()
+            if e.get("job") == "eod" and "planned" in e:
+                text = f"EOD {e.get('session', '')} planned {len(e['planned'])}"
+            events.append({"time": str(e.get("at", ""))[11:19], "level": level, "message": f"[{e.get('job', '')}] {text}"[:160]})
+        reports = sorted(directory.glob("report_*.html"))
+        return {
+            "available": True, "mode": mode, "gates": gates, "positions": positions, "planned": planned,
+            "events": events, "equity_paper": meta.get("equity"), "last_eod": meta.get("last_eod", ""),
+            "updated_at": mtime.isoformat(timespec="seconds") if mtime else "", "stale": stale,
+            "latest_report": reports[-1].name if reports else "",
+        }
 
 ````
 
@@ -2001,7 +3138,7 @@ self.addEventListener("fetch", (event) => {
 ````text
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { MarketChart } from "./components/MarketChart";
-import type { ChartPayload, ChartTimeframe, PhoenixSnapshot, Position, RankingItem, WatchItem } from "./types";
+import type { ChartPayload, ChartTimeframe, PhoenixSnapshot, Position, RankingItem, VermilionState, WatchItem } from "./types";
 
 const PAGE_HOST = window.location.hostname;
 const IS_TAURI = PAGE_HOST === "tauri.localhost";
@@ -2197,6 +3334,11 @@ function App() {
       ?? state.watchlist[0] ?? state.ranking?.[0] ?? state.intraday_candidates?.[0]
       ?? (state.positions[0] ? { ticker: state.positions[0].ticker, name: state.positions[0].name ?? state.positions[0].ticker, price: state.positions[0].last, change_pct: 0, score: null, signal: "NOT_PROVEN" } : undefined);
   }, [selectedTicker, state.intraday_candidates, state.positions, state.watchlist, state.ranking]);
+  const selectedProtection = useMemo(
+    () => state.positions.find((item) => item.ticker === selectedItem?.ticker && item.engine === "VERMILION")
+      ?? state.vermilion?.positions.find((item) => item.ticker === selectedItem?.ticker),
+    [selectedItem?.ticker, state.positions, state.vermilion],
+  );
   const selectedPosition = useMemo(
     () => state.positions.find((item) => item.ticker === selectedItem?.ticker),
     [selectedItem?.ticker, state.positions],
@@ -2345,7 +3487,9 @@ function App() {
               </section>
               <section className="overview-strip">
                 <MetricCard label="推定資産" value={moneyView(state.account.equity)} sub="ESTIMATED EQUITY" />
-                <MetricCard label="現物買付可能額" value={moneyView(state.account.buying_power)} sub="BUYING POWER" />
+                {state.account.margin_power != null
+                  ? <MetricCard label="信用新規建余力" value={moneyView(state.account.margin_power)} sub={`現物買付可能額 ${moneyView(state.account.buying_power)}`} />
+                  : <MetricCard label="現物買付可能額" value={moneyView(state.account.buying_power)} sub="BUYING POWER · 信用余力 NOT_PROVEN" />}
                 <MetricCard label="保有株本日差" value={moneyView(state.account.day_pnl)} sub={balancesHidden ? "••••" : signed(state.account.day_pnl_pct, "%")} valueClass={tone(state.account.day_pnl)} />
                 <MetricCard label="含み損益" value={moneyView(state.account.unrealized_pnl)} sub="UNREALIZED" valueClass={tone(state.account.unrealized_pnl)} />
               </section>
@@ -2370,13 +3514,20 @@ function App() {
                     return <HoldingCard key={`${position.ticker}-${position.account_type ?? "all"}`} position={position} item={item} masked={balancesHidden} onOpen={() => openSummary(position.ticker)} />;
                   }) : <div className="empty-list">{rssUnavailable ? "RSS接続後に保有銘柄を表示します。" : "条件に一致する保有銘柄はありません。"}</div>}
                 </div>
+                {state.vermilion?.mode === "SHADOW" && state.vermilion.positions.length ? <>
+                  <div className="section-heading vermilion-subheading"><div><small>VERMILION · SHADOW</small><h2>影運用ポジション（紙上・注文なし）</h2></div><div className="heading-actions"><span>{state.vermilion.positions.length}銘柄</span></div></div>
+                  <div className="holdings-list">
+                    {state.vermilion.positions.map((position) => <HoldingCard key={`shadow-${position.ticker}`} position={position} masked={balancesHidden} onOpen={() => openSummary(position.ticker)} />)}
+                  </div>
+                </> : null}
               </div>
 
               <div className="panel section-card side-insight">
                 <div className="section-heading"><div><small>AT A GLANCE</small><h2>今日の状況</h2></div></div>
                 {analysisAvailable && ranked.length ? <div className="glance-score"><span>VERMILION TOP SCORE</span><strong>{ranked[0]?.score ?? "--"}</strong><small>{ranked[0]?.ticker.replace(".T", "")} · {ranked[0]?.name}</small></div> : <div className="analysis-offline-card"><b>PHOENIX ANALYSIS</b><strong>NOT CONNECTED</strong><p>口座情報はREALでも、ランキング/スコアは偽装せず非表示にします。</p></div>}
                 <button type="button" className="primary-link" onClick={() => setTab("ranking")} disabled={!analysisAvailable}>本日の狙い目を見る <span>→</span></button>
-                <div className="read-only-note"><b>SHORT RUNTIME ? {state.meta?.short_runtime ?? "NOT_CONNECTED"}</b><p>このUIには発注・訂正・取消の権限を持たせていません。</p></div>
+                <VermilionCard vermilion={state.vermilion} masked={balancesHidden} />
+                <div className="read-only-note"><b>READ ONLY · SHORT {state.meta?.short_runtime ?? "NOT_CONNECTED"}</b><p>このUIには発注・訂正・取消の権限を持たせていません。</p></div>
               </div>
             </section>
           ) : null}
@@ -2449,6 +3600,15 @@ function App() {
                 <div><span>評価損益</span><strong className={selectedPosition ? tone(selectedPosition.pnl) : ""}>{selectedPosition ? moneyView(selectedPosition.pnl) : "—"}</strong></div>
                 <div><span>シグナル</span><strong>{selectedAnalysis?.trade_decision || selectedAnalysis?.signal || selectedItem.signal}</strong></div>
               </div>
+              {selectedProtection ? <div className="detail-strip panel protection-strip">
+                <div><span>区分</span><strong>{selectedProtection.side} · {selectedProtection.execution}{selectedProtection.source === "SHADOW" ? " · 紙上" : ""}</strong></div>
+                <div><span>現在STOP</span><strong>{selectedProtection.current_stop != null ? `¥${num(selectedProtection.current_stop, 1)}` : "NOT_PROVEN"}</strong></div>
+                <div><span>次回STOP（翌営業日から有効）</span><strong>{selectedProtection.pending_stop != null ? `¥${num(selectedProtection.pending_stop, 1)}` : "—"}</strong></div>
+                <div><span>状態</span><strong className={selectedProtection.status === "EXIT_PENDING" ? "negative" : ""}>{selectedProtection.status ?? "NOT_PROVEN"}</strong></div>
+                <div><span>現在R / 確保R</span><strong>{selectedProtection.current_r != null ? signed(selectedProtection.current_r) : "—"}R / {selectedProtection.locked_r != null ? signed(selectedProtection.locked_r) : "—"}R</strong></div>
+                <div><span>保有</span><strong>{selectedProtection.held_sessions ?? 0} / {selectedProtection.max_hold_sessions ?? 40}日</strong></div>
+                <div><span>V-LOCK</span><strong>{selectedProtection.v_lock_display ?? "NOT_PROVEN"}</strong></div>
+              </div> : null}
             </section>
           ) : null}
 
@@ -2595,6 +3755,32 @@ function App() {
   );
 }
 
+function VermilionCard({ vermilion, masked }: { vermilion?: VermilionState; masked: boolean }) {
+  if (!vermilion || !vermilion.available) {
+    return <div className="vermilion-card offline"><b>VERMILION · 制度信用LONG</b><strong>{vermilion?.mode ?? "NOT_CONNECTED"}</strong><p>運用状態ファイルが見つかりません。推測値は表示しません。</p></div>;
+  }
+  const gates = vermilion.gates ?? { route: "NOT_PROVEN", broker_live: "NOT_PROVEN", armed: "NOT_PROVEN" };
+  const allClosed = [gates.route, gates.broker_live, gates.armed].every((g) => g === "CLOSED");
+  return (
+    <div className={`vermilion-card ${vermilion.mode === "LIVE" ? "live" : "shadow"}`}>
+      <div className="vermilion-head"><b>VERMILION · 制度信用LONG</b><em>{vermilion.mode === "SHADOW" ? "影運用（注文なし）" : vermilion.mode}</em></div>
+      <div className="vermilion-gates" aria-label="発注ゲート">
+        <span className={gates.route === "CLOSED" ? "closed" : "open"}>ROUTE {gates.route}</span>
+        <span className={gates.broker_live === "CLOSED" ? "closed" : "open"}>LIVE {gates.broker_live}</span>
+        <span className={gates.armed === "CLOSED" ? "closed" : "open"}>ARMED {gates.armed}</span>
+      </div>
+      <p className="vermilion-note">{allClosed ? "全ゲート閉: 実注文は送信されません。" : "ゲートが開いています。解禁手順どおりか確認してください。"}</p>
+      <div className="vermilion-stats">
+        <div><span>保有</span><strong>{vermilion.positions.length}</strong></div>
+        <div><span>翌営業日候補</span><strong>{vermilion.planned.length}</strong></div>
+        <div><span>{vermilion.mode === "SHADOW" ? "紙上資産" : "最終EOD"}</span><strong>{vermilion.mode === "SHADOW" ? (masked || vermilion.equity_paper == null ? "••••" : money(vermilion.equity_paper)) : (vermilion.last_eod || "—")}</strong></div>
+      </div>
+      {vermilion.planned.length ? <ul className="vermilion-plan">{vermilion.planned.slice(0, 6).map((p) => <li key={p.ticker}><span>{p.ticker.replace(".T", "")}</span><small>{p.quantity}株 · 上限 {num(p.limit_price, 1)}</small><em>{p.submitted ? "寄付指値" : "予定"}</em></li>)}</ul> : null}
+      <small className={`vermilion-updated ${vermilion.stale ? "stale" : ""}`}>{vermilion.stale ? "STALE · " : ""}更新 {vermilion.updated_at ? vermilion.updated_at.replace("T", " ") : "—"}{vermilion.last_eod ? ` · EOD ${vermilion.last_eod}` : ""}</small>
+    </div>
+  );
+}
+
 function HoldingCard({ position, item, masked, onOpen }: { position: Position; item?: WatchItem; masked: boolean; onOpen: () => void }) {
   return (
     <button type="button" className="holding-card" onClick={onOpen}>
@@ -2602,7 +3788,11 @@ function HoldingCard({ position, item, masked, onOpen }: { position: Position; i
       <div className="holding-quote"><strong>{num(position.last, 1)}</strong><small>{item ? signed(item.change_pct, "%") : "NOT_PROVEN"}</small></div>
       <div className="holding-position"><span>{position.qty}株</span><small>平均 {masked ? "••••" : `¥${num(position.avg_price, 1)}`}</small></div>
       <div className="holding-pnl"><strong className={tone(position.pnl)}>{masked ? "••••••" : money(position.pnl)}</strong><small className={tone(position.pnl_pct)}>{masked ? "••••" : signed(position.pnl_pct, "%")}</small></div>
-      <div className="holding-score"><small>{position.execution ?? "NOT_PROVEN"}</small><strong>{position.side || "NOT_PROVEN"}</strong></div>
+      <div className="holding-score">
+        <small>{position.execution ?? "NOT_PROVEN"}{position.source === "SHADOW" ? " · PAPER" : ""}</small>
+        <strong>{position.side || "NOT_PROVEN"}</strong>
+        {position.engine === "VERMILION" ? <small className={`stop-chip ${position.status === "TRAILING" ? "trailing" : position.status === "EXIT_PENDING" ? "exit" : ""}`}>{position.status} · STOP {position.current_stop != null ? num(position.current_stop, 1) : "—"}</small> : null}
+      </div>
       <span className="open-arrow">›</span>
     </button>
   );
@@ -3642,6 +4832,35 @@ button { touch-action: manipulation; }
   .scenario-arrow { font-size: 17px; }
 }
 
+/* VERMILION (制度信用LONG) — read-only status, uses existing tokens */
+.vermilion-card { border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin: 12px 0; display: grid; gap: 10px; background: var(--panel-2); }
+.vermilion-card.offline strong { color: var(--muted); }
+.vermilion-card.live { border-color: var(--accent); }
+.vermilion-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 8px; }
+.vermilion-head b { white-space: nowrap; }
+.vermilion-head b { letter-spacing: .06em; font-size: 12px; color: var(--accent); }
+.vermilion-head em { font-style: normal; font-size: 12px; color: var(--muted); }
+.vermilion-gates { display: flex; flex-wrap: wrap; gap: 6px; }
+.vermilion-gates span { font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); }
+.vermilion-gates span.closed { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 45%, transparent); }
+.vermilion-gates span.open { color: var(--negative); border-color: var(--negative); font-weight: 700; }
+.vermilion-note { margin: 0; font-size: 12px; color: var(--muted); }
+.vermilion-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.vermilion-stats div { display: grid; gap: 2px; }
+.vermilion-stats span { font-size: 11px; color: var(--muted); }
+.vermilion-plan { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.vermilion-plan li { display: grid; grid-template-columns: 60px 1fr auto; gap: 8px; font-size: 12px; align-items: center; }
+.vermilion-plan small { color: var(--muted); }
+.vermilion-plan em { font-style: normal; color: var(--accent-2); font-size: 11px; }
+.vermilion-updated { font-size: 11px; color: var(--muted-2); }
+.vermilion-updated.stale { color: var(--warning); }
+.vermilion-subheading { margin-top: 18px; }
+.stop-chip { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.stop-chip.trailing { color: var(--positive); }
+.stop-chip.exit { color: var(--negative); }
+.protection-strip { margin-top: 10px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.protection-strip > div { border-bottom: 1px solid var(--line-soft); }
+
 ````
 
 ## source/QUADRANT_TERMINAL_v0.4.0/frontend/src/types.ts
@@ -3664,6 +4883,10 @@ export interface AccountState {
   day_pnl: number;
   day_pnl_pct: number;
   unrealized_pnl: number;
+  /** 信用新規建余力（自動振替含む）。信用口座未開設/未取得は null */
+  margin_power?: number | null;
+  /** 保証金率（新規建） */
+  margin_ratio?: number | null;
 }
 
 export interface WatchItem {
@@ -3768,6 +4991,43 @@ export interface Position {
   account_type?: string;
   pending_qty?: number;
   day_change?: number;
+  /** VERMILION 制度信用LONG（runner state 由来） */
+  engine?: "VERMILION" | string;
+  source?: "LIVE" | "SHADOW" | string;
+  initial_stop?: number;
+  pending_stop?: number;
+  initial_r?: number;
+  locked_r?: number | null;
+  held_sessions?: number;
+  max_hold_sessions?: number;
+  time_exit_due?: boolean;
+  open_date?: string;
+  price_status?: "NOT_PROVEN" | string;
+}
+
+export type GateState = "CLOSED" | "OPEN" | "NOT_PROVEN" | string;
+
+export interface VermilionPlan {
+  ticker: string;
+  quantity: number;
+  limit_price: number;
+  signal_date?: string;
+  submitted?: boolean;
+}
+
+export interface VermilionState {
+  available: boolean;
+  mode: "LIVE" | "SHADOW" | "NOT_CONNECTED" | "ERROR" | string;
+  gates?: { route: GateState; broker_live: GateState; armed: GateState };
+  positions: Position[];
+  planned: VermilionPlan[];
+  events: EventRow[];
+  equity_paper?: number;
+  last_eod?: string;
+  updated_at?: string;
+  stale?: boolean;
+  latest_report?: string;
+  error?: string;
 }
 
 export interface OrderRow {
@@ -3843,6 +5103,7 @@ export interface PhoenixSnapshot {
   executions: ExecutionRow[];
   events: EventRow[];
   meta?: SnapshotMeta;
+  vermilion?: VermilionState;
 }
 
 ````
@@ -4225,5 +5486,48 @@ def test_read_and_boundary_rejects_order_formula():
     try: adapter()._verify_formula_boundary(wb)
     except r.RssReadOnlyUnavailable as e: assert "mutation" in str(e)
     else: raise AssertionError
+
+````
+
+## VISUAL_DESIGN_INDEX.md
+
+````text
+# Q UI ビジュアル成果物
+
+## 核となる4+1：四神獣＋中央の金色麒麟
+
+![四神獣と金色麒麟の最終段階](design_assets/stage6.jpg)
+
+[原画像 stage6.jpg](design_assets/stage6.jpg) — q_assets_exact.zipから回収した既存画像。
+
+## 進行段階6枚
+
+|1|2|3|
+|---|---|---|
+|![1](design_assets/stage1.jpg)|![2](design_assets/stage2.jpg)|![3](design_assets/stage3.jpg)|
+|4：四神獣＋Q|5：中央麒麟の移行段階|6：金色麒麟|
+|![4](design_assets/stage4.jpg)|![5](design_assets/stage5.jpg)|![6](design_assets/stage6.jpg)|
+
+## UI・トレールの完成像
+
+[修正版UIの表示HTML](design_reference/corrected_index_rendered.html) — 10月1日07:14添付をブラウザーで開き、表示DOMを回収。元ダウンロードファイルとのbyte一致は未証明。デザイン参照用のサンプル表示であり、本番稼働証明ではない。
+
+![修正版HOME](design_reference/corrected_ui_home.jpg)
+
+![V-LOCKチャート](design_reference/corrected_ui_v_lock_chart.jpg)
+
+[V-LOCKチャートのSVG](design_reference/corrected_ui_v_lock_chart.svg)
+
+[画面構成、金縁カード、トレール、V、Market Briefの詳細仕様](RECOVERED_UI_SPEC.md)
+
+[既存Q保有画面の会話ビューアー記録](design_reference/existing_q_positions_capture.jpg)
+
+## 回収したHTMLの履歴
+
+- [POSITIONS・詳細・CHART・V-LOCKの検討画面](design_reference/quadrant_showcase.html)
+- [上記の生成元Python](design_reference/quadrant_showcase.py)
+- [モバイル検討案](design_reference/QUADRANT_Q_MOBILE_DEMO.html)
+
+これらの旧DEMO案は最終承認UIではない。モバイル案の英語ナビは拒否され、上の修正版でQの既存日本語UIと金縁カードに戻された。独立したVロゴ原画像は未回収。上のV画像は回収した修正版チャートの表示記録とSVGであり、独立Vロゴの代替原本とは称しない。
 
 ````

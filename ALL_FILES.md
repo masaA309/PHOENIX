@@ -1,6 +1,6 @@
 # 全ファイルリンク
 
-収録: 204 ファイル。最新ソース・旧版・画像・予定仕様を含みます。
+収録: 216 ファイル。最新ソース・旧版・画像・予定仕様を含みます。
 
 - [CLAUDE_START_HERE.md](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/CLAUDE_START_HERE.md)
 - [CURRENT_AND_PLANNED.md](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/CURRENT_AND_PLANNED.md)
@@ -10,6 +10,14 @@
 - [design_assets/stage4.jpg](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/design_assets/stage4.jpg)
 - [design_assets/stage5.jpg](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/design_assets/stage5.jpg)
 - [design_assets/stage6.jpg](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/design_assets/stage6.jpg)
+- [design_reference/corrected_index_rendered.html](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/design_reference/corrected_index_rendered.html)
+- [design_reference/corrected_ui_home.jpg](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/design_reference/corrected_ui_home.jpg)
+- [design_reference/corrected_ui_v_lock_chart.jpg](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/design_reference/corrected_ui_v_lock_chart.jpg)
+- [design_reference/corrected_ui_v_lock_chart.svg](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/design_reference/corrected_ui_v_lock_chart.svg)
+- [design_reference/existing_q_positions_capture.jpg](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/design_reference/existing_q_positions_capture.jpg)
+- [design_reference/QUADRANT_Q_MOBILE_DEMO.html](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/design_reference/QUADRANT_Q_MOBILE_DEMO.html)
+- [design_reference/quadrant_showcase.html](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/design_reference/quadrant_showcase.html)
+- [design_reference/quadrant_showcase.py](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/design_reference/quadrant_showcase.py)
 - [HISTORICAL_UI_CONVERSATION.md](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/HISTORICAL_UI_CONVERSATION.md)
 - [original_distribution/QUADRANT_TERMINAL_v0.4.0/backend/app.py](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/original_distribution/QUADRANT_TERMINAL_v0.4.0/backend/app.py)
 - [original_distribution/QUADRANT_TERMINAL_v0.4.0/backend/requirements.txt](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/original_distribution/QUADRANT_TERMINAL_v0.4.0/backend/requirements.txt)
@@ -51,6 +59,8 @@
 - [previous_handoff_kit/collect_q_handoff.ps1](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/previous_handoff_kit/collect_q_handoff.ps1)
 - [previous_handoff_kit/README.md](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/previous_handoff_kit/README.md)
 - [README.md](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/README.md)
+- [recovered_history/browser_1.txt](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/recovered_history/browser_1.txt)
+- [RECOVERED_UI_SPEC.md](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/RECOVERED_UI_SPEC.md)
 - [source/PHOENIX_TERMINAL_v0.1/backend/app.py](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/source/PHOENIX_TERMINAL_v0.1/backend/app.py)
 - [source/PHOENIX_TERMINAL_v0.1/backend/requirements.txt](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/source/PHOENIX_TERMINAL_v0.1/backend/requirements.txt)
 - [source/PHOENIX_TERMINAL_v0.1/frontend/index.html](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/source/PHOENIX_TERMINAL_v0.1/frontend/index.html)
@@ -143,6 +153,7 @@
 - [source/QUADRANT_TERMINAL_v0.4.0/backend/requirements.txt](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/source/QUADRANT_TERMINAL_v0.4.0/backend/requirements.txt)
 - [source/QUADRANT_TERMINAL_v0.4.0/backend/rss_readonly.py](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/source/QUADRANT_TERMINAL_v0.4.0/backend/rss_readonly.py)
 - [source/QUADRANT_TERMINAL_v0.4.0/backend/tests/test_rss_readonly.py](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/source/QUADRANT_TERMINAL_v0.4.0/backend/tests/test_rss_readonly.py)
+- [source/QUADRANT_TERMINAL_v0.4.0/backend/vermilion_readonly.py](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/source/QUADRANT_TERMINAL_v0.4.0/backend/vermilion_readonly.py)
 - [source/QUADRANT_TERMINAL_v0.4.0/frontend/index.html](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/source/QUADRANT_TERMINAL_v0.4.0/frontend/index.html)
 - [source/QUADRANT_TERMINAL_v0.4.0/frontend/package-lock.json](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/source/QUADRANT_TERMINAL_v0.4.0/frontend/package-lock.json)
 - [source/QUADRANT_TERMINAL_v0.4.0/frontend/package.json](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/source/QUADRANT_TERMINAL_v0.4.0/frontend/package.json)
@@ -206,6 +217,7 @@
 - [source/SHISHIN_TERMINAL_v0.3.0/frontend/tsconfig.node.json](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/source/SHISHIN_TERMINAL_v0.3.0/frontend/tsconfig.node.json)
 - [source/SHISHIN_TERMINAL_v0.3.0/frontend/vite.config.ts](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/source/SHISHIN_TERMINAL_v0.3.0/frontend/vite.config.ts)
 - [source/SHISHIN_TERMINAL_v0.3.0/README.md](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/source/SHISHIN_TERMINAL_v0.3.0/README.md)
+- [VISUAL_DESIGN_INDEX.md](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/VISUAL_DESIGN_INDEX.md)
 - [MANIFEST.json](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/MANIFEST.json)
 - [Q_UI_TEXT_BUNDLE.md](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/Q_UI_TEXT_BUNDLE.md)
 - [Q_UI_CLAUDE_HANDOFF.zip](https://github.com/masaA309/PHOENIX/blob/q-ui-claude-handoff-20261025/Q_UI_CLAUDE_HANDOFF.zip)

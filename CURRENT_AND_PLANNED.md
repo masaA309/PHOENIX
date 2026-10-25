@@ -22,7 +22,7 @@
 - POSITIONS / DETAIL / CHARTに、正式stateに基づくProtection情報を表示する。
 - 現在stop、current R、TRAILING、EXIT_PENDING、pending stop、発効session、保有session、exit reason、freshness、authorityを扱う計画。
 - V-LOCKは費用込み利益保護を示すQ表示。ACTIVE / INACTIVE / NOT_PROVENを区別し、売買ロジックへ書き戻さない。
-- Market BriefとMorning Screeningは別の表示要素として扱う計画。取得記録にMarket Briefの詳細仕様全文は存在しない。
+- Market BriefとMorning Screeningは別の表示要素として扱う計画。追加回収した画面構成・Market Brief・V表示の詳細は `RECOVERED_UI_SPEC.md` を参照。
 - 正式な本線read surfaceからQ adapter → API → UIへ接続し、staging/test stateを本番と推測しない。
 
 ## 実装と計画の差を読む注意点

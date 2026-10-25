@@ -32,3 +32,10 @@ QはREAD ONLY表示です。UI表示のために注文・risk・broker authority
 - テスト・ビルド・実機受入は今回再実行していません。過去のPASS記述は当時の報告です。
 
 正本: https://github.com/masaA309/PHOENIX
+
+
+## 追加回収資料
+
+[画像・UI一覧](VISUAL_DESIGN_INDEX.md) / [回収した詳細仕様](RECOVERED_UI_SPEC.md)
+
+四神獣＋金色麒麟はdesign_assets/stage6.jpg。修正版UI添付の表示HTMLとV-LOCKチャートSVGをdesign_referenceへ追加。表示HTMLはブラウザーDOMの保存であり元添付とのbyte一致は未証明。独立Vロゴの原画像は未回収。旧DEMO案と修正版を一覧で区別。

@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from rss_readonly import ExcelRssReadOnlyAdapter, RssReadOnlyUnavailable
 from phoenix_analysis_readonly import PhoenixAnalysisReadOnlyAdapter
+from vermilion_readonly import VermilionReadOnlyAdapter
 
 VERSION = "0.4.0"
 DATA_SOURCE = os.environ.get("QUADRANT_DATA_SOURCE", "rss").strip().lower()
@@ -88,6 +89,7 @@ BASE_STATE: dict[str, Any] = {
 
 RSS_ADAPTER = ExcelRssReadOnlyAdapter.from_environment()
 PHOENIX_ANALYSIS = PhoenixAnalysisReadOnlyAdapter.from_environment()
+VERMILION = VermilionReadOnlyAdapter.from_environment()
 
 
 def _sma(values: list[float], period: int) -> list[float | None]:
@@ -235,14 +237,33 @@ def attach_phoenix_analysis(state: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
+def attach_vermilion(state: dict[str, Any]) -> dict[str, Any]:
+    """制度信用LONG (VERMILION) runner state -> Q display. Read only; RSS cash holdings stay as they are."""
+    prices = {p.get("ticker"): p.get("last") for p in state.get("positions", []) if p.get("last")}
+    prices.update({w.get("ticker"): w.get("price") for w in state.get("watchlist", []) if w.get("price")})
+    try:
+        vermilion = VERMILION.snapshot(prices)
+    except Exception as exc:  # display must never break the snapshot
+        vermilion = {"available": False, "mode": "ERROR", "error": str(exc)[:200], "positions": [], "planned": [], "events": []}
+    for row in state.get("positions", []):
+        row.setdefault("execution", "CASH" if row.get("account_type") in ("特定", "一般", "NISA") else "NOT_PROVEN")
+        row.setdefault("side", "LONG" if row.get("execution") == "CASH" else "NOT_PROVEN")
+    if vermilion.get("mode") == "LIVE":
+        state["positions"] = list(state.get("positions", [])) + vermilion["positions"]
+    state["vermilion"] = vermilion
+    state.setdefault("system", {})["vermilion"] = vermilion.get("mode", "NOT_CONNECTED") if vermilion.get("available") else "NOT_CONNECTED"
+    return state
+
+
 async def build_state(step: int = 0) -> dict[str, Any]:
     if DATA_SOURCE == "mock":
-        return build_mock_state(step)
+        return await asyncio.to_thread(attach_vermilion, build_mock_state(step))
     try:
         state = await asyncio.to_thread(RSS_ADAPTER.snapshot)
     except RssReadOnlyUnavailable as exc:
         state = rss_unavailable_state(str(exc))
-    return await asyncio.to_thread(attach_phoenix_analysis, state)
+    state = await asyncio.to_thread(attach_phoenix_analysis, state)
+    return await asyncio.to_thread(attach_vermilion, state)
 
 
 @app.get("/health")
