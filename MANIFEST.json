@@ -1,0 +1,1254 @@
+{
+  "date": "2026-10-25",
+  "branch": "q-ui-claude-handoff-20261025",
+  "source_head": "37e2ea9d22d91564198df6a284e792e635c4a5fc",
+  "source_branch": "margin-long-live-prep-20261025",
+  "user_authorization": "Export-only exception and publication to handoff branch explicitly approved in this conversation.",
+  "tests": "Not rerun; artifact collection and hash verification only.",
+  "excluded_files": [
+    "QUADRANT_TERMINAL_v0.4.0/frontend/tsconfig.app.tsbuildinfo",
+    "QUADRANT_TERMINAL_v0.4.0/frontend/tsconfig.node.tsbuildinfo",
+    "QUADRANT_TERMINAL_v0.4.0/rss/QUADRANT_READONLY_RSS.xlsx"
+  ],
+  "excluded_categories": [
+    ".git",
+    ".pytest_cache",
+    ".venv",
+    ".vite",
+    "__pycache__",
+    "dist",
+    "logs",
+    "node_modules",
+    "target",
+    "venv",
+    "live RSS workbook; replaced with empty original template",
+    "unrelated trading/QRC runtime and secrets"
+  ],
+  "history_coverage": "5 turns exposed by read_thread; not entire original conversation",
+  "files": [
+    {
+      "path": "CLAUDE_START_HERE.md",
+      "bytes": 3133,
+      "sha256": "24b16371b95bc2d2d0e350adc76bbe15aa7584edd675bd7aa0be251be7f2a2bf",
+      "origin": "retrieved conversation / transfer documentation"
+    },
+    {
+      "path": "CURRENT_AND_PLANNED.md",
+      "bytes": 3079,
+      "sha256": "c799bd7ec7466ec708c308b222166a8e6157765010892c83cc92a16e465e04b8",
+      "origin": "retrieved conversation / transfer documentation"
+    },
+    {
+      "path": "design_assets/stage1.jpg",
+      "bytes": 25529,
+      "sha256": "c2a372bf6ab11235bf896b6f0bf5610537c43b7206308c258b3f12fcc76e0ed9",
+      "origin": "Downloads/q_assets_exact.zip"
+    },
+    {
+      "path": "design_assets/stage2.jpg",
+      "bytes": 28364,
+      "sha256": "a48b7de20a1ce424a74c2cb9002ceafc5e8e8c3ca01b2dee36d60593a2ef45bc",
+      "origin": "Downloads/q_assets_exact.zip"
+    },
+    {
+      "path": "design_assets/stage3.jpg",
+      "bytes": 30998,
+      "sha256": "afd5e24baf0b026fd2256a2e79bb892a964c1a28ef0a41056bb2f08bcadc51ef",
+      "origin": "Downloads/q_assets_exact.zip"
+    },
+    {
+      "path": "design_assets/stage4.jpg",
+      "bytes": 53535,
+      "sha256": "12c3353a4ebfebd7cdfa8002bbbd740d78d1b0f99ee5f2f2fd658d44f9a75d5d",
+      "origin": "Downloads/q_assets_exact.zip"
+    },
+    {
+      "path": "design_assets/stage5.jpg",
+      "bytes": 29811,
+      "sha256": "95230ada7a76074cee6a1fc25a58bb32a0fa369d6af500fc51f37f49c6eda05a",
+      "origin": "Downloads/q_assets_exact.zip"
+    },
+    {
+      "path": "design_assets/stage6.jpg",
+      "bytes": 33797,
+      "sha256": "213f1de7dd4a492ed28e7fe61c27d5e757fc8f3952b28b9e1842a7a566819432",
+      "origin": "Downloads/q_assets_exact.zip"
+    },
+    {
+      "path": "HISTORICAL_UI_CONVERSATION.md",
+      "bytes": 13618,
+      "sha256": "526d41d150bebcae8ae279a77793b893e4e67ab27d894afa6e81c86024461fbe",
+      "origin": "retrieved conversation / transfer documentation"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/backend/app.py",
+      "bytes": 6895,
+      "sha256": "c6ae8e98b1deb93149a9331381f73337f9ed6d518da495fb33921e61bd8ff323",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/backend/app.py"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/backend/requirements.txt",
+      "bytes": 88,
+      "sha256": "3be0a3dcf70ea676934097f6829f4d44e581f625eb770621637d4766fd352a6b",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/backend/requirements.txt"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/backend/rss_readonly.py",
+      "bytes": 15924,
+      "sha256": "da3b719da58e03f4dcbd17333aad0f016e0d9135cde3e6bd99328b23428fda04",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/backend/rss_readonly.py"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/backend/tests/test_rss_readonly.py",
+      "bytes": 1527,
+      "sha256": "895e53fdd4bd287ef515e4d3b6180f4789213c241e07b1a54aa5278438422362",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/backend/tests/test_rss_readonly.py"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/index.html",
+      "bytes": 814,
+      "sha256": "fc40a838bc162b9f7d4c378d8958805aa2c33d0642fcb7b0f6b7942d1d06a887",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/index.html"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/package.json",
+      "bytes": 607,
+      "sha256": "7aa099e2798febf7fb58f26a8e44d8786239fafe6d6e913915b680ddfcd6484e",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/package.json"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/azure.png",
+      "bytes": 252268,
+      "sha256": "a5ac4b60afdc1ffbe7f622a822cae5655d9637364916470bac1657a1588bca08",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/azure.png"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/black-warrior.png",
+      "bytes": 253550,
+      "sha256": "5841a502c9818d0854d6e65e2b8a00c748eca6cceced5abb9956a4f82f7186ab",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/black-warrior.png"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/vermilion.png",
+      "bytes": 260638,
+      "sha256": "97da3b2e0c6454ff8b06960dc348606f69af770de604f10fe12d9ae572b0508a",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/vermilion.png"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/white-tiger.png",
+      "bytes": 245761,
+      "sha256": "bee8bae00cd5cf1f306536b59321c861fb5e9b67bf3327adb32097a014dd7ff9",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/white-tiger.png"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/public/icon-180.png",
+      "bytes": 51062,
+      "sha256": "6c4c14354e2277abc48abf926ee9ac386b101bbf92ab97906727076740d97d6f",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/public/icon-180.png"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/public/icon-192.png",
+      "bytes": 57060,
+      "sha256": "8dd979d73bf2354ad8f96f98a01116a4e844528b026a7ece278b0b228114c740",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/public/icon-192.png"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/public/icon-512.png",
+      "bytes": 328364,
+      "sha256": "5b843c3b495e945eb4e7a69fa906dde3ec410b6eefa209451300f309cdfe523e",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/public/icon-512.png"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/public/manifest.webmanifest",
+      "bytes": 815,
+      "sha256": "73c7d4d83e442835b6057dcd09455c541dfdf987fbf731e257bce28b95b95dab",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/public/manifest.webmanifest"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/public/quadrant-home-1024.png",
+      "bytes": 1143478,
+      "sha256": "f0c248b99b6079134d2dba6dd4f3087dba2a6723f0f2d88f62533cde9dba4eb7",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/public/quadrant-home-1024.png"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/public/sw.js",
+      "bytes": 963,
+      "sha256": "bc1ac6ec1d98c766eaac77216732a64623f2e912e0c0f70f2baf1d3cdeb14510",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/public/sw.js"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/src/App.tsx",
+      "bytes": 30576,
+      "sha256": "747e94241f78e1da33f5bb9cd303c6d7203e0ca4e6e259764abccbf476130d35",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/src/App.tsx"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/src/components/MarketChart.tsx",
+      "bytes": 4913,
+      "sha256": "a7ce5e2e9b6777e4d69987f404267cd9b4027f9cfce424ec86a8332bd935594a",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/src/components/MarketChart.tsx"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/src/data/mock.ts",
+      "bytes": 2391,
+      "sha256": "b38f73059a485ab3d733da9c99937e9982ce1abff3971004090dbe4bb3d02567",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/src/data/mock.ts"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/src/main.tsx",
+      "bytes": 415,
+      "sha256": "fbf43bba9b099417e439957c319398c3f187abb36be9eced60a7125ea3dac4db",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/src/main.tsx"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/src/styles.css",
+      "bytes": 44169,
+      "sha256": "5e0535900f6fcf0b8e61814bd892ee936a9e8eedbdbdb88f236bc4f4d48338d1",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/src/styles.css"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/src/types.ts",
+      "bytes": 1762,
+      "sha256": "6fdd05a20b25ea7763763f6fbadd3ad6a7cdd3ccb8396925f89609fad4d4f58e",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/src/types.ts"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/src/vite-env.d.ts",
+      "bytes": 167,
+      "sha256": "ab6241d568a84e3ceeb9961d473d89cd552896759646bfd4a3bd3c3dc7daa2ea",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/src/vite-env.d.ts"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/build.rs",
+      "bytes": 39,
+      "sha256": "487059eaf8a947b80f20a9aacac038a5047b2ad69d2401b827376c67d6fe847f",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/build.rs"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/capabilities/default.json",
+      "bytes": 215,
+      "sha256": "c567759603d8b6dbea463f7e6f1d98db002e862702105191de4afa9b60025270",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/capabilities/default.json"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/Cargo.toml",
+      "bytes": 428,
+      "sha256": "d9b04a0b0ff2dbce98886fd0e9243319a5704f1b4622a2324cfd0725b1cf1feb",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/Cargo.toml"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/src/lib.rs",
+      "bytes": 193,
+      "sha256": "1b38a98761fbf6ee2fea09de1e15c160fa041999fa37b38aa98e829513e5a260",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/src/lib.rs"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/src/main.rs",
+      "bytes": 115,
+      "sha256": "681fdbda11a44c859cca4e787b75a2c65d9e92e9fc87e827e219c347e0f95fe7",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/src/main.rs"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/tauri.conf.json",
+      "bytes": 873,
+      "sha256": "365520c9bc9da172788b76345e534efa1a6c85e3cc0cd5ce744f7a21b30abf4b",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/tauri.conf.json"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/tsconfig.app.json",
+      "bytes": 507,
+      "sha256": "a7266d1c85fa6947c70073256d9a73e4c459e97b0b4ef24b5c48dcab498ef4c5",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/tsconfig.app.json"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/tsconfig.json",
+      "bytes": 119,
+      "sha256": "770b4140bbb581e2dfd9ea9946ffc9c75a1d86ba7d2db5f77c83e37cbdf9d808",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/tsconfig.json"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/tsconfig.node.json",
+      "bytes": 231,
+      "sha256": "3dc28b63563e20fab0d9f652f3039ed50e6c46bbdec66631a14822e8309b230d",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/tsconfig.node.json"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/frontend/vite.config.ts",
+      "bytes": 457,
+      "sha256": "8455c201e9ecdadf383bb9808d7776456bed279a487111ed3fc4c7108ecf0d23",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/frontend/vite.config.ts"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/README.md",
+      "bytes": 2267,
+      "sha256": "48e85c86c1742bc470bcd32b79d59dc16d53a39d9238ba1d10a8114bab044505",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/README.md"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/rss/QUADRANT_READONLY_RSS.xlsx",
+      "bytes": 5488,
+      "sha256": "f594efa0a911a0ad4863e02d17ba7346e5c29b6716e053fca77e3a1081379eb1",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/rss/QUADRANT_READONLY_RSS.xlsx"
+    },
+    {
+      "path": "original_distribution/QUADRANT_TERMINAL_v0.4.0/rss/README_RSS.md",
+      "bytes": 1260,
+      "sha256": "40154872795c618aaf481eb963737ac5b8d36223821c695627b02f773880faae",
+      "origin": "original QUADRANT_TERMINAL_v0.4.0.zip: QUADRANT_TERMINAL_v0.4.0/rss/README_RSS.md"
+    },
+    {
+      "path": "previous_handoff_kit/CLAUDE_HANDOFF_PROMPT.md",
+      "bytes": 3117,
+      "sha256": "73cbe037e036fa6af18ac5054f9dc1ced89a5fac3f92dba36779210505a20afc",
+      "origin": "Downloads/Q_CLAUDE_HANDOFF_KIT.zip"
+    },
+    {
+      "path": "previous_handoff_kit/collect_q_handoff.ps1",
+      "bytes": 4421,
+      "sha256": "a5225f287a7c93c40bdd72c455d12c1679a96f05d4b7859515c9792ef4bc304e",
+      "origin": "Downloads/Q_CLAUDE_HANDOFF_KIT.zip"
+    },
+    {
+      "path": "previous_handoff_kit/README.md",
+      "bytes": 1129,
+      "sha256": "d26e78bd4580a031c0cc7efa48698d0d8fe09cb717418b40de73d977a0ade955",
+      "origin": "Downloads/Q_CLAUDE_HANDOFF_KIT.zip"
+    },
+    {
+      "path": "README.md",
+      "bytes": 3133,
+      "sha256": "24b16371b95bc2d2d0e350adc76bbe15aa7584edd675bd7aa0be251be7f2a2bf",
+      "origin": "retrieved conversation / transfer documentation"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/backend/app.py",
+      "bytes": 4306,
+      "sha256": "3d480120bc529e4fc61f28cc9d46e7d5e7c1f72adc6fdfb8ab85cca4b4dce392",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/backend/app.py"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/backend/requirements.txt",
+      "bytes": 45,
+      "sha256": "34833497f8f0f124622fd93a1c252f7a66d3252ce74ed268deabd79141323cfb",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/backend/requirements.txt"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/index.html",
+      "bytes": 353,
+      "sha256": "a90befcedbdd547c98ea0b97054b34ae96123de649640f14bf0c3df2299c1fe2",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/index.html"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/package-lock.json",
+      "bytes": 48637,
+      "sha256": "690d7bb90e546006bc1024282d280a221693974acc2055f24ebd92e4d99c91d9",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/package-lock.json"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/package.json",
+      "bytes": 575,
+      "sha256": "cd45ae06be66768f7287f0bf99893095ad450a058f668c862aa3a25afd73bbf7",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/package.json"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/src/App.tsx",
+      "bytes": 10009,
+      "sha256": "76af05168f4bd1fa66f32c1d839227b872742765ea7f063af712d3f80ff2d15d",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/src/App.tsx"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/src/components/MarketChart.tsx",
+      "bytes": 2748,
+      "sha256": "79a4c035bcbe3911254f578bf6ad24c001547a63bcf4b8093fed8a53e81f7def",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/src/components/MarketChart.tsx"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/src/data/mock.ts",
+      "bytes": 2113,
+      "sha256": "0089f2740d4c087ab2a00d117209740176a182bf969163fda9ad3e5c056c565f",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/src/data/mock.ts"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/src/main.tsx",
+      "bytes": 232,
+      "sha256": "ccbefe7be6c69706a1bb01c4c3f20492eb002435af6ba7e5a6d45f7c6aa3a140",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/src/main.tsx"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/src/styles.css",
+      "bytes": 7382,
+      "sha256": "a52667e0a8376883b9c36a4f49b4d19785d7b89a67b99a8c18734c931bce5776",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/src/styles.css"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/src/types.ts",
+      "bytes": 1370,
+      "sha256": "d210b0008ade35f8a36fbb5487313660e8e633f819ac76148a6379e3e1da58dc",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/src/types.ts"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/src-tauri/build.rs",
+      "bytes": 39,
+      "sha256": "487059eaf8a947b80f20a9aacac038a5047b2ad69d2401b827376c67d6fe847f",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/src-tauri/build.rs"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/src-tauri/capabilities/default.json",
+      "bytes": 215,
+      "sha256": "c567759603d8b6dbea463f7e6f1d98db002e862702105191de4afa9b60025270",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/src-tauri/capabilities/default.json"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/src-tauri/Cargo.toml",
+      "bytes": 418,
+      "sha256": "a094bf7707e787e2eeacd9f8d0bececdab0691f0e326838964f048aafbbad3d7",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/src-tauri/Cargo.toml"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/src-tauri/src/lib.rs",
+      "bytes": 192,
+      "sha256": "ec796e180f15533e36e81a8890a39f8ebbea84fdaef3d28b9ee38f4e2ff4e69c",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/src-tauri/src/lib.rs"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/src-tauri/src/main.rs",
+      "bytes": 115,
+      "sha256": "11690d9e4b0b7404b7d20c0b2ec0eea98eb54afc7caf5d6ffbf11268428c2a29",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/src-tauri/src/main.rs"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/src-tauri/tauri.conf.json",
+      "bytes": 870,
+      "sha256": "14a2a1989439a49735e66f6bf0eb2ef596a994be278520edd448cccba23296ed",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/src-tauri/tauri.conf.json"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/tsconfig.app.json",
+      "bytes": 507,
+      "sha256": "a7266d1c85fa6947c70073256d9a73e4c459e97b0b4ef24b5c48dcab498ef4c5",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/tsconfig.app.json"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/tsconfig.json",
+      "bytes": 119,
+      "sha256": "770b4140bbb581e2dfd9ea9946ffc9c75a1d86ba7d2db5f77c83e37cbdf9d808",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/tsconfig.json"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/tsconfig.node.json",
+      "bytes": 211,
+      "sha256": "4d899360a26430461f39fa0b9297a566eab26e2fc53c28c6eb34d3c5f344d9c6",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/tsconfig.node.json"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/frontend/vite.config.ts",
+      "bytes": 459,
+      "sha256": "a0a9eef78ebe024b0e01f9afa783e050df68cf7b54caebbd02cdec0c12539d12",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/frontend/vite.config.ts"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1/README.md",
+      "bytes": 1636,
+      "sha256": "7ef926f55ec1906b9097a3751fc5610ba1502a0c2c479c9f74a9373ab280bb25",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1/README.md"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/backend/app.py",
+      "bytes": 4306,
+      "sha256": "91f1be162d473a75abb3842d016bff87a0eec066c7eb20d98855d692ca8662b8",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/backend/app.py"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/backend/requirements.txt",
+      "bytes": 45,
+      "sha256": "34833497f8f0f124622fd93a1c252f7a66d3252ce74ed268deabd79141323cfb",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/backend/requirements.txt"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/index.html",
+      "bytes": 353,
+      "sha256": "a90befcedbdd547c98ea0b97054b34ae96123de649640f14bf0c3df2299c1fe2",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/index.html"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/package-lock.json",
+      "bytes": 48637,
+      "sha256": "3f022beac6264008aed685286dc741fd51bfa3677eb87f604119368089104211",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/package-lock.json"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/package.json",
+      "bytes": 575,
+      "sha256": "600092a09da1719f328d1e1ea2bfd540b26048a3fb7acee83a27c2b22318f2cf",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/package.json"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/src/App.tsx",
+      "bytes": 10013,
+      "sha256": "4860b9d4ea8179a51b578712724b9a3519728b26ce9c677fbbd536f06a692c68",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/src/App.tsx"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/src/components/MarketChart.tsx",
+      "bytes": 3892,
+      "sha256": "519cf435675acf85928cd5fea8b0f3abc99e6300c53b4a8d6af25eae3b6c6c41",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/src/components/MarketChart.tsx"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/src/data/mock.ts",
+      "bytes": 2113,
+      "sha256": "0089f2740d4c087ab2a00d117209740176a182bf969163fda9ad3e5c056c565f",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/src/data/mock.ts"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/src/main.tsx",
+      "bytes": 232,
+      "sha256": "ccbefe7be6c69706a1bb01c4c3f20492eb002435af6ba7e5a6d45f7c6aa3a140",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/src/main.tsx"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/src/styles.css",
+      "bytes": 7568,
+      "sha256": "73a4af8381f65a1018f2ad554f4ed852195139064440d3ecc8e42521746ea412",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/src/styles.css"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/src/types.ts",
+      "bytes": 1370,
+      "sha256": "d210b0008ade35f8a36fbb5487313660e8e633f819ac76148a6379e3e1da58dc",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/src/types.ts"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/src-tauri/build.rs",
+      "bytes": 39,
+      "sha256": "487059eaf8a947b80f20a9aacac038a5047b2ad69d2401b827376c67d6fe847f",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/src-tauri/build.rs"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/src-tauri/capabilities/default.json",
+      "bytes": 215,
+      "sha256": "c567759603d8b6dbea463f7e6f1d98db002e862702105191de4afa9b60025270",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/src-tauri/capabilities/default.json"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/src-tauri/Cargo.toml",
+      "bytes": 418,
+      "sha256": "1c87319b8eeeb3cf2b3bc56285463988d2fb90ce443727823d9ad629574af0aa",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/src-tauri/Cargo.toml"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/src-tauri/src/lib.rs",
+      "bytes": 192,
+      "sha256": "ec796e180f15533e36e81a8890a39f8ebbea84fdaef3d28b9ee38f4e2ff4e69c",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/src-tauri/src/lib.rs"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/src-tauri/src/main.rs",
+      "bytes": 115,
+      "sha256": "11690d9e4b0b7404b7d20c0b2ec0eea98eb54afc7caf5d6ffbf11268428c2a29",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/src-tauri/src/main.rs"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/src-tauri/tauri.conf.json",
+      "bytes": 870,
+      "sha256": "812cd293e3b642c18d1e10a04f02773f8e3d8cec0bcae0902a098d25ce192121",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/src-tauri/tauri.conf.json"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/tsconfig.app.json",
+      "bytes": 507,
+      "sha256": "a7266d1c85fa6947c70073256d9a73e4c459e97b0b4ef24b5c48dcab498ef4c5",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/tsconfig.app.json"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/tsconfig.json",
+      "bytes": 119,
+      "sha256": "770b4140bbb581e2dfd9ea9946ffc9c75a1d86ba7d2db5f77c83e37cbdf9d808",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/tsconfig.json"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/tsconfig.node.json",
+      "bytes": 211,
+      "sha256": "4d899360a26430461f39fa0b9297a566eab26e2fc53c28c6eb34d3c5f344d9c6",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/tsconfig.node.json"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/frontend/vite.config.ts",
+      "bytes": 459,
+      "sha256": "a0a9eef78ebe024b0e01f9afa783e050df68cf7b54caebbd02cdec0c12539d12",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/frontend/vite.config.ts"
+    },
+    {
+      "path": "source/PHOENIX_TERMINAL_v0.1.1/README.md",
+      "bytes": 2175,
+      "sha256": "4558ac069bb40b7fdf669f354db1bd0e62d0458e942215ee000d8c7821872fb5",
+      "origin": "canonical workspace: PHOENIX_TERMINAL_v0.1.1/README.md"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/backend/app.py",
+      "bytes": 4424,
+      "sha256": "b18bb78d5106f4f99e9cbe2a76e86220bfbd65c5322f4700669bf2f01a6982b0",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/backend/app.py"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/backend/requirements.txt",
+      "bytes": 45,
+      "sha256": "34833497f8f0f124622fd93a1c252f7a66d3252ce74ed268deabd79141323cfb",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/backend/requirements.txt"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/index.html",
+      "bytes": 814,
+      "sha256": "fc40a838bc162b9f7d4c378d8958805aa2c33d0642fcb7b0f6b7942d1d06a887",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/index.html"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/package-lock.json",
+      "bytes": 49365,
+      "sha256": "6b7dd1b4401bd4b29d2e9f08fe3dabf273f09944da4f1d7dd569f7ac9c262341",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/package-lock.json"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/package.json",
+      "bytes": 607,
+      "sha256": "8713d14429d108facd469d9c635a301814f7ca57c1267ff5925f96b1f7a3ae25",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/package.json"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/public/icon-180.png",
+      "bytes": 1487,
+      "sha256": "d5866bf1e12c3980116623bd3fa3a60d3c73f756731adbae0af5c47afaf354e8",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/public/icon-180.png"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/public/icon-192.png",
+      "bytes": 1660,
+      "sha256": "6cbf8a36d554c4a509e75584cb5f4ead275d3535cf810ec7fc43fd10749648cf",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/public/icon-192.png"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/public/icon-512.png",
+      "bytes": 4982,
+      "sha256": "9d9de5d7d68c931a84b75485cf63cbc649673eb93ae9f08cc7a74f60725f0d28",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/public/icon-512.png"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/public/manifest.webmanifest",
+      "bytes": 815,
+      "sha256": "73c7d4d83e442835b6057dcd09455c541dfdf987fbf731e257bce28b95b95dab",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/public/manifest.webmanifest"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/public/sw.js",
+      "bytes": 963,
+      "sha256": "95bbb99bf74cc75676ee5a033a676a6b4e3f828064e07a7c7c430dc8a1496aba",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/public/sw.js"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/src/App.tsx",
+      "bytes": 24610,
+      "sha256": "5e76106944aa93fc8b4e8d47022e1428e5caa688e00928d2bd85c6d2ed7afbe9",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/src/App.tsx"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/src/components/MarketChart.tsx",
+      "bytes": 4913,
+      "sha256": "a7ce5e2e9b6777e4d69987f404267cd9b4027f9cfce424ec86a8332bd935594a",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/src/components/MarketChart.tsx"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/src/data/mock.ts",
+      "bytes": 2134,
+      "sha256": "76bf7fd437490172b97271c75f365fa3d8be6511a8c5b2c642c871eef0083b8d",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/src/data/mock.ts"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/src/main.tsx",
+      "bytes": 415,
+      "sha256": "fbf43bba9b099417e439957c319398c3f187abb36be9eced60a7125ea3dac4db",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/src/main.tsx"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/src/styles.css",
+      "bytes": 37806,
+      "sha256": "fd0f19ac8ed62f247c39293fec12053c759372e2592c1f0dfe1cdcec2ca4f5f3",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/src/styles.css"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/src/types.ts",
+      "bytes": 1370,
+      "sha256": "d210b0008ade35f8a36fbb5487313660e8e633f819ac76148a6379e3e1da58dc",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/src/types.ts"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/src/vite-env.d.ts",
+      "bytes": 167,
+      "sha256": "ab6241d568a84e3ceeb9961d473d89cd552896759646bfd4a3bd3c3dc7daa2ea",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/src/vite-env.d.ts"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/src-tauri/build.rs",
+      "bytes": 39,
+      "sha256": "487059eaf8a947b80f20a9aacac038a5047b2ad69d2401b827376c67d6fe847f",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/src-tauri/build.rs"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/src-tauri/capabilities/default.json",
+      "bytes": 215,
+      "sha256": "c567759603d8b6dbea463f7e6f1d98db002e862702105191de4afa9b60025270",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/src-tauri/capabilities/default.json"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/src-tauri/Cargo.toml",
+      "bytes": 428,
+      "sha256": "c3299500ae18ca6fc927ab629768c68a85df3edc468fb63742d27133ed4106e7",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/src-tauri/Cargo.toml"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/src-tauri/src/lib.rs",
+      "bytes": 193,
+      "sha256": "1b38a98761fbf6ee2fea09de1e15c160fa041999fa37b38aa98e829513e5a260",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/src-tauri/src/lib.rs"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/src-tauri/src/main.rs",
+      "bytes": 115,
+      "sha256": "681fdbda11a44c859cca4e787b75a2c65d9e92e9fc87e827e219c347e0f95fe7",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/src-tauri/src/main.rs"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/src-tauri/tauri.conf.json",
+      "bytes": 873,
+      "sha256": "3109bb347fd5060ba634cd467b31f5cf10cc3c0efcaee641ae26e5bffe4606f6",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/src-tauri/tauri.conf.json"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/tsconfig.app.json",
+      "bytes": 507,
+      "sha256": "a7266d1c85fa6947c70073256d9a73e4c459e97b0b4ef24b5c48dcab498ef4c5",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/tsconfig.app.json"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/tsconfig.json",
+      "bytes": 119,
+      "sha256": "770b4140bbb581e2dfd9ea9946ffc9c75a1d86ba7d2db5f77c83e37cbdf9d808",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/tsconfig.json"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/tsconfig.node.json",
+      "bytes": 231,
+      "sha256": "3dc28b63563e20fab0d9f652f3039ed50e6c46bbdec66631a14822e8309b230d",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/tsconfig.node.json"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/frontend/vite.config.ts",
+      "bytes": 457,
+      "sha256": "8455c201e9ecdadf383bb9808d7776456bed279a487111ed3fc4c7108ecf0d23",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/frontend/vite.config.ts"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.3.2/README.md",
+      "bytes": 2797,
+      "sha256": "497bdbbe946c503595b2de278ce6915c6a19948a35fc2fbc5ae9072ceccab858",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.3.2/README.md"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/app.py",
+      "bytes": 7558,
+      "sha256": "e141f08d08b47430b115ac56cbee21c156be09052b7c9fb6c29ef15b0144c922",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/app.py"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/App.tsx",
+      "bytes": 30932,
+      "sha256": "350ac9549ef9f85a8d8530305b93dbc7c472cf69f589c43b7783f3bdb5dd87b7",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/App.tsx"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/App_before_provenance.tsx",
+      "bytes": 36555,
+      "sha256": "feece78100f14ab685148fa89319eb2e006329580671a3bd01be1b9fa4abdc15",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/App_before_provenance.tsx"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/MarketChart.tsx",
+      "bytes": 4913,
+      "sha256": "a7ce5e2e9b6777e4d69987f404267cd9b4027f9cfce424ec86a8332bd935594a",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/MarketChart.tsx"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/phoenix_analysis_readonly.py",
+      "bytes": 3640,
+      "sha256": "5fefda800e45bd27b051b6a898031e3e1215a5055d5f873e2805326bbf31eecb",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/phoenix_analysis_readonly.py"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/phoenix_analysis_readonly_before_provenance.py",
+      "bytes": 7097,
+      "sha256": "7a183987b8223beb91f8ce1171aa25295d9ff2f96fae8feea8ae7b6884b382ad",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/phoenix_analysis_readonly_before_provenance.py"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/rss_readonly.py",
+      "bytes": 16256,
+      "sha256": "7dd20516a7b54f575f0b8338c214fa961f4f27c42448c1301ece8d234ab3de7d",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/rss_readonly.py"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/styles.css",
+      "bytes": 44169,
+      "sha256": "5e0535900f6fcf0b8e61814bd892ee936a9e8eedbdbdb88f236bc4f4d48338d1",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/styles.css"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/styles_before_provenance.css",
+      "bytes": 44169,
+      "sha256": "5e0535900f6fcf0b8e61814bd892ee936a9e8eedbdbdb88f236bc4f4d48338d1",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/styles_before_provenance.css"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/types.ts",
+      "bytes": 2249,
+      "sha256": "3eab4e0df24b6e8d59756e61c6aa460745d92f3c91368494a8b39d206b46d2cb",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_chart_backup/types.ts"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_q_morning_intraday_provenance_backup/app.py",
+      "bytes": 11051,
+      "sha256": "334f5dc683040b453076057eea46154cf642c331805eae168a06b6946e483615",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_q_morning_intraday_provenance_backup/app.py"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_q_morning_intraday_provenance_backup/App.tsx",
+      "bytes": 36555,
+      "sha256": "feece78100f14ab685148fa89319eb2e006329580671a3bd01be1b9fa4abdc15",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_q_morning_intraday_provenance_backup/App.tsx"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_q_morning_intraday_provenance_backup/phoenix_analysis_readonly.py",
+      "bytes": 7663,
+      "sha256": "773a6bd0cb6aa273155cdd66da842f6c92309683e3f2803cbb2aef0827e901bb",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_q_morning_intraday_provenance_backup/phoenix_analysis_readonly.py"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_q_morning_intraday_provenance_backup/styles.css",
+      "bytes": 44169,
+      "sha256": "5e0535900f6fcf0b8e61814bd892ee936a9e8eedbdbdb88f236bc4f4d48338d1",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_q_morning_intraday_provenance_backup/styles.css"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/_pre_q_morning_intraday_provenance_backup/types.ts",
+      "bytes": 3634,
+      "sha256": "39857f50549039223a5734338fe18e53dbd5489af2a639482a8f6df51e9e4e0e",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/_pre_q_morning_intraday_provenance_backup/types.ts"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/backend/app.py",
+      "bytes": 11499,
+      "sha256": "daaa68ef50e3f7d289e556e82c1de9a33452b18a40f2fd672f095f3b5f811394",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/backend/app.py"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/backend/phoenix_analysis_readonly.py",
+      "bytes": 12806,
+      "sha256": "0c7cde4b0772cd9f648229c62c86cb2c2994324c12b68f73d4f2e5b926944ab1",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/backend/phoenix_analysis_readonly.py"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/backend/requirements.txt",
+      "bytes": 133,
+      "sha256": "f3f9201135c0f62c33d8a700da390610ee15dbe63615d1ce2b0db867900538c8",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/backend/requirements.txt"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/backend/rss_readonly.py",
+      "bytes": 25978,
+      "sha256": "a6b2e9847d0153719f748aceca06f147c9c9b683237f31eed92842d5cdc9877c",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/backend/rss_readonly.py"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/backend/tests/test_rss_readonly.py",
+      "bytes": 1527,
+      "sha256": "895e53fdd4bd287ef515e4d3b6180f4789213c241e07b1a54aa5278438422362",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/backend/tests/test_rss_readonly.py"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/index.html",
+      "bytes": 814,
+      "sha256": "fc40a838bc162b9f7d4c378d8958805aa2c33d0642fcb7b0f6b7942d1d06a887",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/index.html"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/package-lock.json",
+      "bytes": 49365,
+      "sha256": "f9a863dadcdaef51e4c79637e9408dbf83d368bbbbb227afb8661e32fec9d6e8",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/package-lock.json"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/package.json",
+      "bytes": 607,
+      "sha256": "7aa099e2798febf7fb58f26a8e44d8786239fafe6d6e913915b680ddfcd6484e",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/package.json"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/azure.png",
+      "bytes": 252268,
+      "sha256": "a5ac4b60afdc1ffbe7f622a822cae5655d9637364916470bac1657a1588bca08",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/azure.png"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/black-warrior.png",
+      "bytes": 253550,
+      "sha256": "5841a502c9818d0854d6e65e2b8a00c748eca6cceced5abb9956a4f82f7186ab",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/black-warrior.png"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/vermilion.png",
+      "bytes": 260638,
+      "sha256": "97da3b2e0c6454ff8b06960dc348606f69af770de604f10fe12d9ae572b0508a",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/vermilion.png"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/white-tiger.png",
+      "bytes": 245761,
+      "sha256": "bee8bae00cd5cf1f306536b59321c861fb5e9b67bf3327adb32097a014dd7ff9",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/public/assets/guardians/white-tiger.png"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/public/icon-180.png",
+      "bytes": 51062,
+      "sha256": "6c4c14354e2277abc48abf926ee9ac386b101bbf92ab97906727076740d97d6f",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/public/icon-180.png"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/public/icon-192.png",
+      "bytes": 57060,
+      "sha256": "8dd979d73bf2354ad8f96f98a01116a4e844528b026a7ece278b0b228114c740",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/public/icon-192.png"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/public/icon-512.png",
+      "bytes": 328364,
+      "sha256": "5b843c3b495e945eb4e7a69fa906dde3ec410b6eefa209451300f309cdfe523e",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/public/icon-512.png"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/public/manifest.webmanifest",
+      "bytes": 815,
+      "sha256": "73c7d4d83e442835b6057dcd09455c541dfdf987fbf731e257bce28b95b95dab",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/public/manifest.webmanifest"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/public/quadrant-home-1024.png",
+      "bytes": 1143478,
+      "sha256": "f0c248b99b6079134d2dba6dd4f3087dba2a6723f0f2d88f62533cde9dba4eb7",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/public/quadrant-home-1024.png"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/public/sw.js",
+      "bytes": 963,
+      "sha256": "bc1ac6ec1d98c766eaac77216732a64623f2e912e0c0f70f2baf1d3cdeb14510",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/public/sw.js"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src/App.tsx",
+      "bytes": 46186,
+      "sha256": "cfea1b28b9dff3f1bcdfbe29917cb26d3a48116d57cd3265e86c0d1be6f433df",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src/App.tsx"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src/components/MarketChart.tsx",
+      "bytes": 5813,
+      "sha256": "f7e00f0c5a3b1bc541cd7cd4536cad7c0aad5e306250e837fc8cd26fbb2889ab",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src/components/MarketChart.tsx"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src/data/mock.ts",
+      "bytes": 2391,
+      "sha256": "b38f73059a485ab3d733da9c99937e9982ce1abff3971004090dbe4bb3d02567",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src/data/mock.ts"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src/main.tsx",
+      "bytes": 415,
+      "sha256": "fbf43bba9b099417e439957c319398c3f187abb36be9eced60a7125ea3dac4db",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src/main.tsx"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src/styles.css",
+      "bytes": 50148,
+      "sha256": "db7b079f71adce950083335a1abfdb2ac2dae1af1bf5aa15ea60274856c93ad0",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src/styles.css"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src/types.ts",
+      "bytes": 4514,
+      "sha256": "cd847f754f5d78b81680a8400d1ee223af52d31f36d50a0d476139cde796b772",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src/types.ts"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src/vite-env.d.ts",
+      "bytes": 167,
+      "sha256": "ab6241d568a84e3ceeb9961d473d89cd552896759646bfd4a3bd3c3dc7daa2ea",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src/vite-env.d.ts"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/build.rs",
+      "bytes": 39,
+      "sha256": "487059eaf8a947b80f20a9aacac038a5047b2ad69d2401b827376c67d6fe847f",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/build.rs"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/capabilities/default.json",
+      "bytes": 215,
+      "sha256": "c567759603d8b6dbea463f7e6f1d98db002e862702105191de4afa9b60025270",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/capabilities/default.json"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/Cargo.toml",
+      "bytes": 428,
+      "sha256": "d9b04a0b0ff2dbce98886fd0e9243319a5704f1b4622a2324cfd0725b1cf1feb",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/Cargo.toml"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/src/lib.rs",
+      "bytes": 193,
+      "sha256": "1b38a98761fbf6ee2fea09de1e15c160fa041999fa37b38aa98e829513e5a260",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/src/lib.rs"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/src/main.rs",
+      "bytes": 115,
+      "sha256": "681fdbda11a44c859cca4e787b75a2c65d9e92e9fc87e827e219c347e0f95fe7",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/src/main.rs"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/tauri.conf.json",
+      "bytes": 873,
+      "sha256": "365520c9bc9da172788b76345e534efa1a6c85e3cc0cd5ce744f7a21b30abf4b",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/src-tauri/tauri.conf.json"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/tsconfig.app.json",
+      "bytes": 507,
+      "sha256": "a7266d1c85fa6947c70073256d9a73e4c459e97b0b4ef24b5c48dcab498ef4c5",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/tsconfig.app.json"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/tsconfig.json",
+      "bytes": 119,
+      "sha256": "770b4140bbb581e2dfd9ea9946ffc9c75a1d86ba7d2db5f77c83e37cbdf9d808",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/tsconfig.json"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/tsconfig.node.json",
+      "bytes": 231,
+      "sha256": "3dc28b63563e20fab0d9f652f3039ed50e6c46bbdec66631a14822e8309b230d",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/tsconfig.node.json"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/frontend/vite.config.ts",
+      "bytes": 457,
+      "sha256": "8455c201e9ecdadf383bb9808d7776456bed279a487111ed3fc4c7108ecf0d23",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/frontend/vite.config.ts"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/README.md",
+      "bytes": 2267,
+      "sha256": "48e85c86c1742bc470bcd32b79d59dc16d53a39d9238ba1d10a8114bab044505",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/README.md"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/rss/QUADRANT_READONLY_RSS.xlsx",
+      "bytes": 5488,
+      "sha256": "f594efa0a911a0ad4863e02d17ba7346e5c29b6716e053fca77e3a1081379eb1",
+      "origin": "empty original-distribution template; live local workbook deliberately excluded"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/rss/README_RSS.md",
+      "bytes": 1260,
+      "sha256": "40154872795c618aaf481eb963737ac5b8d36223821c695627b02f773880faae",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/rss/README_RSS.md"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/START_QUADRANT_READONLY.cmd",
+      "bytes": 605,
+      "sha256": "595630549538482bedcd377459dbad36d11bea4735cb34e4044accb6ed23746b",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/START_QUADRANT_READONLY.cmd"
+    },
+    {
+      "path": "source/QUADRANT_TERMINAL_v0.4.0/tests/test_margin_readonly.py",
+      "bytes": 1365,
+      "sha256": "bfeb4be3d7b865733d768895fe07ec162e4a198249380b81741995c2a1ac8d06",
+      "origin": "canonical workspace: QUADRANT_TERMINAL_v0.4.0/tests/test_margin_readonly.py"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/backend/app.py",
+      "bytes": 4403,
+      "sha256": "9df2f1aad1acdbaed3f40d0653739b8a62e925e3e5ce0b1479f7421d09d09f6d",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/backend/app.py"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/backend/requirements.txt",
+      "bytes": 45,
+      "sha256": "34833497f8f0f124622fd93a1c252f7a66d3252ce74ed268deabd79141323cfb",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/backend/requirements.txt"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/index.html",
+      "bytes": 824,
+      "sha256": "1153b029179c33f8ab6e74d6a247fc24dea2a649a5c9be6bc5ff68337e4b6772",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/index.html"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/package-lock.json",
+      "bytes": 49363,
+      "sha256": "3040214f6901493d7a83ab16feee75f2d2859121323c83295a9e119bbdfafb37",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/package-lock.json"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/package.json",
+      "bytes": 606,
+      "sha256": "553bf560d60d806343f6500dd4eb7e824c564c1bc02bb368de8be07af0308151",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/package.json"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/public/icon-180.png",
+      "bytes": 1487,
+      "sha256": "d5866bf1e12c3980116623bd3fa3a60d3c73f756731adbae0af5c47afaf354e8",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/public/icon-180.png"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/public/icon-192.png",
+      "bytes": 1660,
+      "sha256": "6cbf8a36d554c4a509e75584cb5f4ead275d3535cf810ec7fc43fd10749648cf",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/public/icon-192.png"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/public/icon-512.png",
+      "bytes": 4982,
+      "sha256": "9d9de5d7d68c931a84b75485cf63cbc649673eb93ae9f08cc7a74f60725f0d28",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/public/icon-512.png"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/public/manifest.webmanifest",
+      "bytes": 715,
+      "sha256": "088556675b7cbac9e30985df226e9f49d4d82a13f4e19d9e9c1e3dc3a454d991",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/public/manifest.webmanifest"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/public/sw.js",
+      "bytes": 962,
+      "sha256": "9c6226113edca66dcd52dd8b34ca5c1fcc369ebe6195899190eee2d1e87d9b83",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/public/sw.js"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/src/App.tsx",
+      "bytes": 21886,
+      "sha256": "a85bd03348b60d58b46907ba458bc9036ec3f6c7b1f33aefe852c7c2a4e80218",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/src/App.tsx"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/src/components/MarketChart.tsx",
+      "bytes": 4913,
+      "sha256": "a7ce5e2e9b6777e4d69987f404267cd9b4027f9cfce424ec86a8332bd935594a",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/src/components/MarketChart.tsx"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/src/data/mock.ts",
+      "bytes": 2113,
+      "sha256": "0089f2740d4c087ab2a00d117209740176a182bf969163fda9ad3e5c056c565f",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/src/data/mock.ts"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/src/main.tsx",
+      "bytes": 415,
+      "sha256": "fbf43bba9b099417e439957c319398c3f187abb36be9eced60a7125ea3dac4db",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/src/main.tsx"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/src/styles.css",
+      "bytes": 31167,
+      "sha256": "1c8a16fc322fc5cc25dc24468564f8b2e55134f9cf567550e4376383407456bd",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/src/styles.css"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/src/types.ts",
+      "bytes": 1370,
+      "sha256": "d210b0008ade35f8a36fbb5487313660e8e633f819ac76148a6379e3e1da58dc",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/src/types.ts"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/src/vite-env.d.ts",
+      "bytes": 167,
+      "sha256": "ab6241d568a84e3ceeb9961d473d89cd552896759646bfd4a3bd3c3dc7daa2ea",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/src/vite-env.d.ts"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/src-tauri/build.rs",
+      "bytes": 39,
+      "sha256": "487059eaf8a947b80f20a9aacac038a5047b2ad69d2401b827376c67d6fe847f",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/src-tauri/build.rs"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/src-tauri/capabilities/default.json",
+      "bytes": 215,
+      "sha256": "c567759603d8b6dbea463f7e6f1d98db002e862702105191de4afa9b60025270",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/src-tauri/capabilities/default.json"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/src-tauri/Cargo.toml",
+      "bytes": 426,
+      "sha256": "d723a2b4cd076d348f84493e16d4ed15cc31945495c3766c71038ee108c603e6",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/src-tauri/Cargo.toml"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/src-tauri/src/lib.rs",
+      "bytes": 192,
+      "sha256": "1baaa8c28b9ffe049306b9307e9189fbe94f543caf034caae99ef7f99d401930",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/src-tauri/src/lib.rs"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/src-tauri/src/main.rs",
+      "bytes": 115,
+      "sha256": "681fdbda11a44c859cca4e787b75a2c65d9e92e9fc87e827e219c347e0f95fe7",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/src-tauri/src/main.rs"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/src-tauri/tauri.conf.json",
+      "bytes": 883,
+      "sha256": "4d2fbcd182f9ac160bacb09cbb12b9a3a0cbd886edc4b1ddff614c1eab0701bc",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/src-tauri/tauri.conf.json"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/tsconfig.app.json",
+      "bytes": 507,
+      "sha256": "a7266d1c85fa6947c70073256d9a73e4c459e97b0b4ef24b5c48dcab498ef4c5",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/tsconfig.app.json"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/tsconfig.json",
+      "bytes": 119,
+      "sha256": "770b4140bbb581e2dfd9ea9946ffc9c75a1d86ba7d2db5f77c83e37cbdf9d808",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/tsconfig.json"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/tsconfig.node.json",
+      "bytes": 231,
+      "sha256": "3dc28b63563e20fab0d9f652f3039ed50e6c46bbdec66631a14822e8309b230d",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/tsconfig.node.json"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/frontend/vite.config.ts",
+      "bytes": 457,
+      "sha256": "8455c201e9ecdadf383bb9808d7776456bed279a487111ed3fc4c7108ecf0d23",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/frontend/vite.config.ts"
+    },
+    {
+      "path": "source/SHISHIN_TERMINAL_v0.3.0/README.md",
+      "bytes": 3571,
+      "sha256": "353c91f299ee6a0196d336266adf4137e5005ae35da8108ec5efc678891c84f2",
+      "origin": "canonical workspace: SHISHIN_TERMINAL_v0.3.0/README.md"
+    }
+  ]
+}
